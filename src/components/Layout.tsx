@@ -4,7 +4,7 @@ import { useAuth, canUpload, isAdmin } from '../lib/auth';
 
 const navCls = ({ isActive }: { isActive: boolean }) =>
   `px-3 py-1.5 rounded-md text-sm font-medium ${
-    isActive ? 'bg-brand-600 text-white' : 'text-slate-700 hover:bg-slate-100'
+    isActive ? 'bg-brand-700 text-white' : 'text-slate-700 hover:bg-slate-100'
   }`;
 
 export default function Layout() {
