@@ -2,15 +2,20 @@ import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { useMemo, useState } from 'react';
 import { supabase } from '../lib/supabase';
+import { useAuth, canUpload } from '../lib/auth';
+import PageHeader from '../components/PageHeader';
+import AddSensorModal from '../components/AddSensorModal';
 
 const PAGE_SIZE = 24;
 
 export default function SensorModelList() {
+  const { profile } = useAuth();
   const [q, setQ] = useState('');
   const [cat, setCat] = useState('');
   const [makeId, setMakeId] = useState('');
   const [modelId, setModelId] = useState('');
   const [page, setPage] = useState(0);
+  const [showAdd, setShowAdd] = useState(false);
 
   const cats = useQuery({ queryKey: ['cats'], queryFn: async () => (await supabase.from('sensor_categories').select('id,name').order('name')).data ?? [] });
   const makes = useQuery({ queryKey: ['makes'], queryFn: async () => (await supabase.from('sensor_makes').select('id,name').order('name')).data ?? [] });
@@ -42,7 +47,6 @@ export default function SensorModelList() {
   function reset() { setQ(''); setCat(''); setMakeId(''); setModelId(''); setPage(0); }
   const hasFilter = q || cat || makeId || modelId;
 
-  // Group visible models by category for visual hierarchy
   const grouped = useMemo(() => {
     const g: Record<string, any[]> = {};
     for (const m of visible as any[]) {
@@ -54,10 +58,22 @@ export default function SensorModelList() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="page-title">Sensor catalog</h1>
-        <p className="muted mt-1">{filtered.length} model{filtered.length === 1 ? '' : 's'}{hasFilter && ' (filtered)'}</p>
-      </div>
+      <PageHeader
+        eyebrow="Catalog"
+        title="Sensor catalog"
+        icon="🔧"
+        subtitle={`${models.data?.length ?? 0} models across ${makes.data?.length ?? 0} makes`}
+        stats={[
+          { label: 'Total models', value: models.data?.length ?? 0 },
+          { label: 'Filtered', value: filtered.length },
+          { label: 'Makes', value: makes.data?.length ?? 0 },
+        ]}
+        action={canUpload(profile) && (
+          <button onClick={() => setShowAdd(true)} className="bg-white text-brand-700 hover:bg-slate-100 rounded-lg px-4 py-2 font-semibold text-sm shadow-sm">
+            + New sensor
+          </button>
+        )}
+      />
 
       <div className="card space-y-4">
         <div>
@@ -83,7 +99,7 @@ export default function SensorModelList() {
             <label className="label">Model</label>
             <select className="input" value={modelId} onChange={(e) => { setModelId(e.target.value); setPage(0); }} disabled={!makeId}>
               <option value="">{makeId ? 'All models' : 'Pick a make first'}</option>
-              {(models.data ?? []).filter((m: any) => !makeId || m.sensor_makes?.name).map((m: any) => (
+              {(models.data ?? []).map((m: any) => (
                 <option key={m.id} value={m.id}>{m.model_no || m.name}</option>
               ))}
             </select>
@@ -104,9 +120,9 @@ export default function SensorModelList() {
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
             {items.map((m: any) => (
-              <Link to={`/sensors/${m.id}`} key={m.id} className="card-tight hover:border-brand-700 transition">
+              <Link to={`/sensors/${m.id}`} key={m.id} className="card-tight hover:border-brand-700 hover:shadow-md transition group">
                 <div className="flex items-start gap-3">
-                  <div className="bg-brand-50 text-brand-700 rounded-lg w-10 h-10 flex items-center justify-center shrink-0">🔧</div>
+                  <div className="bg-brand-50 text-brand-700 rounded-lg w-10 h-10 flex items-center justify-center shrink-0 group-hover:bg-brand-700 group-hover:text-white transition">🔧</div>
                   <div className="min-w-0 flex-1">
                     <div className="text-xs text-slate-500">{m.sensor_makes?.name ?? '—'}</div>
                     <div className="font-semibold text-slate-900 truncate">{m.model_no || m.name || 'Untitled'}</div>
@@ -128,6 +144,8 @@ export default function SensorModelList() {
           </div>
         </div>
       )}
+
+      {showAdd && <AddSensorModal onClose={() => setShowAdd(false)} />}
     </div>
   );
 }

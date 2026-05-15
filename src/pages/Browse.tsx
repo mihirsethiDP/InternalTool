@@ -3,6 +3,7 @@ import { useMemo, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { runSearch } from '../lib/search';
 import { DocCard } from '../components/DocCard';
+import PageHeader from '../components/PageHeader';
 
 // Doc types that imply "this is about a sensor" — make/model filters become useful.
 const SENSOR_DOC_KEYS = new Set([
@@ -56,10 +57,13 @@ export default function Browse() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="page-title">Browse documents</h1>
-        <p className="muted mt-1">Search and filter — every field is independent.</p>
-      </div>
+      <PageHeader
+        eyebrow="Library"
+        title="Browse documents"
+        icon="📚"
+        subtitle="Search and filter across the whole hub — every field is independent."
+        stats={[{ label: 'Results', value: results.data?.hits.length ?? 0 }]}
+      />
 
       {/* Search + filters card */}
       <div className="card space-y-4">

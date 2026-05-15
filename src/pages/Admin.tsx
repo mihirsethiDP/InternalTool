@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth, isAdmin } from '../lib/auth';
+import PageHeader from '../components/PageHeader';
 
 export default function Admin() {
   const { profile } = useAuth();
@@ -13,7 +14,7 @@ export default function Admin() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold">Admin</h1>
+      <PageHeader eyebrow="Settings" icon="⚙️" title="Admin" subtitle="Manage users, plants, and document types." />
       <UsersPanel onChanged={() => qc.invalidateQueries({ queryKey: ['admin-users'] })} />
       <PlantsPanel />
       <TypesPanel />

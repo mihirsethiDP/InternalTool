@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth, isAdmin } from '../lib/auth';
+import PageHeader from '../components/PageHeader';
 
 export default function PlantList() {
   const { profile } = useAuth();
@@ -16,15 +17,16 @@ export default function PlantList() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-start justify-between gap-4 flex-wrap">
-        <div>
-          <h1 className="page-title">Plants</h1>
-          <p className="muted mt-1">{data?.length ?? 0} plant{data?.length === 1 ? '' : 's'}</p>
-        </div>
-        {isAdmin(profile) && (
-          <button className="btn-primary" onClick={() => setAdding(true)}>+ New plant</button>
+      <PageHeader
+        eyebrow="Sites"
+        title="Plants"
+        icon="🏭"
+        subtitle="All operational sites — open one to see its equipment, sensors, and documents."
+        stats={[{ label: 'Plants', value: data?.length ?? 0 }]}
+        action={isAdmin(profile) && !adding && (
+          <button onClick={() => setAdding(true)} className="bg-white text-brand-700 hover:bg-slate-100 rounded-lg px-4 py-2 font-semibold text-sm shadow-sm">+ New plant</button>
         )}
-      </div>
+      />
 
       {adding && (
         <NewPlantForm onClose={() => setAdding(false)} onCreated={() => qc.invalidateQueries({ queryKey: ['plant-list'] })} />
@@ -34,13 +36,14 @@ export default function PlantList() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {(data ?? []).map((p: any) => (
-          <Link to={`/plants/${p.id}`} key={p.id} className="card hover:border-brand-700 hover:shadow-sm transition">
+          <Link to={`/plants/${p.id}`} key={p.id} className="card hover:border-brand-700 hover:shadow-md transition group">
             <div className="flex items-start gap-3">
-              <div className="bg-brand-50 text-brand-700 rounded-lg w-10 h-10 flex items-center justify-center shrink-0 text-lg">🏭</div>
-              <div className="min-w-0">
+              <div className="bg-brand-50 text-brand-700 group-hover:bg-brand-700 group-hover:text-white transition rounded-lg w-11 h-11 flex items-center justify-center shrink-0 text-lg">🏭</div>
+              <div className="min-w-0 flex-1">
                 <div className="font-semibold text-slate-900 truncate">{p.name}</div>
                 <div className="muted truncate">{p.location || 'No location'}</div>
               </div>
+              <div className="text-slate-300 group-hover:text-brand-700 transition">→</div>
             </div>
           </Link>
         ))}
@@ -70,10 +73,11 @@ function NewPlantForm({ onClose, onCreated }: { onClose: () => void; onCreated: 
 
   return (
     <form onSubmit={submit} className="card">
+      <div className="text-xs uppercase tracking-wide font-semibold text-slate-500 mb-3">New plant</div>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         <div>
           <label className="label">Plant name</label>
-          <input className="input" required value={name} onChange={(e) => setName(e.target.value)} placeholder="STP Aurangabad" />
+          <input className="input" required value={name} autoFocus onChange={(e) => setName(e.target.value)} placeholder="STP Aurangabad" />
         </div>
         <div>
           <label className="label">Location</label>

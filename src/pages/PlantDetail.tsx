@@ -6,6 +6,7 @@ import { runSearch } from '../lib/search';
 import { DocCard } from '../components/DocCard';
 import { useAuth, canUpload } from '../lib/auth';
 import { useUpload } from '../components/UploadModal';
+import PageHeader from '../components/PageHeader';
 
 export default function PlantDetail() {
   const { id } = useParams();
@@ -34,25 +35,21 @@ export default function PlantDetail() {
 
   return (
     <div className="space-y-8">
-      {/* Page header — strong hierarchy */}
-      <div className="bg-gradient-to-br from-brand-700 to-brand-800 text-white rounded-2xl p-6 shadow-sm">
-        <div className="flex items-start justify-between gap-4 flex-wrap">
-          <div>
-            <div className="text-xs uppercase tracking-wider text-white/70 mb-1">Plant</div>
-            <h1 className="text-3xl font-bold tracking-tight">{plant.data?.name ?? '…'}</h1>
-            <div className="text-white/80 mt-1">{plant.data?.location || 'No location set'}</div>
-          </div>
-          {canUpload(profile) && (
-            <button onClick={() => upload.open({ plant_id: id! })} className="bg-white text-brand-700 hover:bg-slate-100 rounded-lg px-4 py-2 font-semibold text-sm shadow-sm">
-              + Upload document
-            </button>
-          )}
-        </div>
-        <div className="flex gap-6 mt-5 text-sm">
-          <Stat label="Equipment" value={equipment.data?.length ?? 0} />
-          <Stat label="Sensors installed" value={sensors.data?.length ?? 0} />
-        </div>
-      </div>
+      <PageHeader
+        eyebrow="Plant"
+        icon="🏭"
+        title={plant.data?.name ?? '…'}
+        subtitle={plant.data?.location || 'No location set'}
+        stats={[
+          { label: 'Equipment', value: equipment.data?.length ?? 0 },
+          { label: 'Sensors installed', value: sensors.data?.length ?? 0 },
+        ]}
+        action={canUpload(profile) && (
+          <button onClick={() => upload.open({ plant_id: id! })} className="bg-white text-brand-700 hover:bg-slate-100 rounded-lg px-4 py-2 font-semibold text-sm shadow-sm">
+            + Upload document
+          </button>
+        )}
+      />
 
       {/* Equipment */}
       <EquipmentSection plantId={id!} equipment={equipment.data ?? []} canEdit={canUpload(profile)} onChanged={() => qc.invalidateQueries({ queryKey: ['equipment', id] })} />
@@ -68,15 +65,6 @@ export default function PlantDetail() {
 
       {/* Documents with type filter */}
       <DocumentsSection plantId={id!} />
-    </div>
-  );
-}
-
-function Stat({ label, value }: { label: string; value: number }) {
-  return (
-    <div>
-      <div className="text-2xl font-bold leading-tight">{value}</div>
-      <div className="text-xs uppercase tracking-wider text-white/70">{label}</div>
     </div>
   );
 }
