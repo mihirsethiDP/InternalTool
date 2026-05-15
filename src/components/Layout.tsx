@@ -20,9 +20,14 @@ function Inner() {
     <div className="min-h-full flex flex-col bg-slate-50">
       <header className="bg-brand-700 text-white">
         <div className="max-w-7xl mx-auto px-5 h-16 flex items-center gap-6">
-          <NavLink to="/" className="flex items-center gap-2 font-bold text-lg tracking-tight">
-            <span className="bg-white/15 rounded-lg w-9 h-9 flex items-center justify-center text-base">💧</span>
-            <span>Digital Paani</span>
+          <NavLink to="/" className="flex items-center gap-2.5 font-bold text-lg tracking-tight">
+            <img
+              src={`${import.meta.env.BASE_URL}logo.png`}
+              alt="DigitalPaani"
+              className="h-9 w-auto object-contain"
+              onError={(e) => { (e.currentTarget.style.display = 'none'); }}
+            />
+            <span>DigitalPaani</span>
             <span className="text-white/60 font-normal hidden sm:inline">· Docs</span>
           </NavLink>
           <nav className="flex items-center gap-1 ml-2">
@@ -51,7 +56,7 @@ function Inner() {
       </header>
       <main className="flex-1"><div className="max-w-7xl mx-auto px-5 py-8"><Outlet /></div></main>
       <footer className="border-t border-slate-200 bg-white text-xs text-slate-500 py-4 text-center">
-        Digital Paani · Internal Document Hub
+        DigitalPaani · Internal Document Hub
       </footer>
     </div>
   );

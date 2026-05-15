@@ -25,7 +25,18 @@ export default function Login() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-slate-50 p-6">
       <div className="card w-full max-w-md">
-        <h1 className="text-xl font-bold text-brand-700 mb-1">📘 DP Internal Document Hub</h1>
+        <div className="flex items-center gap-3 mb-2">
+          <img
+            src={`${import.meta.env.BASE_URL}logo.png`}
+            alt="DigitalPaani"
+            className="h-12 w-auto object-contain bg-brand-700 rounded-lg p-1.5"
+            onError={(e) => { (e.currentTarget.style.display = 'none'); }}
+          />
+          <div>
+            <h1 className="text-xl font-bold text-brand-700 leading-tight">DigitalPaani</h1>
+            <div className="text-xs text-slate-500">Internal Document Hub</div>
+          </div>
+        </div>
         <p className="text-sm text-slate-600 mb-4">
           Sign in with your <strong>@digitalpaani.com</strong> email. We&rsquo;ll send you a one-time link.
         </p>
