@@ -55,11 +55,21 @@ export interface Plant {
   created_at: string;
 }
 
+export type DocumentScope = 'general' | 'plant' | 'plant_sensor' | 'plant_with_sensor_refs';
+
 export interface DocumentType {
   id: string;
   key: string;
   label: string;
   sort_order: number;
+  scope: DocumentScope;
+}
+
+export interface Equipment {
+  id: string;
+  plant_id: string;
+  name: string;
+  notes: string | null;
 }
 
 export interface DocumentRow {
@@ -82,6 +92,7 @@ export interface SearchHit {
   document_title: string;
   type_label: string | null;
   plant_name: string | null;
+  equipment_name: string | null;
   sensor_model_no: string | null;
   sensor_make: string | null;
   page_number: number | null;

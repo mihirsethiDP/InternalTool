@@ -41,6 +41,7 @@ export function DocCard({ hit, query }: { hit: SearchHit; query?: string }) {
           </div>
           <div className="text-xs text-slate-500 mt-0.5 flex gap-3 flex-wrap">
             {hit.plant_name && <span>🏭 {hit.plant_name}</span>}
+            {hit.equipment_name && <span>⚙️ {hit.equipment_name}</span>}
             {hit.sensor_make && hit.sensor_model_no && (
               <span>🔧 {hit.sensor_make} {hit.sensor_model_no}</span>
             )}

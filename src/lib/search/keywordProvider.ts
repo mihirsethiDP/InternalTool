@@ -20,6 +20,7 @@ export async function keywordSearch(query: string, filters: SearchFilters): Prom
     p_type_key: filters.type_key ?? null,
     p_category_id: filters.category_id ?? null,
     p_make_id: filters.make_id ?? null,
+    p_equipment_id: filters.equipment_id ?? null,
     p_limit: 50,
   });
   if (error) {

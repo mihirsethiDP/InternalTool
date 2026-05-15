@@ -3,25 +3,20 @@ import { Link } from 'react-router-dom';
 import { useMemo, useState } from 'react';
 import { supabase } from '../lib/supabase';
 
-const PAGE_SIZE = 25; // Miller's law: small, scannable chunks
+const PAGE_SIZE = 24;
 
 export default function SensorModelList() {
   const [q, setQ] = useState('');
   const [cat, setCat] = useState('');
-  const [make, setMake] = useState('');
+  const [makeId, setMakeId] = useState('');
+  const [modelId, setModelId] = useState('');
   const [page, setPage] = useState(0);
 
-  const cats = useQuery({
-    queryKey: ['cats'],
-    queryFn: async () => (await supabase.from('sensor_categories').select('id,name').order('name')).data ?? [],
-  });
-  const makes = useQuery({
-    queryKey: ['makes'],
-    queryFn: async () => (await supabase.from('sensor_makes').select('id,name').order('name')).data ?? [],
-  });
+  const cats = useQuery({ queryKey: ['cats'], queryFn: async () => (await supabase.from('sensor_categories').select('id,name').order('name')).data ?? [] });
+  const makes = useQuery({ queryKey: ['makes'], queryFn: async () => (await supabase.from('sensor_makes').select('id,name').order('name')).data ?? [] });
 
   const models = useQuery({
-    queryKey: ['sensor-models', cat, make],
+    queryKey: ['sensor-models', cat, makeId],
     queryFn: async () => {
       let qb = supabase
         .from('sensor_models')
@@ -29,48 +24,47 @@ export default function SensorModelList() {
         .order('model_no')
         .limit(2000);
       if (cat) qb = qb.eq('category_id', cat);
-      if (make) qb = qb.eq('make_id', make);
+      if (makeId) qb = qb.eq('make_id', makeId);
       return (await qb).data ?? [];
     },
   });
 
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
-    if (!needle) return models.data ?? [];
-    return (models.data ?? []).filter((m: any) =>
-      [m.model_no, m.name, m.sensor_makes?.name, m.sensor_categories?.name]
-        .filter(Boolean)
-        .some((s: string) => s.toLowerCase().includes(needle))
-    );
-  }, [q, models.data]);
+    let list = models.data ?? [];
+    if (modelId) list = list.filter((m: any) => m.id === modelId);
+    if (needle) list = list.filter((m: any) => [m.model_no, m.name, m.sensor_makes?.name, m.sensor_categories?.name].filter(Boolean).some((s: string) => s.toLowerCase().includes(needle)));
+    return list;
+  }, [q, models.data, modelId]);
 
   const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const visible = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+  function reset() { setQ(''); setCat(''); setMakeId(''); setModelId(''); setPage(0); }
+  const hasFilter = q || cat || makeId || modelId;
 
-  function reset() { setQ(''); setCat(''); setMake(''); setPage(0); }
-  const hasFilter = q || cat || make;
+  // Group visible models by category for visual hierarchy
+  const grouped = useMemo(() => {
+    const g: Record<string, any[]> = {};
+    for (const m of visible as any[]) {
+      const k = m.sensor_categories?.name || 'Uncategorised';
+      (g[k] ??= []).push(m);
+    }
+    return g;
+  }, [visible]);
 
   return (
     <div className="space-y-6">
-      <div className="flex items-end justify-between gap-4 flex-wrap">
-        <div>
-          <h1 className="page-title">Sensor catalog</h1>
-          <p className="muted mt-1">{filtered.length} model{filtered.length === 1 ? '' : 's'}{hasFilter && ' (filtered)'}</p>
-        </div>
+      <div>
+        <h1 className="page-title">Sensor catalog</h1>
+        <p className="muted mt-1">{filtered.length} model{filtered.length === 1 ? '' : 's'}{hasFilter && ' (filtered)'}</p>
       </div>
 
-      {/* Single grouped filter card — proximity & similarity */}
-      <div className="card">
+      <div className="card space-y-4">
+        <div>
+          <label className="label">Search</label>
+          <input className="input" placeholder="Make, model, or description…" value={q} onChange={(e) => { setQ(e.target.value); setPage(0); }} />
+        </div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div>
-            <label className="label">Search</label>
-            <input
-              className="input"
-              placeholder="Make, model, or name…"
-              value={q}
-              onChange={(e) => { setQ(e.target.value); setPage(0); }}
-            />
-          </div>
           <div>
             <label className="label">Category</label>
             <select className="input" value={cat} onChange={(e) => { setCat(e.target.value); setPage(0); }}>
@@ -80,59 +74,56 @@ export default function SensorModelList() {
           </div>
           <div>
             <label className="label">Make</label>
-            <select className="input" value={make} onChange={(e) => { setMake(e.target.value); setPage(0); }}>
+            <select className="input" value={makeId} onChange={(e) => { setMakeId(e.target.value); setModelId(''); setPage(0); }}>
               <option value="">All makes</option>
               {makes.data?.map((m: any) => <option key={m.id} value={m.id}>{m.name}</option>)}
             </select>
           </div>
-        </div>
-        {hasFilter && (
-          <div className="mt-3">
-            <button onClick={reset} className="btn-ghost btn-sm">Clear filters</button>
+          <div>
+            <label className="label">Model</label>
+            <select className="input" value={modelId} onChange={(e) => { setModelId(e.target.value); setPage(0); }} disabled={!makeId}>
+              <option value="">{makeId ? 'All models' : 'Pick a make first'}</option>
+              {(models.data ?? []).filter((m: any) => !makeId || m.sensor_makes?.name).map((m: any) => (
+                <option key={m.id} value={m.id}>{m.model_no || m.name}</option>
+              ))}
+            </select>
           </div>
-        )}
+        </div>
+        {hasFilter && <button onClick={reset} className="btn-ghost btn-sm">Clear filters</button>}
       </div>
 
-      {/* Table */}
-      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-        <table className="table">
-          <thead>
-            <tr>
-              <th>Make</th>
-              <th>Model</th>
-              <th>Category</th>
-              <th>Description</th>
-              <th className="w-24"></th>
-            </tr>
-          </thead>
-          <tbody>
-            {visible.map((m: any) => (
-              <tr key={m.id}>
-                <td className="font-medium text-slate-900">{m.sensor_makes?.name ?? '—'}</td>
-                <td className="font-mono text-sm">{m.model_no || '—'}</td>
-                <td><span className="badge">{m.sensor_categories?.name ?? '—'}</span></td>
-                <td className="text-slate-600 max-w-md truncate">{m.name || '—'}</td>
-                <td className="text-right">
-                  <Link to={`/sensors/${m.id}`} className="text-brand-700 hover:underline text-sm font-medium">View →</Link>
-                </td>
-              </tr>
+      {Object.keys(grouped).length === 0 && (
+        <div className="card text-sm text-slate-500 text-center">No models match.</div>
+      )}
+
+      {Object.entries(grouped).map(([category, items]) => (
+        <section key={category}>
+          <div className="flex items-baseline justify-between mb-3">
+            <h2 className="text-sm uppercase tracking-wider font-semibold text-slate-500">{category}</h2>
+            <span className="muted text-xs">{items.length}</span>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            {items.map((m: any) => (
+              <Link to={`/sensors/${m.id}`} key={m.id} className="card-tight hover:border-brand-700 transition">
+                <div className="flex items-start gap-3">
+                  <div className="bg-brand-50 text-brand-700 rounded-lg w-10 h-10 flex items-center justify-center shrink-0">🔧</div>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-xs text-slate-500">{m.sensor_makes?.name ?? '—'}</div>
+                    <div className="font-semibold text-slate-900 truncate">{m.model_no || m.name || 'Untitled'}</div>
+                    {m.name && m.model_no && <div className="text-xs text-slate-500 truncate mt-0.5">{m.name}</div>}
+                  </div>
+                </div>
+              </Link>
             ))}
-            {visible.length === 0 && (
-              <tr><td colSpan={5} className="py-10 text-center text-slate-500">No models match.</td></tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+          </div>
+        </section>
+      ))}
 
-      {/* Pagination */}
       {pageCount > 1 && (
         <div className="flex items-center justify-between text-sm">
-          <div className="muted">
-            Showing {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, filtered.length)} of {filtered.length}
-          </div>
+          <div className="muted">Page {page + 1} of {pageCount}</div>
           <div className="flex gap-2">
             <button className="btn-secondary btn-sm" disabled={page === 0} onClick={() => setPage(page - 1)}>← Prev</button>
-            <span className="px-2 py-1.5 text-slate-600">Page {page + 1} / {pageCount}</span>
             <button className="btn-secondary btn-sm" disabled={page + 1 >= pageCount} onClick={() => setPage(page + 1)}>Next →</button>
           </div>
         </div>
