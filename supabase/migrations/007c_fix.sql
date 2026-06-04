@@ -1,0 +1,72 @@
+-- 007c_fix: clean up duplicated troubleshooting docs from earlier failed runs
+-- and re-insert exactly once. Safe to re-run.
+
+-- 1. Delete chunks of any demo troubleshooting docs
+delete from public.document_chunks
+where document_id in (
+  select id from public.documents
+  where storage_path is null
+    and type_id = (select id from public.document_types where key='troubleshooting')
+);
+
+-- 2. Delete all demo troubleshooting docs (real uploads with storage_path are untouched)
+delete from public.documents
+where storage_path is null
+  and type_id = (select id from public.document_types where key='troubleshooting');
+
+-- 3. Confirm baseline (should be 0)
+select 'troubleshooting demo docs before insert' as t, count(*)
+from public.documents
+where storage_path is null
+  and type_id = (select id from public.document_types where key='troubleshooting');
+
+-- 4. Insert one row per sensor
+insert into public.documents (title, type_id, sensor_model_id, page_count, size_bytes) values
+('VizSens-ODO — Troubleshooting Steps',
+ (select id from public.document_types where key='troubleshooting'),
+ (select id from public.sensor_models where model_no='VizSens-ODO'), 1, 0),
+('VizSens-pH (Analog) — Troubleshooting Steps',
+ (select id from public.document_types where key='troubleshooting'),
+ (select id from public.sensor_models where model_no='VizSens-pH (Analog)'), 1, 0),
+('VizSens-ORP (Analog) — Troubleshooting Steps',
+ (select id from public.document_types where key='troubleshooting'),
+ (select id from public.sensor_models where model_no='VizSens-ORP (Analog)'), 1, 0),
+('VizSens-EC (Analog) — Troubleshooting Steps',
+ (select id from public.document_types where key='troubleshooting'),
+ (select id from public.sensor_models where model_no='VizSens-EC (Analog)'), 1, 0),
+('VizSens-TDS (Analog) — Troubleshooting Steps',
+ (select id from public.document_types where key='troubleshooting'),
+ (select id from public.sensor_models where model_no='VizSens-TDS (Analog)'), 1, 0),
+('UPCS-MAG-110 — Troubleshooting Steps',
+ (select id from public.document_types where key='troubleshooting'),
+ (select id from public.sensor_models where model_no='UPCS-MAG-110'), 1, 0),
+('UPC-WA-202 — Troubleshooting Steps',
+ (select id from public.document_types where key='troubleshooting'),
+ (select id from public.sensor_models where model_no='UPC-WA-202'), 1, 0),
+('BT-UL — Troubleshooting Steps',
+ (select id from public.document_types where key='troubleshooting'),
+ (select id from public.sensor_models where model_no='BT-UL'), 1, 0);
+
+-- 5. Insert chunks (subqueries now match exactly one document each)
+insert into public.document_chunks (document_id, page_number, chunk_text) values
+((select id from public.documents where title='VizSens-ODO — Troubleshooting Steps'), 1,
+ 'VizSens-ODO Troubleshooting. Issue 1 — Reading drifts upward or downward over time: most common cause is build-up on the luminescent cap from biofilm, oil, or fine particulate. Action: clean the cap with mild soap and water (Alconox) or alcohol if oils are present. Never use chlorine-based cleaners or organic solvents — they bleach the fluorescent coating and shorten sensor life permanently. Issue 2 — Slow response: cap fouling reducing oxygen diffusion. Action: inspect and clean the cap; replace it if coating cannot be removed. Typical cap life is 2 years in clean water and 6 to 12 months in heavy wastewater. Issue 3 — Reading stable but offset from expected value: perform air-saturation calibration by holding the sensor in humid air for 15 minutes, then zero/span via the controller menu. Issue 4 — Temperature reading wrong: cross-check with a calibrated thermometer; if discrepancy exceeds 1 C the NTC element has failed. Issue 5 — Output stuck at zero or full scale: loose wiring or power supply problem. Verify 9 to 36 VDC at terminals; for Modbus check RS485 A and B polarity. Issue 6 — Sudden drop in sensitivity: chlorine, ozone, or other strong oxidizers have damaged the luminescent material — replace the cap.'),
+((select id from public.documents where title='VizSens-pH (Analog) — Troubleshooting Steps'), 1,
+ 'VizSens-pH (Analog) Troubleshooting. Issue 1 — pH drift in wastewater: a clogged reference junction is the number one cause of drift in glass pH electrodes. Suspended solids, biological growth, or chemical precipitate block the junction. Action: soak the sensor tip in 0.1 M HCl for 5 minutes, rinse with distilled water, recondition in pH 7 buffer for 30 minutes. Issue 2 — Reference electrode poisoning: in wastewater containing sulfides, heavy metals or proteins, the reference electrolyte can be chemically altered. Symptom: stable but completely wrong readings. Action: replace the sensor — poisoning is irreversible. Issue 3 — Slow response or flat slope at calibration: glass bulb fouled by oils, biofilm or scaling. Action: soak in detergent solution, then in 0.1 M HCl, rinse, recalibrate. Issue 4 — Unstable or noisy readings: poor grounding or wet connector. Verify the analog cable shield is grounded at the controller end only; check for moisture ingress at the connector and dry it. Issue 5 — Calibration fails or slope below 95 percent: replace buffer solutions with fresh, in-date pH 4 and pH 7 at room temperature. Issue 6 — Temperature compensation off: confirm PT1000 element is intact. Routine: clean monthly in wastewater; recalibrate every 30 to 60 days.'),
+((select id from public.documents where title='VizSens-ORP (Analog) — Troubleshooting Steps'), 1,
+ 'VizSens-ORP (Analog) Troubleshooting. Issue 1 — Phantom drift in anaerobic wastewater: Hydrogen Sulfide (H2S) diffuses through the liquid junction and reacts with the silver inside, forming silver sulfide (Ag2S). Reading looks stable but is hundreds of millivolts off from reality. Action: replace the sensor; for installations with persistent H2S, request a double-junction PTFE reference variant. Issue 2 — Unstable readings: fouling of the precious metal tip with oils or biofilm. Action: polish the tip gently with a non-abrasive cloth, rinse with distilled water, recondition in standard solution. Issue 3 — Sensor verification: use a standard ORP solution such as Zobells solution or Lights solution; reading should be within plus or minus 10 mV of the reference value. Issue 4 — Slow response after stirring: reference electrolyte depleted or junction clogged — replace the sensor (gel reference is not refillable). Issue 5 — Output stuck at full scale: open circuit on the cable; check connector and continuity. Issue 6 — Reading drifts with temperature: ORP is temperature-sensitive; reference all measurements to the controller temperature reading. Routine: verify monthly; expected sensor life is 6 to 18 months in wastewater.'),
+((select id from public.documents where title='VizSens-EC (Analog) — Troubleshooting Steps'), 1,
+ 'VizSens-EC (Analog) Troubleshooting. Issue 1 — Reading drifts low or fluctuates in wastewater: biological growth, mineral scaling, or chemical precipitation coats the electrodes and alters the cell constant. Action: clean monthly with dilute white vinegar (5 percent acetic acid) for calcium and mineral deposits; dilute bleach (1 percent) for black organic deposits with thorough rinse; acetone for oils and fats. Issue 2 — Platinum black flaking or worn off: the platinum coating is essential for accuracy in high-conductivity solutions. If flaking or if cell constant has changed by 50 percent, the cell must be cleaned and re-platinized or replaced. Issue 3 — Reading much lower than expected: trapped air bubble between the electrodes. Action: dip the probe several times, gently shake to dislodge bubbles, hold vertical during measurement. Issue 4 — Reading near zero: open circuit or fully fouled electrodes; verify continuity with a multimeter, then clean. Issue 5 — Slow response: aged or fouled electrodes — clean and recalibrate with a known KCl standard (1413 microSiemens per cm). Issue 6 — For severely fouling wastewater, consider switching to an electrodeless (toroidal) conductivity probe.'),
+((select id from public.documents where title='VizSens-TDS (Analog) — Troubleshooting Steps'), 1,
+ 'VizSens-TDS (Analog) Troubleshooting. TDS sensors use the same platinum electrode technology as EC sensors and share most failure modes. Issue 1 — TDS reading drifts high over time: scale or biofilm on the electrode. Action: clean monthly with 5 percent vinegar for mineral scale, 1 percent bleach for biofilm; rinse thoroughly. Issue 2 — Sudden jump to unrealistic TDS values: check the conductivity-to-TDS conversion factor in the controller; typical values are 0.5 for natural water and 0.7 for wastewater. A wrong factor produces consistent multiplicative error. Issue 3 — Reading too low: air bubble trapped between electrodes — dip the probe several times to dislodge. Issue 4 — Slow response: fouled electrodes; clean and recalibrate against a known TDS standard. Issue 5 — Cell constant drift: verify by measuring a known standard; if the reading is off by more than 5 percent the cell constant has shifted due to platinum erosion. Issue 6 — Output zero: open circuit; check cable continuity and connector seating. Issue 7 — For high-fouling wastewater, switch to a toroidal (electrodeless) probe.'),
+((select id from public.documents where title='UPCS-MAG-110 — Troubleshooting Steps'), 1,
+ 'UPCS-MAG-110 Troubleshooting. Issue 1 — No flow reading despite known flow: confirm the pipe is completely full of liquid (the meter cannot measure with air entrainment). Check that grounding rings are installed and connected on both sides of the sensor with 4 sq mm copper wire to the transmitter ground terminal; ground impedance should be below 10 ohms. About 50 percent of magnetic-meter failures are caused by improper grounding. Issue 2 — Erratic or jumping readings: poor grounding or air bubbles in the line. Bleed the line at the high point; verify ground continuity. Issue 3 — Empty pipe error or alarm: pipe is not full, or the empty-pipe detection threshold is mis-set. Action: ensure the pipe is full at the meter location; check and adjust the empty-pipe threshold parameter in the transmitter. Issue 4 — Electrode coating: insulating buildup on electrodes (common in wastewater with grease or biofilm) blocks the signal, causing low or erratic readings. Symptom: electrode impedance exceeds 1 megaohm (typical clean range is 10 to 100 kilohms). Action: isolate, remove the sensor, clean the electrodes with appropriate solvent, reinstall, verify impedance. Issue 5 — Reverse flow indication: check the flow direction arrow on the meter body. Issue 6 — Low conductivity liquid: meter requires conductivity above the minimum threshold (typically 5 microSiemens per cm). Issue 7 — Drifting calibration: verify the K factor / cell tube constant matches the factory calibration certificate.'),
+((select id from public.documents where title='UPC-WA-202 — Troubleshooting Steps'), 1,
+ 'UPC-WA-202 Troubleshooting. The WA-202 is a multi-parameter analyzer based on UV spectroscopy with optional external probes; troubleshooting is parameter-specific. Issue 1 — UV absorbance drift: usually fouling of the optical window or cuvette. Action: trigger an auto-zero cycle with fresh cleaning solution; if drift persists, manually clean the optical window with cleaning fluid and lint-free wipe. Refill cleaning solution if low. Issue 2 — High suspended solids causing readings above range: confirm the SS bypass / clog protection is active; some installations need an upstream coarse strainer despite WA-202 high-SS tolerance. Issue 3 — Auto-zero failure: cleaning solution exhausted or pump fault. Check level and prime the cleaning pump. Issue 4 — Lamp end-of-life: typical UV lamp life is 6000 hours; check the lamp hours counter and replace as needed. Issue 5 — External probe (pH/ORP/DO/EC/turbidity) reading wrong: refer to that probes individual troubleshooting; common causes are fouling, junction blockage or calibration drift. Issue 6 — Communication or data upload failure: check internet connectivity at the cabinet; verify SIM data balance if cellular; confirm CPCB endpoint credentials. Issue 7 — Cell window scratches or etching: replace the cuvette assembly; never use abrasive cleaning. Routine: weekly visual check, monthly cleaning-solution refill, quarterly external-probe calibration.'),
+((select id from public.documents where title='BT-UL — Troubleshooting Steps'), 1,
+ 'Brotek BT-UL Troubleshooting. Issue 1 — Echo loss or no reading: most common cause is foam covering more than 40 to 50 percent of the liquid surface; the foam absorbs ultrasonic energy. Action: install a stilling well or waveguide pipe so the probe measures inside a column with reduced foam. For chronic heavy foam, switch to a radar level meter (radar penetrates foam under 5 cm). Issue 2 — Random or jumping values when level is in the blind zone: the BT-UL blind spot is 0.3 m; if liquid rises into the blind zone the meter outputs arbitrary values. Action: re-mount higher so the maximum liquid level stays at least 0.3 m below the probe face. Issue 3 — Temperature-related drift in summer or hot vapours: steam or mist above 30 to 40 C attenuates the ultrasonic signal and water droplets condense on the probe face. Action: shade the probe from direct sun, fit a vapour shield, or extend the probe up the standpipe to keep the probe face dry. Issue 4 — Output stuck at 4 mA: verify 18 to 28 VDC at the terminals; confirm full-scale start point is correctly configured. Issue 5 — Output stuck at 20 mA: liquid is above the configured full-scale or echo is being lost — check both. Issue 6 — Reading drifts after cleaning: condensation on the probe face. Wipe dry and allow to stabilize. Issue 7 — Mounting too close to a wall, ladder or fill inlet: false echoes from these obstructions. Re-mount with at least 30 cm clearance from any vertical surface and away from the inflow column.');
+
+-- 6. Final count
+select 'troubleshooting docs' as t, count(*) from public.documents
+ where type_id = (select id from public.document_types where key='troubleshooting')
+   and storage_path is null;
