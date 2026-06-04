@@ -1,10 +1,11 @@
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import type { SearchHit } from '../lib/types';
 import { supabase } from '../lib/supabase';
 import { useState } from 'react';
 
 export function DocCard({ hit, query }: { hit: SearchHit; query?: string }) {
   const [opening, setOpening] = useState(false);
+  const nav = useNavigate();
 
   async function open() {
     setOpening(true);
@@ -15,15 +16,12 @@ export function DocCard({ hit, query }: { hit: SearchHit; query?: string }) {
       .maybeSingle();
 
     if (doc?.storage_path) {
-      const { data, error } = await supabase.storage
-        .from('documents')
-        .createSignedUrl(doc.storage_path, 600);
-      if (data?.signedUrl) {
-        const url = hit.page_number ? `${data.signedUrl}#page=${hit.page_number}` : data.signedUrl;
-        window.open(url, '_blank');
-      } else if (error) {
-        alert('Could not open file: ' + error.message);
-      }
+      // Route to in-app viewer with page + query for highlight
+      const params = new URLSearchParams();
+      if (hit.page_number) params.set('page', String(hit.page_number));
+      if (query) params.set('q', query);
+      const qs = params.toString();
+      nav(`/view/${hit.document_id}${qs ? '?' + qs : ''}`);
     } else if (doc?.vendor_url) {
       window.open(doc.vendor_url, '_blank');
     } else {
