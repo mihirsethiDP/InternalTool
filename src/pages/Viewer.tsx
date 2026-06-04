@@ -72,17 +72,43 @@ export default function Viewer() {
     setNumPages(n);
   }
 
-  // Scroll to the initial page once it has rendered
+  // Scroll to the first highlighted match (preferring matches on/after the
+  // initial page). Re-runs when the query changes so typing in the highlight
+  // box jumps to the first occurrence. If no query, just goes to the initial
+  // page top.
   useEffect(() => {
-    if (scrolledToInitial.current || !numPages) return;
-    const target = Math.min(initialPage, numPages);
-    const el = pageRefs.current[target];
-    if (el) {
-      el.scrollIntoView({ behavior: 'auto', block: 'start' });
-      setVisiblePage(target);
+    if (!numPages) return;
+    const wait = scrolledToInitial.current ? 120 : 800; // first render needs longer
+    const t = setTimeout(() => {
+      scrollToBestMatch();
       scrolledToInitial.current = true;
+    }, wait);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line
+  }, [numPages, terms.join('|'), initialPage]);
+
+  function scrollToBestMatch() {
+    if (terms.length === 0) {
+      const target = Math.min(initialPage, numPages || 1);
+      pageRefs.current[target]?.scrollIntoView({ behavior: 'auto', block: 'start' });
+      setVisiblePage(target);
+      return;
     }
-  }, [numPages, initialPage]);
+    const marks = Array.from(document.querySelectorAll<HTMLElement>('.dp-mark'));
+    if (marks.length === 0) {
+      const target = Math.min(initialPage, numPages || 1);
+      pageRefs.current[target]?.scrollIntoView({ behavior: 'auto', block: 'start' });
+      return;
+    }
+    // Prefer the first mark on or after the initial page (DOM order = page order)
+    let chosen: HTMLElement | null = null;
+    for (const m of marks) {
+      const wrapper = m.closest('[data-page]') as HTMLElement | null;
+      const pg = wrapper ? parseInt(wrapper.dataset.page || '1', 10) : 1;
+      if (pg >= initialPage) { chosen = m; break; }
+    }
+    (chosen ?? marks[0]).scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
 
   // Track which page is currently in view (using IntersectionObserver)
   useEffect(() => {
