@@ -13,6 +13,7 @@ export function DocCard({ hit, query }: { hit: SearchHit; query?: string }) {
       .select('storage_path, vendor_url')
       .eq('id', hit.document_id)
       .maybeSingle();
+
     if (doc?.storage_path) {
       const { data, error } = await supabase.storage
         .from('documents')
@@ -25,6 +26,13 @@ export function DocCard({ hit, query }: { hit: SearchHit; query?: string }) {
       }
     } else if (doc?.vendor_url) {
       window.open(doc.vendor_url, '_blank');
+    } else {
+      alert(
+        'No file attached to this document yet.\n\n' +
+        'This document is searchable by its content but has no PDF file. ' +
+        'An uploader can attach the actual PDF via the "+ Upload" button — ' +
+        'tag it with the same sensor and document type, and the file will replace this stub.'
+      );
     }
     setOpening(false);
   }
