@@ -44,20 +44,18 @@ export function DocCard({ hit, query }: { hit: SearchHit; query?: string }) {
 }
 
 function highlight(text: string, q?: string) {
-  // ts_headline wraps matches in <b>...</b>. Swap to placeholders before escaping,
-  // then convert placeholders to <mark> after. This keeps the content safe from
-  // injection while preserving Postgres-side highlights.
-  const OPEN = '\x01';
-  const CLOSE = '\x02';
-  const preserved = text.replace(/<b>/g, OPEN).replace(/<\/b>/g, CLOSE);
-  const escaped = preserved.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]!));
-  let out = escaped.replace(new RegExp(OPEN, 'g'), '<mark>').replace(new RegExp(CLOSE, 'g'), '</mark>');
-  if (q) {
-    const terms = q.split(/\s+/).filter((t) => t.length > 2);
-    for (const t of terms) {
-      const re = new RegExp(`(${t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'ig');
-      out = out.replace(re, (m) => (/<\/?mark>/.test(m) ? m : `<mark>${m}</mark>`));
-    }
-  }
-  return out;
+  // Server returns plain-text snippets now (no markup); do all highlighting
+  // here with a prefix-aware regex so it matches what Postgres FTS prefix
+  // matching actually returns.
+  const escaped = text.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]!));
+  if (!q || !q.trim()) return escaped;
+  const terms = q
+    .split(/\s+/)
+    .map((t) => t.replace(/[^a-zA-Z0-9]/g, ''))
+    .filter((t) => t.length > 1);
+  if (terms.length === 0) return escaped;
+  const pattern = terms.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+  // Match a whole word that STARTS with any of the terms (prefix match).
+  const re = new RegExp(`\\b(?:${pattern})\\w*`, 'gi');
+  return escaped.replace(re, '<mark>$&</mark>');
 }
