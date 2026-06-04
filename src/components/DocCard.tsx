@@ -1,7 +1,7 @@
-import { Link, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import type { SearchHit } from '../lib/types';
-import { supabase } from '../lib/supabase';
 import { useState } from 'react';
+import { openDocument } from '../lib/openDoc';
 
 export function DocCard({ hit, query }: { hit: SearchHit; query?: string }) {
   const [opening, setOpening] = useState(false);
@@ -9,29 +9,7 @@ export function DocCard({ hit, query }: { hit: SearchHit; query?: string }) {
 
   async function open() {
     setOpening(true);
-    const { data: doc } = await supabase
-      .from('documents')
-      .select('storage_path, vendor_url')
-      .eq('id', hit.document_id)
-      .maybeSingle();
-
-    if (doc?.storage_path) {
-      // Route to in-app viewer with page + query for highlight
-      const params = new URLSearchParams();
-      if (hit.page_number) params.set('page', String(hit.page_number));
-      if (query) params.set('q', query);
-      const qs = params.toString();
-      nav(`/view/${hit.document_id}${qs ? '?' + qs : ''}`);
-    } else if (doc?.vendor_url) {
-      window.open(doc.vendor_url, '_blank');
-    } else {
-      alert(
-        'No file attached to this document yet.\n\n' +
-        'This document is searchable by its content but has no PDF file. ' +
-        'An uploader can attach the actual PDF via the "+ Upload" button — ' +
-        'tag it with the same sensor and document type, and the file will replace this stub.'
-      );
-    }
+    await openDocument({ id: hit.document_id, nav, page: hit.page_number ?? null, query });
     setOpening(false);
   }
 

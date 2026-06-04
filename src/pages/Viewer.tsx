@@ -174,7 +174,12 @@ export default function Viewer() {
       )}
 
       <style>{`
-        .dp-mark { background: #fde68a; color: inherit; padding: 0; border-radius: 2px; box-shadow: 0 0 0 1px #fbbf24; }
+        /* Translucent so the canvas-rendered text underneath stays visible. */
+        .dp-mark {
+          background: rgba(255, 213, 0, 0.45);
+          border-radius: 2px;
+          padding: 0;
+        }
         .react-pdf__Page__textContent { user-select: text; }
         .react-pdf__Page { background: white; }
       `}</style>

@@ -1,8 +1,10 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
 import { DocCard } from '../components/DocCard';
 import { runSearch } from '../lib/search';
 import { supabase } from '../lib/supabase';
+import { openDocument } from '../lib/openDoc';
 
 const EXAMPLES = [
   'troubleshooting DO sensor',
@@ -14,6 +16,7 @@ const EXAMPLES = [
 
 export default function Home() {
   const [q, setQ] = useState('');
+  const nav = useNavigate();
 
   const search = useQuery({
     queryKey: ['search', q],
@@ -102,7 +105,11 @@ export default function Home() {
           <h2 className="section-title">Recently uploaded</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
             {(recent.data ?? []).map((d: any) => (
-              <div key={d.id} className="card-tight flex items-start gap-3">
+              <button
+                key={d.id}
+                onClick={() => openDocument({ id: d.id, nav })}
+                className="card-tight flex items-start gap-3 text-left hover:border-brand-700 hover:shadow-sm transition"
+              >
                 <div className="bg-brand-50 text-brand-700 rounded-lg w-10 h-10 flex items-center justify-center shrink-0">📄</div>
                 <div className="min-w-0 flex-1">
                   <div className="font-medium text-slate-900 truncate">{d.title}</div>
@@ -110,7 +117,7 @@ export default function Home() {
                     {d.document_types?.label ?? '—'}{d.plants?.name ? ` · ${d.plants.name}` : ''}
                   </div>
                 </div>
-              </div>
+              </button>
             ))}
             {(recent.data ?? []).length === 0 && (
               <div className="card text-sm text-slate-500 col-span-full text-center">
