@@ -5,11 +5,11 @@ import { runSearch } from '../lib/search';
 import { supabase } from '../lib/supabase';
 
 const EXAMPLES = [
-  'Brotek UT-116 manual',
   'troubleshooting DO sensor',
-  'warranty certificate',
-  'P&ID',
-  'calibration',
+  'Advance Analytik OCEMS',
+  'calibration procedure',
+  'level transmitter manual',
+  'flow meter datasheet',
 ];
 
 export default function Home() {
@@ -44,7 +44,7 @@ export default function Home() {
           Find any document <span className="text-brand-700">in seconds.</span>
         </h1>
         <p className="text-slate-600 text-lg mb-8">
-          Manuals, datasheets, certificates, I/O lists, P&amp;IDs — full-text search across every page.
+          Sensor manuals, troubleshooting steps, technical data sheets — full-text search across every page.
         </p>
 
         <form

@@ -13,17 +13,14 @@ const SENSOR_DOC_KEYS = new Set([
 
 export default function Browse() {
   const [q, setQ] = useState('');
-  const [plant, setPlant] = useState('');
   const [type, setType] = useState('');         // selected document_type.key
   const [category, setCategory] = useState(''); // sensor_category.id
   const [make, setMake] = useState('');         // sensor_makes.id
   const [model, setModel] = useState('');       // sensor_models.id
 
-  // Independent reference data — each loaded once, no cascading dependencies.
-  const plants = useQuery({ queryKey: ['plants'], queryFn: async () => (await supabase.from('plants').select('id,name').order('name')).data ?? [] });
   const cats = useQuery({ queryKey: ['cats'], queryFn: async () => (await supabase.from('sensor_categories').select('id,name').order('name')).data ?? [] });
   const makes = useQuery({ queryKey: ['makes'], queryFn: async () => (await supabase.from('sensor_makes').select('id,name').order('name')).data ?? [] });
-  const types = useQuery({ queryKey: ['types'], queryFn: async () => (await supabase.from('document_types').select('id,key,label,scope').order('sort_order')).data ?? [] });
+  const types = useQuery({ queryKey: ['types'], queryFn: async () => (await supabase.from('document_types').select('id,key,label,scope').eq('scope', 'general').order('sort_order')).data ?? [] });
 
   // Models list is only fetched when a make is picked (progressive disclosure).
   const models = useQuery({
@@ -40,11 +37,9 @@ export default function Browse() {
     return SENSOR_DOC_KEYS.has(type);   // sensor-relevant types
   }, [type]);
 
-  // Always fetch results (no enabled gate) — empty filters means "all documents".
   const results = useQuery({
-    queryKey: ['browse', q, plant, type, category, make, model],
+    queryKey: ['browse', q, type, category, make, model],
     queryFn: () => runSearch(q, {
-      plant_id: plant || undefined,
       type_key: type || undefined,
       category_id: category || undefined,
       make_id: make || undefined,
@@ -52,8 +47,8 @@ export default function Browse() {
     }),
   });
 
-  function reset() { setQ(''); setPlant(''); setType(''); setCategory(''); setMake(''); setModel(''); }
-  const hasFilter = q || plant || type || category || make || model;
+  function reset() { setQ(''); setType(''); setCategory(''); setMake(''); setModel(''); }
+  const hasFilter = q || type || category || make || model;
 
   return (
     <div className="space-y-6">
@@ -83,13 +78,6 @@ export default function Browse() {
             <select className="input" value={type} onChange={(e) => { setType(e.target.value); if (!SENSOR_DOC_KEYS.has(e.target.value)) { setMake(''); setModel(''); setCategory(''); } }}>
               <option value="">All types</option>
               {types.data?.map((t: any) => <option key={t.id} value={t.key}>{t.label}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="label">Plant</label>
-            <select className="input" value={plant} onChange={(e) => setPlant(e.target.value)}>
-              <option value="">All plants</option>
-              {plants.data?.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}
             </select>
           </div>
 

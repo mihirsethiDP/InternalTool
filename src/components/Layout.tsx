@@ -33,7 +33,6 @@ function Inner() {
           <nav className="flex items-center gap-1 ml-2">
             <NavLink to="/" end className={navCls}>Search</NavLink>
             <NavLink to="/browse" className={navCls}>Browse</NavLink>
-            <NavLink to="/plants" className={navCls}>Plants</NavLink>
             <NavLink to="/sensors" className={navCls}>Sensors</NavLink>
             {isAdmin(profile) && <NavLink to="/admin" className={navCls}>Admin</NavLink>}
           </nav>

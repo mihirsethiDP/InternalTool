@@ -45,7 +45,7 @@ export default function PlantDetail() {
           { label: 'Sensors installed', value: sensors.data?.length ?? 0 },
         ]}
         action={canUpload(profile) && (
-          <button onClick={() => upload.open({ plant_id: id! })} className="bg-white text-brand-700 hover:bg-slate-100 rounded-lg px-4 py-2 font-semibold text-sm shadow-sm">
+          <button onClick={() => upload.open()} className="bg-white text-brand-700 hover:bg-slate-100 rounded-lg px-4 py-2 font-semibold text-sm shadow-sm">
             + Upload document
           </button>
         )}

@@ -60,13 +60,20 @@ export function DocCard({ hit, query }: { hit: SearchHit; query?: string }) {
 }
 
 function highlight(text: string, q?: string) {
-  const safe = text.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]!));
-  if (!q) return safe;
-  const terms = q.split(/\s+/).filter((t) => t.length > 2);
-  let out = safe;
-  for (const t of terms) {
-    const re = new RegExp(`(${t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'ig');
-    out = out.replace(re, '<mark>$1</mark>');
+  // ts_headline wraps matches in <b>...</b>. Swap to placeholders before escaping,
+  // then convert placeholders to <mark> after. This keeps the content safe from
+  // injection while preserving Postgres-side highlights.
+  const OPEN = '\x01';
+  const CLOSE = '\x02';
+  const preserved = text.replace(/<b>/g, OPEN).replace(/<\/b>/g, CLOSE);
+  const escaped = preserved.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]!));
+  let out = escaped.replace(new RegExp(OPEN, 'g'), '<mark>').replace(new RegExp(CLOSE, 'g'), '</mark>');
+  if (q) {
+    const terms = q.split(/\s+/).filter((t) => t.length > 2);
+    for (const t of terms) {
+      const re = new RegExp(`(${t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'ig');
+      out = out.replace(re, (m) => (/<\/?mark>/.test(m) ? m : `<mark>${m}</mark>`));
+    }
   }
   return out;
 }

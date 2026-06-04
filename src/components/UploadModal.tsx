@@ -2,12 +2,9 @@ import { createContext, useContext, useEffect, useMemo, useState, ReactNode } fr
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import { extractPdfText, chunkPage } from '../lib/pdf';
-import type { DocumentScope } from '../lib/types';
 import AddSensorModal from './AddSensorModal';
 
 interface UploadDefaults {
-  plant_id?: string;
-  equipment_id?: string;
   sensor_model_id?: string;
   type_key?: string;
 }
@@ -31,7 +28,6 @@ export function UploadProvider({ children }: { children: ReactNode }) {
   );
 }
 
-// --- File icon helper ---
 function fileIcon(name: string) {
   const ext = name.split('.').pop()?.toLowerCase();
   if (ext === 'pdf') return '📕';
@@ -47,8 +43,6 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
   const [title, setTitle] = useState('');
   const [titleTouched, setTitleTouched] = useState(false);
   const [typeId, setTypeId] = useState('');
-  const [plantId, setPlantId] = useState(defaults.plant_id ?? '');
-  const [equipmentId, setEquipmentId] = useState(defaults.equipment_id ?? '');
   const [sensorModelId, setSensorModelId] = useState(defaults.sensor_model_id ?? '');
   const [makeId, setMakeId] = useState('');
   const [vendorUrl, setVendorUrl] = useState('');
@@ -59,27 +53,26 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const types = useQuery({ queryKey: ['types'], queryFn: async () => (await supabase.from('document_types').select('*').order('sort_order')).data ?? [] });
-  const plants = useQuery({ queryKey: ['plants'], queryFn: async () => (await supabase.from('plants').select('id,name').order('name')).data ?? [] });
+  // Only show "general" scope types in the dropdown (the sensor-tied ones):
+  // Sensor Manual, Installation Guide, Troubleshooting Steps, Technical Data Sheet.
+  const types = useQuery({
+    queryKey: ['types-general'],
+    queryFn: async () => (await supabase.from('document_types').select('*').eq('scope', 'general').order('sort_order')).data ?? [],
+  });
   const makes = useQuery({ queryKey: ['makes'], queryFn: async () => (await supabase.from('sensor_makes').select('id,name').order('name')).data ?? [] });
   const models = useQuery({
     queryKey: ['models-by-make', makeId],
     queryFn: async () => makeId ? ((await supabase.from('sensor_models').select('id, model_no, name').eq('make_id', makeId).order('model_no')).data ?? []) : [],
     enabled: Boolean(makeId),
   });
-  const equipment = useQuery({
-    queryKey: ['equipment', plantId],
-    queryFn: async () => plantId ? ((await supabase.from('equipment').select('id,name').eq('plant_id', plantId).order('name')).data ?? []) : [],
-    enabled: Boolean(plantId),
-  });
 
-  // "Recently used" — distinct top-3 doc types / plants / makes from the latest 30 uploads.
+  // Recent picks (type & make only — plants gone)
   const recent = useQuery({
     queryKey: ['recent-meta'],
     queryFn: async () => {
       const { data } = await supabase
         .from('documents')
-        .select('type_id, plant_id, sensor_models(make_id), uploaded_at')
+        .select('type_id, sensor_models(make_id), uploaded_at')
         .order('uploaded_at', { ascending: false })
         .limit(30);
       return data ?? [];
@@ -87,13 +80,8 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
   });
 
   const recentTypeIds = useMemo(() => distinct((recent.data ?? []).map((d: any) => d.type_id)).slice(0, 3), [recent.data]);
-  const recentPlantIds = useMemo(() => distinct((recent.data ?? []).map((d: any) => d.plant_id)).slice(0, 3), [recent.data]);
   const recentMakeIds = useMemo(() => distinct((recent.data ?? []).map((d: any) => d.sensor_models?.make_id)).slice(0, 3), [recent.data]);
 
-  const selectedType = types.data?.find((t: any) => t.id === typeId);
-  const scope: DocumentScope = (selectedType?.scope ?? 'general') as DocumentScope;
-
-  // Preselect type from defaults
   useEffect(() => {
     if (defaults.type_key && types.data) {
       const t = types.data.find((x: any) => x.key === defaults.type_key);
@@ -101,35 +89,27 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
     }
   }, [defaults.type_key, types.data]);
 
-  // Title auto-fills from filename until the user edits it
   useEffect(() => {
     if (!titleTouched && file) setTitle(file.name.replace(/\.[^.]+$/, ''));
   }, [file, titleTouched]);
 
-  // Clear sensor/plant fields when scope changes
+  // If a default sensor_model_id is provided (from sensor detail page), preload its make
   useEffect(() => {
-    if (scope === 'plant' || scope === 'plant_with_sensor_refs') { setMakeId(''); setSensorModelId(''); }
-    if (scope === 'general') { setPlantId(''); setEquipmentId(''); }
-  }, [scope]); // eslint-disable-line
+    if (defaults.sensor_model_id && !makeId) {
+      (async () => {
+        const { data } = await supabase.from('sensor_models').select('make_id').eq('id', defaults.sensor_model_id!).maybeSingle();
+        if (data?.make_id) setMakeId(data.make_id);
+      })();
+    }
+  }, [defaults.sensor_model_id]); // eslint-disable-line
 
   function pickFile(f: File | null) { setFile(f); setError(null); }
-  function onDrop(e: React.DragEvent) {
-    e.preventDefault(); setDragOver(false);
-    const f = e.dataTransfer.files?.[0];
-    if (f) pickFile(f);
-  }
+  function onDrop(e: React.DragEvent) { e.preventDefault(); setDragOver(false); const f = e.dataTransfer.files?.[0]; if (f) pickFile(f); }
 
   function valid(): string | null {
     if (!file) return 'Choose a file.';
     if (!typeId) return 'Pick a document type.';
-    if (scope === 'plant' || scope === 'plant_sensor' || scope === 'plant_with_sensor_refs') {
-      if (!plantId) return 'Pick a plant for this document type.';
-    }
-    if (scope === 'plant_sensor') {
-      if (!equipmentId) return 'Pick the equipment.';
-      if (!sensorModelId) return 'Pick the sensor model.';
-    }
-    if (scope === 'general' && !sensorModelId) return 'Pick the sensor model this document is for.';
+    if (!sensorModelId) return 'Pick the sensor (make + model) this document is for.';
     return null;
   }
 
@@ -151,9 +131,7 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
 
     const insert = await supabase.from('documents').insert({
       title, type_id: typeId,
-      plant_id: plantId || null,
-      equipment_id: equipmentId || null,
-      sensor_model_id: sensorModelId || null,
+      sensor_model_id: sensorModelId,
       vendor_url: vendorUrl || null,
       storage_path: storagePath, size_bytes: file.size,
     }).select('id').single();
@@ -185,33 +163,29 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
     setProgress(100); setStatus('✅ Uploaded.');
     qc.invalidateQueries({ queryKey: ['recent-docs'] });
     qc.invalidateQueries({ queryKey: ['recent-meta'] });
-    qc.invalidateQueries({ queryKey: ['plant-docs'] });
     qc.invalidateQueries({ queryKey: ['browse'] });
+    qc.invalidateQueries({ queryKey: ['sensor-docs'] });
     setBusy(false);
     setTimeout(onClose, 700);
   }
 
-  function labelOf(coll: any[] | undefined, id: string) {
-    return coll?.find((x: any) => x.id === id);
-  }
+  function labelOf(coll: any[] | undefined, id: string) { return coll?.find((x: any) => x.id === id); }
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto" onClick={onClose}>
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[92vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-        {/* Header */}
         <div className="px-7 pt-7 pb-5 border-b border-slate-100 flex items-start justify-between sticky top-0 bg-white rounded-t-2xl z-10">
           <div>
             <div className="inline-flex items-center gap-2 bg-brand-50 text-brand-700 rounded-full px-2.5 py-0.5 text-xs font-semibold tracking-wide mb-2">
               ⬆ New document
             </div>
             <h2 className="text-2xl font-bold tracking-tight">Upload a document</h2>
-            <p className="text-sm text-slate-500 mt-1">PDFs are fully text-indexed. Word, Excel, and images are indexed by metadata.</p>
+            <p className="text-sm text-slate-500 mt-1">Sensor manuals, troubleshooting steps, datasheets, installation guides. PDF contents are fully text-indexed.</p>
           </div>
           <button type="button" onClick={onClose} className="text-slate-400 hover:text-slate-700 text-2xl leading-none -mt-1">×</button>
         </div>
 
         <form onSubmit={submit} className="px-7 py-6 space-y-6">
-          {/* Drag-drop / file picker */}
           <label
             onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
             onDragLeave={() => setDragOver(false)}
@@ -238,7 +212,6 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
             )}
           </label>
 
-          {/* Title */}
           <div>
             <label className="label">Title</label>
             <input
@@ -251,7 +224,6 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
             {file && !titleTouched && <div className="text-xs text-slate-500 mt-1.5">Auto-filled from the file name — feel free to edit.</div>}
           </div>
 
-          {/* Document type with recent suggestions */}
           <div>
             <label className="label">Document type</label>
             {recentTypeIds.length > 0 && (
@@ -274,99 +246,58 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
               <option value="">— Select type —</option>
               {types.data?.map((t: any) => <option key={t.id} value={t.id}>{t.label}</option>)}
             </select>
-            {selectedType && <ScopeHint scope={scope} />}
           </div>
 
-          {/* Linkage — scope-driven */}
-          {typeId && (
-            <div className="rounded-2xl bg-slate-50 border border-slate-200 p-5 space-y-4">
-              <div className="text-xs uppercase tracking-wide font-semibold text-slate-500">Link this document</div>
+          <div className="rounded-2xl bg-slate-50 border border-slate-200 p-5 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="text-xs uppercase tracking-wide font-semibold text-slate-500">Which sensor is this for?</div>
+              <button type="button" className="text-xs text-brand-700 font-medium hover:underline" onClick={() => setShowAddSensor(true)}>
+                + Can't find it? Add new sensor
+              </button>
+            </div>
 
-              {(scope === 'plant' || scope === 'plant_sensor' || scope === 'plant_with_sensor_refs') && (
-                <div>
-                  <label className="label">Plant <span className="text-red-500">*</span></label>
-                  {recentPlantIds.length > 0 && (
-                    <div className="flex flex-wrap gap-1.5 mb-2">
-                      {recentPlantIds.map((pid) => {
-                        const p = labelOf(plants.data, pid);
-                        if (!p) return null;
-                        const active = plantId === pid;
-                        return (
-                          <button type="button" key={pid} onClick={() => { setPlantId(pid); setEquipmentId(''); }}
-                            className={`rounded-full px-3 py-1 text-xs font-medium border transition ${active ? 'bg-brand-700 text-white border-brand-700' : 'bg-white text-slate-700 border-slate-200 hover:border-brand-700 hover:text-brand-700'}`}>
-                            {p.name}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
-                  <select className="input" value={plantId} onChange={(e) => { setPlantId(e.target.value); setEquipmentId(''); }} required>
-                    <option value="">— Select plant —</option>
-                    {plants.data?.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                  </select>
-                </div>
-              )}
-
-              {scope === 'plant_sensor' && plantId && (
-                <div>
-                  <label className="label">Equipment <span className="text-red-500">*</span></label>
-                  <select className="input" value={equipmentId} onChange={(e) => setEquipmentId(e.target.value)} required>
-                    <option value="">— Select equipment —</option>
-                    {equipment.data?.map((e: any) => <option key={e.id} value={e.id}>{e.name}</option>)}
-                  </select>
-                  {(equipment.data ?? []).length === 0 && (
-                    <div className="text-xs text-amber-700 mt-1.5">No equipment on this plant yet — add some from the plant page first.</div>
-                  )}
-                </div>
-              )}
-
-              {(scope === 'general' || scope === 'plant_sensor') && (
-                <div>
-                  <div className="flex items-center justify-between mb-1.5">
-                    <span className="label mb-0">Sensor</span>
-                    <button type="button" className="text-xs text-brand-700 font-medium hover:underline" onClick={() => setShowAddSensor(true)}>
-                      + Can't find it? Add new sensor
+            {recentMakeIds.length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                <span className="text-xs text-slate-500 self-center mr-1">Recent makes:</span>
+                {recentMakeIds.map((mid) => {
+                  const m = labelOf(makes.data, mid);
+                  if (!m) return null;
+                  const active = makeId === mid;
+                  return (
+                    <button type="button" key={mid} onClick={() => { setMakeId(mid); setSensorModelId(''); }}
+                      className={`rounded-full px-3 py-1 text-xs font-medium border transition ${active ? 'bg-brand-700 text-white border-brand-700' : 'bg-white text-slate-700 border-slate-200 hover:border-brand-700 hover:text-brand-700'}`}>
+                      {m.name}
                     </button>
-                  </div>
-                  {recentMakeIds.length > 0 && (
-                    <div className="flex flex-wrap gap-1.5 mb-2">
-                      <span className="text-xs text-slate-500 self-center mr-1">Recent makes:</span>
-                      {recentMakeIds.map((mid) => {
-                        const m = labelOf(makes.data, mid);
-                        if (!m) return null;
-                        const active = makeId === mid;
-                        return (
-                          <button type="button" key={mid} onClick={() => { setMakeId(mid); setSensorModelId(''); }}
-                            className={`rounded-full px-3 py-1 text-xs font-medium border transition ${active ? 'bg-brand-700 text-white border-brand-700' : 'bg-white text-slate-700 border-slate-200 hover:border-brand-700 hover:text-brand-700'}`}>
-                            {m.name}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    <select className="input" value={makeId} onChange={(e) => { setMakeId(e.target.value); setSensorModelId(''); }}>
-                      <option value="">— Select make —</option>
-                      {makes.data?.map((m: any) => <option key={m.id} value={m.id}>{m.name}</option>)}
-                    </select>
-                    <select className="input" value={sensorModelId} onChange={(e) => setSensorModelId(e.target.value)} disabled={!makeId}>
-                      <option value="">{makeId ? '— Select model —' : 'Pick a make first'}</option>
-                      {models.data?.map((m: any) => <option key={m.id} value={m.id}>{m.model_no || m.name}</option>)}
-                    </select>
-                  </div>
-                </div>
-              )}
+                  );
+                })}
+              </div>
+            )}
 
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div>
-                <label className="label">Vendor URL (optional)</label>
-                <input className="input" value={vendorUrl} onChange={(e) => setVendorUrl(e.target.value)} placeholder="https://www.siemens.com/…" />
+                <label className="label">Make <span className="text-red-500">*</span></label>
+                <select className="input" value={makeId} onChange={(e) => { setMakeId(e.target.value); setSensorModelId(''); }} required>
+                  <option value="">— Select make —</option>
+                  {makes.data?.map((m: any) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="label">Model <span className="text-red-500">*</span></label>
+                <select className="input" value={sensorModelId} onChange={(e) => setSensorModelId(e.target.value)} disabled={!makeId} required>
+                  <option value="">{makeId ? '— Select model —' : 'Pick a make first'}</option>
+                  {models.data?.map((m: any) => <option key={m.id} value={m.id}>{m.model_no || m.name}</option>)}
+                </select>
               </div>
             </div>
-          )}
+
+            <div>
+              <label className="label">Vendor URL (optional)</label>
+              <input className="input" value={vendorUrl} onChange={(e) => setVendorUrl(e.target.value)} placeholder="https://www.vendor.com/sensor-model" />
+            </div>
+          </div>
 
           {error && <div className="text-sm text-red-700 bg-red-50 border border-red-100 rounded-lg px-3 py-2.5">{error}</div>}
 
-          {/* Sticky footer */}
           <div className="flex items-center justify-end gap-3 pt-2 sticky bottom-0 bg-white -mx-7 px-7 -mb-6 py-4 border-t border-slate-100">
             <button type="button" onClick={onClose} className="btn-ghost">Cancel</button>
             <button
@@ -394,7 +325,6 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
           onClose={() => setShowAddSensor(false)}
           defaultMakeName={makes.data?.find((m: any) => m.id === makeId)?.name}
           onCreated={(newId) => {
-            // we don't know the make_id directly; refetch and pick the new model
             qc.invalidateQueries({ queryKey: ['makes'] });
             qc.invalidateQueries({ queryKey: ['models-by-make'] });
             setSensorModelId(newId);
@@ -403,16 +333,6 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
       )}
     </div>
   );
-}
-
-function ScopeHint({ scope }: { scope: DocumentScope }) {
-  const text = {
-    general: 'General document. Link a sensor model — it will show up under that sensor and any plant that installs it.',
-    plant: 'Plant-specific document. Will be linked to a single plant.',
-    plant_sensor: 'Sensor-on-equipment document (e.g. calibration / test certificate). Pick plant, equipment, and sensor model.',
-    plant_with_sensor_refs: 'Plant document that references sensors. Sensors are discoverable via the document text.',
-  }[scope];
-  return <div className="text-xs text-slate-500 mt-2">{text}</div>;
 }
 
 function distinct<T>(arr: T[]): T[] {
