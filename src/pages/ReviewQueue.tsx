@@ -17,10 +17,6 @@ export function ReviewQueueList() {
   const { profile } = useAuth();
   const [status, setStatus] = useState<'pending' | 'approved' | 'rejected' | 'all'>('pending');
 
-  if (!isAdmin(profile)) {
-    return <div className="card text-sm">Admins only.</div>;
-  }
-
   const subs = useQuery({
     queryKey: ['review-queue', status],
     queryFn: async () => {
@@ -46,6 +42,10 @@ export function ReviewQueueList() {
       return r;
     },
   });
+
+  if (!isAdmin(profile)) {
+    return <div className="card text-sm">Admins only.</div>;
+  }
 
   return (
     <div className="space-y-6">
@@ -121,8 +121,6 @@ export function ReviewQueueDetail() {
   const [approveOpen, setApproveOpen] = useState(false);
   const [rejectOpen, setRejectOpen] = useState(false);
 
-  if (!isAdmin(profile)) return <div className="card text-sm">Admins only.</div>;
-
   const sub = useQuery({
     queryKey: ['submission', id],
     queryFn: async () => {
@@ -164,6 +162,7 @@ export function ReviewQueueDetail() {
   }
 
   const s = sub.data;
+  if (!isAdmin(profile)) return <div className="card text-sm">Admins only.</div>;
   if (sub.isLoading) return <div className="muted">Loading…</div>;
   if (!s) return <div className="card text-sm">Submission not found.</div>;
 
