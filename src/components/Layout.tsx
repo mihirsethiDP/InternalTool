@@ -2,6 +2,7 @@ import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useAuth, canUpload, isAdmin } from '../lib/auth';
 import { UploadProvider, useUpload } from './UploadModal';
+import NotificationBell from './NotificationBell';
 
 const navCls = ({ isActive }: { isActive: boolean }) =>
   `px-3 py-2 rounded-md text-sm font-medium transition ${
@@ -44,6 +45,7 @@ function Inner() {
                 + Upload
               </button>
             )}
+            <NotificationBell />
             <div className="hidden md:flex items-center gap-2.5 bg-white/10 hover:bg-white/15 transition rounded-full pl-2 pr-3 py-1">
               <span className="bg-white text-brand-700 w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold">{initials}</span>
               <div className="leading-tight">

@@ -170,6 +170,21 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
       setError('Submission failed: ' + (insert.error?.message ?? '?'));
       return;
     }
+    // Notify all admins that a new submission has landed (best-effort, non-blocking)
+    try {
+      const { data: admins } = await supabase.from('profiles').select('id').eq('role', 'admin');
+      if (admins?.length) {
+        await supabase.from('notifications').insert(
+          admins.map((a: any) => ({
+            recipient_id: a.id,
+            kind: 'submission_created',
+            submission_id: insert.data!.id,
+            message: `New submission "${title}" awaiting review.`,
+          }))
+        );
+      }
+    } catch (e) { console.warn('notify admins failed', e); }
+
     setProgress(100);
     setStatus('✅ Submitted for review. You\'ll be notified when an admin approves or rejects it.');
     qc.invalidateQueries({ queryKey: ['my-submissions'] });

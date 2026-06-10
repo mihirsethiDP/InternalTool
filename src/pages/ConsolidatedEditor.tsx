@@ -204,7 +204,7 @@ function SectionEditor({ section, initialBody, onChange, onSave, busy }: {
           disabled={busy}
           className="btn-primary disabled:opacity-60"
         >
-          {busy ? 'Saving…' : `Save ${SECTION_LABEL[section]}`}
+          {busy ? 'Saving…' : 'Save'}
         </button>
       </div>
       <style>{`

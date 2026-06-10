@@ -325,6 +325,18 @@ function ApproveModal({ submission, editedText, onClose, onDone }: any) {
       }).eq('id', submission.id);
       if (updSub.error) throw updSub.error;
 
+      // Notify the maker
+      try {
+        if (submission.uploaded_by) {
+          await supabase.from('notifications').insert({
+            recipient_id: submission.uploaded_by,
+            kind: 'submission_approved',
+            submission_id: submission.id,
+            message: `Your submission "${submission.title}" was approved${note ? ` — ${note}` : ''}.`,
+          });
+        }
+      } catch (e) { console.warn('notify maker failed', e); }
+
       qc.invalidateQueries({ queryKey: ['review-queue'] });
       qc.invalidateQueries({ queryKey: ['review-queue-counts'] });
       qc.invalidateQueries({ queryKey: ['my-submissions'] });
@@ -401,6 +413,19 @@ function RejectModal({ submission, onClose, onDone }: any) {
         storage_path: null,
       }).eq('id', submission.id);
       if (upd.error) throw upd.error;
+
+      // Notify the maker
+      try {
+        if (submission.uploaded_by) {
+          await supabase.from('notifications').insert({
+            recipient_id: submission.uploaded_by,
+            kind: 'submission_rejected',
+            submission_id: submission.id,
+            message: `Your submission "${submission.title}" was rejected${note ? ` — ${note}` : ''}.`,
+          });
+        }
+      } catch (e) { console.warn('notify maker failed', e); }
+
       qc.invalidateQueries({ queryKey: ['review-queue'] });
       qc.invalidateQueries({ queryKey: ['review-queue-counts'] });
       qc.invalidateQueries({ queryKey: ['my-submissions'] });
