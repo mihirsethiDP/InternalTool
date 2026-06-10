@@ -35,6 +35,7 @@ function Inner() {
             <NavLink to="/browse" className={navCls}>Browse</NavLink>
             <NavLink to="/sensors" className={navCls}>Sensors</NavLink>
             {canUpload(profile) && <NavLink to="/my-submissions" className={navCls}>My submissions</NavLink>}
+            {isAdmin(profile) && <NavLink to="/review" className={navCls}>Review queue</NavLink>}
             {isAdmin(profile) && <NavLink to="/admin" className={navCls}>Admin</NavLink>}
           </nav>
           <div className="ml-auto flex items-center gap-3">
