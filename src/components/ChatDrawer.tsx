@@ -57,13 +57,6 @@ export default function ChatDrawer({ open, onClose }: { open: boolean; onClose: 
     });
   }
 
-  function openHit(h: Hit) {
-    const params = new URLSearchParams();
-    if (h.query) params.set('q', h.query);
-    onClose();
-    nav(`/consolidated/${h.document_id}?q=${encodeURIComponent((turns[turns.length - 1] as any)?.query ?? '')}`);
-  }
-
   function openHitWith(query: string, id: string) {
     onClose();
     nav(`/consolidated/${id}?q=${encodeURIComponent(query)}`);
