@@ -25,12 +25,12 @@ export default function Home() {
   });
 
   const recent = useQuery({
-    queryKey: ['recent-docs'],
+    queryKey: ['recent-consolidated'],
     queryFn: async () => {
       const { data } = await supabase
-        .from('documents')
-        .select('id, title, uploaded_at, document_types(label), plants(name)')
-        .order('uploaded_at', { ascending: false })
+        .from('consolidated_docs')
+        .select('id, last_updated_at, sensor_models(model_no, sensor_makes(name))')
+        .order('last_updated_at', { ascending: false })
         .limit(6);
       return data ?? [];
     },
@@ -102,7 +102,7 @@ export default function Home() {
 
       {!q && (
         <section className="max-w-5xl mx-auto">
-          <h2 className="section-title">Recently uploaded</h2>
+          <h2 className="section-title">Recently updated</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
             {(recent.data ?? []).map((d: any) => (
               <button
@@ -110,18 +110,20 @@ export default function Home() {
                 onClick={() => openDocument({ id: d.id, nav })}
                 className="card-tight flex items-start gap-3 text-left hover:border-brand-700 hover:shadow-sm transition"
               >
-                <div className="bg-brand-50 text-brand-700 rounded-lg w-10 h-10 flex items-center justify-center shrink-0">📄</div>
+                <div className="bg-brand-50 text-brand-700 rounded-lg w-10 h-10 flex items-center justify-center shrink-0">📘</div>
                 <div className="min-w-0 flex-1">
-                  <div className="font-medium text-slate-900 truncate">{d.title}</div>
+                  <div className="font-medium text-slate-900 truncate">
+                    {d.sensor_models?.sensor_makes?.name} {d.sensor_models?.model_no}
+                  </div>
                   <div className="text-xs text-slate-500 mt-0.5">
-                    {d.document_types?.label ?? '—'}{d.plants?.name ? ` · ${d.plants.name}` : ''}
+                    Consolidated reference · updated {new Date(d.last_updated_at).toLocaleDateString()}
                   </div>
                 </div>
               </button>
             ))}
             {(recent.data ?? []).length === 0 && (
               <div className="card text-sm text-slate-500 col-span-full text-center">
-                No documents yet. Use <strong>+ Upload</strong> in the top-right to add the first one.
+                No consolidated references yet. Submissions approved in the Review queue will appear here.
               </div>
             )}
           </div>
