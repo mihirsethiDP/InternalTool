@@ -109,34 +109,36 @@ export default function ConsolidatedViewer() {
         }
       />
 
-      {/* Highlight bar + match navigation */}
-      <div className="card-tight flex items-center gap-3 flex-wrap">
-        <div className="muted text-xs whitespace-nowrap">Highlight in document:</div>
-        <input
-          className="input flex-1 min-w-48"
-          value={highlight}
-          onChange={(e) => setHighlight(e.target.value)}
-          placeholder="word or phrase…"
-        />
-        {highlight && (
-          <div className="flex items-center gap-2 text-sm shrink-0">
-            <span className="muted whitespace-nowrap">
-              {matchCount > 0 ? `${matchIdx + 1} / ${matchCount}` : '0 matches'}
-            </span>
-            <button
-              onClick={() => goTo(matchIdx - 1)}
-              disabled={matchCount === 0}
-              title="Previous match"
-              className="rounded-md border border-slate-300 bg-white hover:bg-slate-50 disabled:opacity-40 px-2 py-1 text-sm"
-            >↑</button>
-            <button
-              onClick={() => goTo(matchIdx + 1)}
-              disabled={matchCount === 0}
-              title="Next match"
-              className="rounded-md border border-slate-300 bg-white hover:bg-slate-50 disabled:opacity-40 px-2 py-1 text-sm"
-            >↓</button>
-          </div>
-        )}
+      {/* Highlight bar + match navigation — sticky as you scroll the document */}
+      <div className="sticky top-0 z-30 -mx-5 px-5 py-3 bg-white/95 backdrop-blur border-b border-slate-200">
+        <div className="flex items-center gap-3 flex-wrap">
+          <div className="muted text-xs whitespace-nowrap">Highlight in document:</div>
+          <input
+            className="input flex-1 min-w-48"
+            value={highlight}
+            onChange={(e) => setHighlight(e.target.value)}
+            placeholder="word or phrase…"
+          />
+          {highlight && (
+            <div className="flex items-center gap-2 text-sm shrink-0">
+              <span className="muted whitespace-nowrap">
+                {matchCount > 0 ? `${matchIdx + 1} / ${matchCount}` : '0 matches'}
+              </span>
+              <button
+                onClick={() => goTo(matchIdx - 1)}
+                disabled={matchCount === 0}
+                title="Previous match"
+                className="rounded-md border border-slate-300 bg-white hover:bg-slate-50 disabled:opacity-40 px-2 py-1 text-sm"
+              >↑</button>
+              <button
+                onClick={() => goTo(matchIdx + 1)}
+                disabled={matchCount === 0}
+                title="Next match"
+                className="rounded-md border border-slate-300 bg-white hover:bg-slate-50 disabled:opacity-40 px-2 py-1 text-sm"
+              >↓</button>
+            </div>
+          )}
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-5">

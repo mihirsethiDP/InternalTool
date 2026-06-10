@@ -101,13 +101,10 @@ export default function ConsolidatedEditor() {
         title={title}
         subtitle="Edit any section, then Save to update the consolidated reference and rebuild search."
         action={
-          <div className="flex items-center gap-2">
-            <button onClick={() => nav(`/consolidated/${id}`)} className="bg-white text-brand-700 hover:bg-slate-100 rounded-lg px-3 py-2 text-sm shadow-sm">View</button>
-            <button onClick={save} disabled={busy}
-              className="bg-white text-brand-700 hover:bg-slate-100 rounded-lg px-3 py-2 text-sm font-semibold shadow-sm disabled:opacity-60">
-              {busy ? 'Saving…' : 'Save changes'}
-            </button>
-          </div>
+          <button onClick={() => nav(`/consolidated/${id}`)}
+            className="bg-white text-brand-700 hover:bg-slate-100 rounded-lg px-3 py-2 text-sm shadow-sm">
+            ← Done editing
+          </button>
         }
       />
 
@@ -124,6 +121,8 @@ export default function ConsolidatedEditor() {
             section={s}
             initialBody={sections[s]}
             onChange={(body) => setSections((prev) => ({ ...prev, [s]: body }))}
+            onSave={save}
+            busy={busy}
           />
         ))}
       </div>
@@ -137,8 +136,12 @@ export default function ConsolidatedEditor() {
 }
 
 /* ============== Per-section editor ============== */
-function SectionEditor({ section, initialBody, onChange }: {
-  section: SubmissionSection; initialBody: string; onChange: (b: string) => void;
+function SectionEditor({ section, initialBody, onChange, onSave, busy }: {
+  section: SubmissionSection;
+  initialBody: string;
+  onChange: (b: string) => void;
+  onSave: () => void;
+  busy: boolean;
 }) {
   const editor = useEditor({
     extensions: [
@@ -193,6 +196,16 @@ function SectionEditor({ section, initialBody, onChange }: {
       </div>
       <div className="rounded-lg border border-slate-200 p-3 focus-within:border-brand-700 focus-within:ring-2 focus-within:ring-brand-700/15 transition">
         <EditorContent editor={editor} />
+      </div>
+      <div className="flex justify-end mt-3">
+        <button
+          type="button"
+          onClick={onSave}
+          disabled={busy}
+          className="btn-primary disabled:opacity-60"
+        >
+          {busy ? 'Saving…' : `Save ${SECTION_LABEL[section]}`}
+        </button>
       </div>
       <style>{`
         .tiptap-editor { outline: none; }
