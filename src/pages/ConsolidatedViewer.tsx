@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth, isAdmin } from '../lib/auth';
 import PageHeader from '../components/PageHeader';
@@ -8,12 +8,17 @@ import { SECTION_LABEL, SECTION_ORDER, parseSections } from '../lib/consolidated
 import type { SubmissionSection } from '../lib/types';
 
 export default function ConsolidatedViewer() {
-  const { id } = useParams();           // consolidated_doc_id
+  const { id } = useParams();
   const [params] = useSearchParams();
   const nav = useNavigate();
   const { profile } = useAuth();
   const initialQuery = params.get('q') ?? '';
   const [highlight, setHighlight] = useState(initialQuery);
+
+  const containerRef = useRef<HTMLDivElement>(null);
+  const marksRef = useRef<HTMLElement[]>([]);
+  const [matchIdx, setMatchIdx] = useState(0);
+  const [matchCount, setMatchCount] = useState(0);
 
   const cdoc = useQuery({
     queryKey: ['consolidated-doc', id],
@@ -27,7 +32,6 @@ export default function ConsolidatedViewer() {
     },
   });
 
-  // Source PDFs for this sensor (from approved submissions, for the "Original PDFs" sidebar)
   const sources = useQuery({
     queryKey: ['consolidated-sources', cdoc.data?.sensor_model_id],
     queryFn: async () => {
@@ -44,6 +48,36 @@ export default function ConsolidatedViewer() {
   });
 
   const sections = useMemo(() => parseSections(cdoc.data?.content_markdown), [cdoc.data?.content_markdown]);
+
+  // Re-scan for highlighted matches whenever highlight text or content changes
+  useEffect(() => {
+    const t = setTimeout(() => {
+      if (!containerRef.current) return;
+      const marks = Array.from(containerRef.current.querySelectorAll('mark')) as HTMLElement[];
+      marksRef.current = marks;
+      setMatchCount(marks.length);
+      if (marks.length === 0) { setMatchIdx(0); return; }
+      const start = 0;
+      setMatchIdx(start);
+      applyActive(start);
+      marks[start].scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 80);
+    return () => clearTimeout(t);
+  }, [highlight, cdoc.data?.content_markdown]);
+
+  function applyActive(idx: number) {
+    marksRef.current.forEach((m, i) => {
+      if (i === idx) m.classList.add('dp-mark-active');
+      else m.classList.remove('dp-mark-active');
+    });
+  }
+  function goTo(idx: number) {
+    if (matchCount === 0) return;
+    const safe = ((idx % matchCount) + matchCount) % matchCount;
+    setMatchIdx(safe);
+    applyActive(safe);
+    marksRef.current[safe]?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
 
   async function openSource(storagePath: string | null) {
     if (!storagePath) return;
@@ -75,20 +109,39 @@ export default function ConsolidatedViewer() {
         }
       />
 
-      {/* Highlight bar */}
-      <div className="card-tight flex items-center gap-3">
+      {/* Highlight bar + match navigation */}
+      <div className="card-tight flex items-center gap-3 flex-wrap">
         <div className="muted text-xs whitespace-nowrap">Highlight in document:</div>
         <input
-          className="input"
+          className="input flex-1 min-w-48"
           value={highlight}
           onChange={(e) => setHighlight(e.target.value)}
           placeholder="word or phrase…"
         />
+        {highlight && (
+          <div className="flex items-center gap-2 text-sm shrink-0">
+            <span className="muted whitespace-nowrap">
+              {matchCount > 0 ? `${matchIdx + 1} / ${matchCount}` : '0 matches'}
+            </span>
+            <button
+              onClick={() => goTo(matchIdx - 1)}
+              disabled={matchCount === 0}
+              title="Previous match"
+              className="rounded-md border border-slate-300 bg-white hover:bg-slate-50 disabled:opacity-40 px-2 py-1 text-sm"
+            >↑</button>
+            <button
+              onClick={() => goTo(matchIdx + 1)}
+              disabled={matchCount === 0}
+              title="Next match"
+              className="rounded-md border border-slate-300 bg-white hover:bg-slate-50 disabled:opacity-40 px-2 py-1 text-sm"
+            >↓</button>
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-5">
         {/* Body */}
-        <div className="space-y-5">
+        <div ref={containerRef} className="space-y-5">
           {/* Section nav */}
           <nav className="card-tight flex items-center gap-2 flex-wrap text-sm">
             {SECTION_ORDER.filter((s) => sections[s]).map((s) => (
@@ -103,7 +156,7 @@ export default function ConsolidatedViewer() {
           </nav>
 
           {SECTION_ORDER.map((s) => sections[s] && (
-            <section key={s} id={s} className="card">
+            <section key={s} id={s} className="card scroll-mt-20">
               <h2 className="text-xs uppercase tracking-wider font-semibold text-slate-500 mb-2">
                 {SECTION_LABEL[s]}
               </h2>
@@ -115,7 +168,7 @@ export default function ConsolidatedViewer() {
           ))}
         </div>
 
-        {/* Sidebar: source PDFs */}
+        {/* Sidebar */}
         <aside className="space-y-3">
           <div className="card-tight">
             <div className="text-xs uppercase tracking-wide font-semibold text-slate-500 mb-2">📄 Original PDFs</div>
@@ -133,7 +186,16 @@ export default function ConsolidatedViewer() {
 
       <style>{`
         .prose-doc { white-space: pre-wrap; }
-        .prose-doc mark { background: rgba(255, 213, 0, 0.45); padding: 0; border-radius: 2px; }
+        .prose-doc mark {
+          background: rgba(255, 213, 0, 0.45);
+          padding: 0 1px; border-radius: 2px;
+          transition: background 120ms;
+        }
+        .prose-doc mark.dp-mark-active {
+          background: rgba(255, 132, 0, 0.7);
+          outline: 2px solid #fb923c;
+          outline-offset: 1px;
+        }
       `}</style>
     </div>
   );

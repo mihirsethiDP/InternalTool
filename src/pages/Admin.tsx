@@ -1,5 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useAuth, isAdmin } from '../lib/auth';
 import PageHeader from '../components/PageHeader';
@@ -14,11 +15,47 @@ export default function Admin() {
 
   return (
     <div className="space-y-6">
-      <PageHeader eyebrow="Settings" icon="⚙️" title="Admin" subtitle="Manage users, plants, and document types." />
+      <PageHeader eyebrow="Settings" icon="⚙️" title="Admin" subtitle="Manage users, consolidated docs, and document types." />
+      <ConsolidatedDocsPanel />
       <UsersPanel onChanged={() => qc.invalidateQueries({ queryKey: ['admin-users'] })} />
-      <PlantsPanel />
       <TypesPanel />
     </div>
+  );
+}
+
+function ConsolidatedDocsPanel() {
+  const docs = useQuery({
+    queryKey: ['admin-consolidated-docs'],
+    queryFn: async () => (await supabase
+      .from('consolidated_docs')
+      .select('id, last_updated_at, sensor_models(model_no, sensor_makes(name), sensor_categories(name))')
+      .order('last_updated_at', { ascending: false })).data ?? [],
+  });
+  return (
+    <section className="card">
+      <h2 className="font-semibold mb-2">Consolidated references</h2>
+      <p className="text-xs text-slate-500 mb-3">
+        One reference per sensor model. Click to view; admins can edit the body inline.
+      </p>
+      {(docs.data ?? []).length === 0 && (
+        <div className="text-sm text-slate-500">None yet. They&rsquo;re created automatically when you approve the first submission for a sensor.</div>
+      )}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+        {(docs.data ?? []).map((d: any) => (
+          <Link key={d.id} to={`/consolidated/${d.id}`} className="card-tight hover:border-brand-700 transition flex items-center justify-between">
+            <div className="min-w-0">
+              <div className="font-medium text-slate-900 truncate">
+                {d.sensor_models?.sensor_makes?.name} {d.sensor_models?.model_no}
+              </div>
+              <div className="text-xs text-slate-500">
+                {d.sensor_models?.sensor_categories?.name} · updated {new Date(d.last_updated_at).toLocaleDateString()}
+              </div>
+            </div>
+            <span className="text-slate-300">→</span>
+          </Link>
+        ))}
+      </div>
+    </section>
   );
 }
 

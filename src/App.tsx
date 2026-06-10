@@ -12,6 +12,7 @@ import Viewer from './pages/Viewer';
 import MySubmissions from './pages/MySubmissions';
 import { ReviewQueueList, ReviewQueueDetail } from './pages/ReviewQueue';
 import ConsolidatedViewer from './pages/ConsolidatedViewer';
+import ConsolidatedEditor from './pages/ConsolidatedEditor';
 import { useAuth } from './lib/auth';
 
 function Protected({ children }: { children: JSX.Element }) {
@@ -38,6 +39,7 @@ export default function App() {
         <Route path="review" element={<ReviewQueueList />} />
         <Route path="review/:id" element={<ReviewQueueDetail />} />
         <Route path="consolidated/:id" element={<ConsolidatedViewer />} />
+        <Route path="consolidated/:id/edit" element={<ConsolidatedEditor />} />
         <Route path="admin" element={<Admin />} />
         <Route path="*" element={<div className="p-6">Not found.</div>} />
       </Route>
