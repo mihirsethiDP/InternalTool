@@ -4,10 +4,27 @@ import { Link } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useAuth, isAdmin } from '../lib/auth';
 import PageHeader from '../components/PageHeader';
+import { ReviewQueueList } from './ReviewQueue';
+
+type AdminTab = 'review' | 'consolidated' | 'users' | 'types';
 
 export default function Admin() {
   const { profile } = useAuth();
   const qc = useQueryClient();
+  const [tab, setTab] = useState<AdminTab>('review');
+
+  // Pending count for the tab badge (works for admins only, RLS allows it)
+  const pending = useQuery({
+    queryKey: ['admin-pending-count'],
+    queryFn: async () => {
+      const { count } = await supabase
+        .from('document_submissions')
+        .select('id', { count: 'exact', head: true })
+        .eq('status', 'pending');
+      return count ?? 0;
+    },
+    refetchInterval: 30_000,
+  });
 
   if (!isAdmin(profile)) {
     return <div className="card text-sm">Admin only.</div>;
@@ -15,11 +32,45 @@ export default function Admin() {
 
   return (
     <div className="space-y-6">
-      <PageHeader eyebrow="Settings" icon="⚙️" title="Admin" subtitle="Manage users, consolidated docs, and document types." />
-      <ConsolidatedDocsPanel />
-      <UsersPanel onChanged={() => qc.invalidateQueries({ queryKey: ['admin-users'] })} />
-      <TypesPanel />
+      <PageHeader
+        eyebrow="Settings"
+        icon="⚙️"
+        title="Admin"
+        subtitle="Review submissions, manage consolidated references, users, and document taxonomy."
+      />
+
+      {/* Tabs */}
+      <div className="border-b border-slate-200 flex gap-1 overflow-x-auto">
+        <Tab name="review" active={tab} onClick={setTab} badge={pending.data ?? 0}>Review queue</Tab>
+        <Tab name="consolidated" active={tab} onClick={setTab}>Consolidated references</Tab>
+        <Tab name="users" active={tab} onClick={setTab}>Users</Tab>
+        <Tab name="types" active={tab} onClick={setTab}>Document types</Tab>
+      </div>
+
+      {tab === 'review' && <ReviewQueueList />}
+      {tab === 'consolidated' && <ConsolidatedDocsPanel />}
+      {tab === 'users' && <UsersPanel onChanged={() => qc.invalidateQueries({ queryKey: ['admin-users'] })} />}
+      {tab === 'types' && <TypesPanel />}
     </div>
+  );
+}
+
+function Tab({ name, active, onClick, badge, children }: { name: AdminTab; active: AdminTab; onClick: (n: AdminTab) => void; badge?: number; children: React.ReactNode; }) {
+  const isActive = active === name;
+  return (
+    <button
+      onClick={() => onClick(name)}
+      className={`px-4 py-2.5 text-sm font-medium whitespace-nowrap border-b-2 transition flex items-center gap-2 ${
+        isActive ? 'border-brand-700 text-brand-700' : 'border-transparent text-slate-600 hover:text-brand-700'
+      }`}
+    >
+      {children}
+      {badge != null && badge > 0 && (
+        <span className={`rounded-full text-[10px] font-bold px-1.5 min-w-[18px] h-[18px] flex items-center justify-center ${
+          isActive ? 'bg-brand-700 text-white' : 'bg-amber-100 text-amber-800'
+        }`}>{badge > 99 ? '99+' : badge}</span>
+      )}
+    </button>
   );
 }
 
@@ -32,13 +83,14 @@ function ConsolidatedDocsPanel() {
       .order('last_updated_at', { ascending: false })).data ?? [],
   });
   return (
-    <section className="card">
-      <h2 className="font-semibold mb-2">Consolidated references</h2>
-      <p className="text-xs text-slate-500 mb-3">
+    <div className="space-y-3">
+      <p className="text-sm text-slate-500">
         One reference per sensor model. Click to view; admins can edit the body inline.
       </p>
       {(docs.data ?? []).length === 0 && (
-        <div className="text-sm text-slate-500">None yet. They&rsquo;re created automatically when you approve the first submission for a sensor.</div>
+        <div className="card text-sm text-slate-500 text-center">
+          None yet. They&rsquo;re created automatically when you approve the first submission for a sensor.
+        </div>
       )}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
         {(docs.data ?? []).map((d: any) => (
@@ -55,7 +107,7 @@ function ConsolidatedDocsPanel() {
           </Link>
         ))}
       </div>
-    </section>
+    </div>
   );
 }
 
@@ -64,15 +116,12 @@ function UsersPanel({ onChanged }: { onChanged: () => void }) {
     queryKey: ['admin-users'],
     queryFn: async () => (await supabase.from('profiles').select('*').order('created_at', { ascending: false })).data ?? [],
   });
-
   async function setRole(id: string, role: string) {
     await supabase.from('profiles').update({ role }).eq('id', id);
     onChanged();
   }
-
   return (
-    <section className="card">
-      <h2 className="font-semibold mb-2">Users & permissions</h2>
+    <div className="card">
       <p className="text-xs text-slate-500 mb-3">Anyone who has signed in appears here. Change a user&rsquo;s role to grant upload or admin rights.</p>
       <table className="w-full text-sm">
         <thead className="text-left text-xs uppercase text-slate-500"><tr><th>Email</th><th>Role</th><th></th></tr></thead>
@@ -90,40 +139,7 @@ function UsersPanel({ onChanged }: { onChanged: () => void }) {
           ))}
         </tbody>
       </table>
-    </section>
-  );
-}
-
-function PlantsPanel() {
-  const qc = useQueryClient();
-  const [name, setName] = useState('');
-  const [location, setLocation] = useState('');
-  const plants = useQuery({ queryKey: ['admin-plants'], queryFn: async () => (await supabase.from('plants').select('*').order('name')).data ?? [] });
-
-  async function add(e: React.FormEvent) {
-    e.preventDefault();
-    if (!name) return;
-    await supabase.from('plants').insert({ name, location: location || null });
-    setName(''); setLocation('');
-    qc.invalidateQueries({ queryKey: ['admin-plants'] });
-    qc.invalidateQueries({ queryKey: ['plants'] });
-    qc.invalidateQueries({ queryKey: ['plant-list'] });
-  }
-
-  return (
-    <section className="card">
-      <h2 className="font-semibold mb-2">Plants</h2>
-      <form onSubmit={add} className="flex gap-2 mb-3">
-        <input className="input" placeholder="Plant name (e.g. STP Aurangabad)" value={name} onChange={(e) => setName(e.target.value)} />
-        <input className="input" placeholder="Location" value={location} onChange={(e) => setLocation(e.target.value)} />
-        <button className="btn-primary">Add</button>
-      </form>
-      <ul className="text-sm divide-y divide-slate-100">
-        {(plants.data ?? []).map((p: any) => (
-          <li key={p.id} className="py-2 flex justify-between"><span>{p.name}</span><span className="text-slate-500 text-xs">{p.location}</span></li>
-        ))}
-      </ul>
-    </section>
+    </div>
   );
 }
 
@@ -131,8 +147,10 @@ function TypesPanel() {
   const qc = useQueryClient();
   const [label, setLabel] = useState('');
   const [key, setKey] = useState('');
-  const types = useQuery({ queryKey: ['admin-types'], queryFn: async () => (await supabase.from('document_types').select('*').order('sort_order')).data ?? [] });
-
+  const types = useQuery({
+    queryKey: ['admin-types'],
+    queryFn: async () => (await supabase.from('document_types').select('*').order('sort_order')).data ?? [],
+  });
   async function add(e: React.FormEvent) {
     e.preventDefault();
     if (!label || !key) return;
@@ -142,12 +160,10 @@ function TypesPanel() {
     qc.invalidateQueries({ queryKey: ['admin-types'] });
     qc.invalidateQueries({ queryKey: ['types'] });
   }
-
   return (
-    <section className="card">
-      <h2 className="font-semibold mb-2">Document types</h2>
-      <form onSubmit={add} className="flex gap-2 mb-3">
-        <input className="input" placeholder='Label (e.g. "Commissioning Report")' value={label} onChange={(e) => setLabel(e.target.value)} />
+    <div className="card">
+      <form onSubmit={add} className="flex gap-2 mb-3 flex-wrap">
+        <input className="input flex-1 min-w-48" placeholder='Label (e.g. "Commissioning Report")' value={label} onChange={(e) => setLabel(e.target.value)} />
         <input className="input md:w-48" placeholder="key (snake_case)" value={key} onChange={(e) => setKey(e.target.value.replace(/[^a-z0-9_]/g, ''))} />
         <button className="btn-primary">Add</button>
       </form>
@@ -156,6 +172,6 @@ function TypesPanel() {
           <li key={t.id} className="py-1"><span className="badge-blue">{t.label}</span> <span className="text-xs text-slate-400">{t.key}</span></li>
         ))}
       </ul>
-    </section>
+    </div>
   );
 }

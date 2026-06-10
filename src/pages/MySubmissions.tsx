@@ -52,9 +52,9 @@ export default function MySubmissions() {
   return (
     <div className="space-y-6">
       <PageHeader
-        eyebrow="Workflow"
+        eyebrow="Uploads"
         icon="📝"
-        title="My submissions"
+        title="My uploads"
         subtitle="Documents you've uploaded for admin review."
         stats={[
           { label: 'Pending', value: counts.data?.pending ?? 0 },

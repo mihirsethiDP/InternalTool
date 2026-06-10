@@ -48,19 +48,10 @@ export function ReviewQueueList() {
   }
 
   return (
-    <div className="space-y-6">
-      <PageHeader
-        eyebrow="Workflow"
-        icon="✅"
-        title="Review queue"
-        subtitle="Submissions from uploaders awaiting your approval."
-        stats={[
-          { label: 'Pending', value: counts.data?.pending ?? 0 },
-          { label: 'Approved', value: counts.data?.approved ?? 0 },
-          { label: 'Rejected', value: counts.data?.rejected ?? 0 },
-        ]}
-      />
-
+    <div className="space-y-4">
+      <div className="text-sm text-slate-500">
+        Pending {counts.data?.pending ?? 0} · Approved {counts.data?.approved ?? 0} · Rejected {counts.data?.rejected ?? 0}
+      </div>
       <div className="flex items-center gap-2 flex-wrap">
         <span className="muted text-xs mr-1 self-center">Show:</span>
         {(['pending', 'approved', 'rejected', 'all'] as const).map((s) => (
