@@ -1,8 +1,10 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useAuth, canUpload, isAdmin } from '../lib/auth';
+import { useState } from 'react';
 import { UploadProvider, useUpload } from './UploadModal';
 import NotificationBell from './NotificationBell';
+import ChatDrawer from './ChatDrawer';
 
 const navCls = ({ isActive }: { isActive: boolean }) =>
   `px-3 py-2 rounded-md text-sm font-medium transition ${
@@ -13,6 +15,7 @@ function Inner() {
   const { profile, email } = useAuth();
   const nav = useNavigate();
   const upload = useUpload();
+  const [chatOpen, setChatOpen] = useState(false);
 
   async function signOut() { await supabase.auth.signOut(); nav('/login'); }
   const initials = (email || 'U').split('@')[0].slice(0, 2).toUpperCase();
@@ -61,6 +64,17 @@ function Inner() {
       <footer className="border-t border-slate-200 bg-white text-xs text-slate-500 py-4 text-center">
         DigitalPaani · Internal Document Hub
       </footer>
+
+      {/* Floating chat launcher */}
+      <button
+        onClick={() => setChatOpen(true)}
+        title="Ask the document hub"
+        className="fixed bottom-6 right-6 z-40 bg-gradient-to-br from-brand-700 to-brand-900 text-white rounded-full w-14 h-14 shadow-xl hover:shadow-2xl hover:scale-105 transition flex items-center justify-center"
+      >
+        <span className="text-2xl">💬</span>
+      </button>
+
+      <ChatDrawer open={chatOpen} onClose={() => setChatOpen(false)} />
     </div>
   );
 }
