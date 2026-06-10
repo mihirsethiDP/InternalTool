@@ -9,6 +9,7 @@ import SensorModelDetail from './pages/SensorModelDetail';
 import Admin from './pages/Admin';
 import Login from './pages/Login';
 import Viewer from './pages/Viewer';
+import MySubmissions from './pages/MySubmissions';
 import { useAuth } from './lib/auth';
 
 function Protected({ children }: { children: JSX.Element }) {
@@ -31,6 +32,7 @@ export default function App() {
         <Route path="sensors/:id" element={<SensorModelDetail />} />
         <Route path="upload" element={<Navigate to="/" replace />} />
         <Route path="view/:id" element={<Viewer />} />
+        <Route path="my-submissions" element={<MySubmissions />} />
         <Route path="admin" element={<Admin />} />
         <Route path="*" element={<div className="p-6">Not found.</div>} />
       </Route>

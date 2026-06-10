@@ -81,6 +81,7 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
 
   const recentTypeIds = useMemo(() => distinct((recent.data ?? []).map((d: any) => d.type_id)).slice(0, 3), [recent.data]);
   const recentMakeIds = useMemo(() => distinct((recent.data ?? []).map((d: any) => d.sensor_models?.make_id)).slice(0, 3), [recent.data]);
+  const selectedType = types.data?.find((t: any) => t.id === typeId);
 
   useEffect(() => {
     if (defaults.type_key && types.data) {
@@ -129,44 +130,52 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
     if (up.error) { setBusy(false); setError('Upload failed: ' + up.error.message); return; }
     setProgress(40); setStatus('Creating document record…');
 
-    const insert = await supabase.from('documents').insert({
-      title, type_id: typeId,
-      sensor_model_id: sensorModelId,
-      vendor_url: vendorUrl || null,
-      storage_path: storagePath, size_bytes: file.size,
-    }).select('id').single();
-    if (insert.error || !insert.data) { setBusy(false); setError('DB insert failed: ' + (insert.error?.message ?? '?')); return; }
-    const documentId = insert.data.id;
-    setProgress(55);
-
+    // Extract PDF text first (so we can store it on the submission for the checker to edit)
+    let extractedText = '';
+    let pageCount: number | null = null;
     if (/\.pdf$/i.test(file.name) || /pdf/i.test(file.type)) {
       try {
         setStatus('Extracting PDF text…');
         const pages = await extractPdfText(file);
-        await supabase.from('documents').update({ page_count: pages.length }).eq('id', documentId);
-        setProgress(75); setStatus('Indexing for search…');
-        const chunks = pages.flatMap((p) => chunkPage(p.text, p.page));
-        for (let i = 0; i < chunks.length; i += 50) {
-          const batch = chunks.slice(i, i + 50).map((c) => ({ document_id: documentId, page_number: c.page, chunk_text: c.text }));
-          const { error } = await supabase.from('document_chunks').insert(batch);
-          if (error) { console.warn(error); break; }
-          setProgress(75 + Math.floor((i / chunks.length) * 20));
-        }
+        pageCount = pages.length;
+        extractedText = pages.map((p) => `[Page ${p.page}]\n${p.text}`).join('\n\n');
       } catch (e: any) {
         console.warn('pdf extract failed', e);
-        setStatus('Saved, but PDF text extraction failed; document is still findable by metadata.');
       }
-    } else {
-      await supabase.from('document_chunks').insert({ document_id: documentId, page_number: null, chunk_text: title });
     }
+    setProgress(55);
 
-    setProgress(100); setStatus('✅ Uploaded.');
-    qc.invalidateQueries({ queryKey: ['recent-docs'] });
-    qc.invalidateQueries({ queryKey: ['recent-meta'] });
-    qc.invalidateQueries({ queryKey: ['browse'] });
-    qc.invalidateQueries({ queryKey: ['sensor-docs'] });
+    // Map document_type.key → section name used by consolidated docs
+    const typeKey = selectedType?.key;
+    const targetSection =
+      typeKey === 'sensor_manual' ? 'manual' :
+      typeKey === 'installation_guide' ? 'install' :
+      typeKey === 'troubleshooting' ? 'troubleshooting' :
+      typeKey === 'datasheet' ? 'datasheet' : 'other';
+
+    setStatus('Submitting for review…');
+    const insert = await supabase.from('document_submissions').insert({
+      title,
+      type_id: typeId,
+      sensor_model_id: sensorModelId,
+      storage_path: storagePath,
+      vendor_url: vendorUrl || null,
+      size_bytes: file.size,
+      page_count: pageCount,
+      extracted_text: extractedText || null,
+      target_section: targetSection,
+    }).select('id').single();
+    if (insert.error || !insert.data) {
+      setBusy(false);
+      setError('Submission failed: ' + (insert.error?.message ?? '?'));
+      return;
+    }
+    setProgress(100);
+    setStatus('✅ Submitted for review. You\'ll be notified when an admin approves or rejects it.');
+    qc.invalidateQueries({ queryKey: ['my-submissions'] });
+    qc.invalidateQueries({ queryKey: ['pending-submissions'] });
     setBusy(false);
-    setTimeout(onClose, 700);
+    setTimeout(onClose, 1200);
   }
 
   function labelOf(coll: any[] | undefined, id: string) { return coll?.find((x: any) => x.id === id); }
@@ -177,10 +186,10 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
         <div className="px-7 pt-7 pb-5 border-b border-slate-100 flex items-start justify-between sticky top-0 bg-white rounded-t-2xl z-10">
           <div>
             <div className="inline-flex items-center gap-2 bg-brand-50 text-brand-700 rounded-full px-2.5 py-0.5 text-xs font-semibold tracking-wide mb-2">
-              ⬆ New document
+              ⬆ New submission
             </div>
-            <h2 className="text-2xl font-bold tracking-tight">Upload a document</h2>
-            <p className="text-sm text-slate-500 mt-1">Sensor manuals, troubleshooting steps, datasheets, installation guides. PDF contents are fully text-indexed.</p>
+            <h2 className="text-2xl font-bold tracking-tight">Submit a document for review</h2>
+            <p className="text-sm text-slate-500 mt-1">Your submission goes to an admin for review. Once approved, it&rsquo;s merged into the sensor&rsquo;s consolidated reference.</p>
           </div>
           <button type="button" onClick={onClose} className="text-slate-400 hover:text-slate-700 text-2xl leading-none -mt-1">×</button>
         </div>
@@ -305,7 +314,7 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
               disabled={busy}
               className="group relative inline-flex items-center gap-2 rounded-xl bg-gradient-to-br from-brand-700 to-brand-900 text-white px-5 py-2.5 text-sm font-semibold shadow-sm hover:shadow-md hover:from-brand-600 transition disabled:opacity-60"
             >
-              {busy ? (<><span className="animate-spin">⟳</span> Uploading…</>) : (<>⬆ Upload document</>)}
+              {busy ? (<><span className="animate-spin">⟳</span> Submitting…</>) : (<>⬆ Submit for review</>)}
             </button>
           </div>
 

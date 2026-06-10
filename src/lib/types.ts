@@ -87,6 +87,29 @@ export interface DocumentRow {
   size_bytes: number | null;
 }
 
+export type SubmissionStatus = 'pending' | 'approved' | 'rejected';
+export type SubmissionSection = 'manual' | 'install' | 'troubleshooting' | 'datasheet' | 'other';
+
+export interface DocumentSubmission {
+  id: string;
+  title: string;
+  type_id: string | null;
+  sensor_model_id: string | null;
+  storage_path: string | null;
+  vendor_url: string | null;
+  size_bytes: number | null;
+  page_count: number | null;
+  extracted_text: string | null;
+  uploaded_by: string;
+  uploaded_at: string;
+  status: SubmissionStatus;
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+  reviewer_notes: string | null;
+  decision: 'replace_section' | 'append_section' | 'rejected' | null;
+  target_section: SubmissionSection | null;
+}
+
 export interface SearchHit {
   document_id: string;
   document_title: string;
