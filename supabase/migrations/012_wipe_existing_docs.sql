@@ -25,8 +25,13 @@ delete from public.document_submissions;
 delete from public.document_chunks;
 delete from public.documents;
 
--- 2. Files in Storage
-delete from storage.objects where bucket_id = 'documents';
+-- 2. Storage objects are NOT deleted from SQL anymore.
+--    Supabase blocks raw DELETE on storage.objects (see protect_delete guard).
+--    Clear the bucket from one of:
+--      (a) Supabase Dashboard → Storage → documents → select all → Delete
+--      (b) scripts/wipe-storage.mjs (uses service-role key from .env.local)
+--    The orphaned files are harmless; nothing in the app references them once
+--    `documents` rows are gone above.
 
 commit;
 
@@ -36,6 +41,5 @@ union all select 'document_chunks', count(*) from public.document_chunks
 union all select 'document_submissions', count(*) from public.document_submissions
 union all select 'consolidated_docs', count(*) from public.consolidated_docs
 union all select 'consolidated_doc_chunks', count(*) from public.consolidated_doc_chunks
-union all select 'storage objects (documents bucket)', count(*) from storage.objects where bucket_id='documents'
 union all select 'sensor models (kept)', count(*) from public.sensor_models
 union all select 'sensor makes (kept)', count(*) from public.sensor_makes;
