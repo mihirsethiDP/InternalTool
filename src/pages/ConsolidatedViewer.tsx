@@ -6,12 +6,11 @@ import {
   ArrowLeft, PencilLine, FileText, BookOpen, Wrench, ClipboardList,
   FileSpreadsheet, Layers, ChevronUp, ChevronDown, ExternalLink,
   FlaskConical, Droplets, Package, CalendarClock, Cable, ShieldAlert,
-  CheckCircle2, Circle, FileStack, BookOpenText, Globe,
+  CheckCircle2, Circle, FileStack, BookOpenText,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth, isAdmin } from '../lib/auth';
 import { SECTION_LABEL, SECTION_ORDER, parseSections } from '../lib/consolidated';
-import { LANGUAGES } from '../i18n';
 import type { SubmissionSection } from '../lib/types';
 
 export const SECTION_ICON: Record<SubmissionSection, React.ReactNode> = {
@@ -40,8 +39,7 @@ export default function ConsolidatedViewer() {
   const [params] = useSearchParams();
   const nav = useNavigate();
   const { profile } = useAuth();
-  const { t, i18n } = useTranslation();
-  const [docLang, setDocLang] = useState<string>(i18n.language || 'en');
+  const { t } = useTranslation();
   const initialQuery = params.get('q') ?? '';
   // If the user arrived from search with a query, open the consolidated view
   // directly so the highlight lands. Otherwise default to the documents view.
@@ -82,28 +80,10 @@ export default function ConsolidatedViewer() {
     enabled: Boolean(cdoc.data?.sensor_model_id),
   });
 
-  // Cached translation for the chosen language (English needs none)
-  const translation = useQuery({
-    queryKey: ['doc-translation', id, docLang],
-    queryFn: async () => {
-      if (docLang === 'en') return null;
-      const { data } = await supabase
-        .from('consolidated_doc_translations')
-        .select('content_markdown')
-        .eq('consolidated_doc_id', id)
-        .eq('lang', docLang)
-        .maybeSingle();
-      return data;
-    },
-    enabled: Boolean(id) && docLang !== 'en',
-  });
-
-  const translationMissing = docLang !== 'en' && !translation.isLoading && !translation.data;
-  const effectiveMarkdown = (docLang !== 'en' && translation.data?.content_markdown)
-    ? translation.data.content_markdown
-    : cdoc.data?.content_markdown;
-
-  const sections = useMemo(() => parseSections(effectiveMarkdown), [effectiveMarkdown]);
+  // NOTE: document-content translation (Layer 2) is scaffolded but dormant:
+  // migration 018 + scripts/translate-docs.mjs. When enabled, this is where
+  // the cached translation would be loaded based on a language picker.
+  const sections = useMemo(() => parseSections(cdoc.data?.content_markdown), [cdoc.data?.content_markdown]);
   const presentSections = SECTION_ORDER.filter((s) => sections[s]);
 
   const sourcesBySection = useMemo(() => {
@@ -267,17 +247,6 @@ export default function ConsolidatedViewer() {
 
           {mode === 'consolidated' && (
             <div className="flex items-center gap-2">
-              <div className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 pl-2 pr-1 py-0.5">
-                <Globe size={14} className="text-slate-400" />
-                <select
-                  value={docLang}
-                  onChange={(e) => setDocLang(e.target.value)}
-                  className="text-sm py-1 outline-none bg-transparent"
-                  title={t('viewer.language')}
-                >
-                  {LANGUAGES.map((l) => <option key={l.code} value={l.code}>{l.native}</option>)}
-                </select>
-              </div>
               <input
                 className="rounded-md border border-slate-300 px-3 py-1.5 text-sm w-48 focus:border-brand-700 focus:ring-2 focus:ring-brand-700/15 outline-none"
                 value={highlight}
@@ -358,11 +327,6 @@ export default function ConsolidatedViewer() {
           {/* CONSOLIDATED MODE */}
           {mode === 'consolidated' && (
             <>
-              {translationMissing && (
-                <div className="rounded-lg bg-amber-50 border border-amber-200 text-amber-900 text-sm px-4 py-2.5">
-                  {t('viewer.translationMissing')}
-                </div>
-              )}
               {presentSections.length === 0 && (
                 <div className="card text-sm text-slate-500 text-center py-10">
                   {t('viewer.noConsolidated')}
