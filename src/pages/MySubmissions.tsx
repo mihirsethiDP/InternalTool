@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
+import { FileText } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../lib/auth';
 import PageHeader from '../components/PageHeader';
@@ -87,7 +88,7 @@ export default function MySubmissions() {
         {(submissions.data ?? []).map((s: any) => (
           <div key={s.id} className="card-tight">
             <div className="flex items-start gap-3 flex-wrap">
-              <div className="bg-brand-50 text-brand-700 rounded-lg w-10 h-10 flex items-center justify-center shrink-0">📄</div>
+              <div className="bg-brand-50 text-brand-700 rounded-md w-9 h-9 flex items-center justify-center shrink-0"><FileText size={16} strokeWidth={2} /></div>
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2 flex-wrap">
                   <div className="font-semibold text-slate-900 truncate">{s.title}</div>
@@ -96,7 +97,7 @@ export default function MySubmissions() {
                 </div>
                 <div className="text-xs text-slate-500 mt-0.5">
                   {s.sensor_models?.sensor_makes?.name && (
-                    <>🔧 {s.sensor_models.sensor_makes.name} {s.sensor_models.model_no} · </>
+                    <>{s.sensor_models.sensor_makes.name} {s.sensor_models.model_no} · </>
                   )}
                   Submitted {new Date(s.uploaded_at).toLocaleString()}
                 </div>

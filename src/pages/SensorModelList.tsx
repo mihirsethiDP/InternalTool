@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { useMemo, useState } from 'react';
+import { Cpu } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth, canUpload } from '../lib/auth';
 import PageHeader from '../components/PageHeader';
@@ -122,7 +123,7 @@ export default function SensorModelList() {
             {items.map((m: any) => (
               <Link to={`/sensors/${m.id}`} key={m.id} className="card-tight hover:border-brand-700 hover:shadow-md transition group">
                 <div className="flex items-start gap-3">
-                  <div className="bg-brand-50 text-brand-700 rounded-lg w-10 h-10 flex items-center justify-center shrink-0 group-hover:bg-brand-700 group-hover:text-white transition">🔧</div>
+                  <div className="bg-brand-50 text-brand-700 rounded-md w-9 h-9 flex items-center justify-center shrink-0 group-hover:bg-brand-700 group-hover:text-white transition"><Cpu size={16} strokeWidth={2} /></div>
                   <div className="min-w-0 flex-1">
                     <div className="text-xs text-slate-500">{m.sensor_makes?.name ?? '—'}</div>
                     <div className="font-semibold text-slate-900 truncate">{m.model_no || m.name || 'Untitled'}</div>

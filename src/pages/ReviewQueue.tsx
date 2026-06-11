@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
+import { FileText } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth, isAdmin } from '../lib/auth';
 import PageHeader from '../components/PageHeader';
@@ -67,7 +68,7 @@ export function ReviewQueueList() {
       <div className="space-y-3">
         {(subs.data ?? []).map((s: any) => (
           <Link key={s.id} to={`/review/${s.id}`} className="card-tight flex items-start gap-3 hover:border-brand-700 transition">
-            <div className="bg-brand-50 text-brand-700 rounded-lg w-10 h-10 flex items-center justify-center shrink-0">📄</div>
+            <div className="bg-brand-50 text-brand-700 rounded-md w-9 h-9 flex items-center justify-center shrink-0"><FileText size={16} strokeWidth={2} /></div>
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2 flex-wrap">
                 <div className="font-semibold text-slate-900 truncate">{s.title}</div>
@@ -76,7 +77,7 @@ export function ReviewQueueList() {
               </div>
               <div className="text-xs text-slate-500 mt-0.5">
                 {s.sensor_models?.sensor_makes?.name && (
-                  <>🔧 {s.sensor_models.sensor_makes.name} {s.sensor_models.model_no} · </>
+                  <>{s.sensor_models.sensor_makes.name} {s.sensor_models.model_no} · </>
                 )}
                 {new Date(s.uploaded_at).toLocaleString()}
               </div>

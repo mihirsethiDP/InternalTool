@@ -1,6 +1,7 @@
 import { useNavigate } from 'react-router-dom';
 import type { SearchHit } from '../lib/types';
 import { useState } from 'react';
+import { FileText } from 'lucide-react';
 import { openDocument } from '../lib/openDoc';
 
 export function DocCard({ hit, query }: { hit: SearchHit; query?: string }) {
@@ -14,9 +15,11 @@ export function DocCard({ hit, query }: { hit: SearchHit; query?: string }) {
   }
 
   return (
-    <div className="card hover:shadow-md transition cursor-pointer" onClick={open}>
+    <div className="card hover:border-brand-700 hover:shadow-sm transition cursor-pointer" onClick={open}>
       <div className="flex items-start gap-3">
-        <div className="text-2xl">📄</div>
+        <div className="bg-brand-50 text-brand-700 rounded-md w-9 h-9 flex items-center justify-center shrink-0">
+          <FileText size={16} strokeWidth={2} />
+        </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 flex-wrap">
             <h3 className="font-semibold text-slate-900 truncate">{hit.document_title}</h3>
@@ -24,10 +27,10 @@ export function DocCard({ hit, query }: { hit: SearchHit; query?: string }) {
             {hit.page_number != null && <span className="badge">p.{hit.page_number}</span>}
           </div>
           <div className="text-xs text-slate-500 mt-0.5 flex gap-3 flex-wrap">
-            {hit.plant_name && <span>🏭 {hit.plant_name}</span>}
-            {hit.equipment_name && <span>⚙️ {hit.equipment_name}</span>}
+            {hit.plant_name && <span>{hit.plant_name}</span>}
+            {hit.equipment_name && <span>· {hit.equipment_name}</span>}
             {hit.sensor_make && hit.sensor_model_no && (
-              <span>🔧 {hit.sensor_make} {hit.sensor_model_no}</span>
+              <span>{hit.sensor_make} {hit.sensor_model_no}</span>
             )}
           </div>
           {hit.snippet && (

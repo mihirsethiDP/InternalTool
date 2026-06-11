@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { Bell, Inbox, CheckCircle2, XCircle } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../lib/auth';
 
@@ -93,12 +94,12 @@ export default function NotificationBell() {
     <div ref={dropdownRef} className="relative">
       <button
         onClick={() => setOpen((o) => !o)}
-        className="relative rounded-full bg-white/10 hover:bg-white/20 transition w-9 h-9 flex items-center justify-center text-white"
+        className="relative rounded-md hover:bg-white/10 transition w-9 h-9 flex items-center justify-center text-white"
         title="Notifications"
       >
-        🔔
+        <Bell size={18} strokeWidth={2} />
         {unread > 0 && (
-          <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1">
+          <span className="absolute -top-0.5 -right-0.5 bg-red-500 text-white text-[10px] font-semibold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1 ring-2 ring-brand-700">
             {unread > 99 ? '99+' : unread}
           </span>
         )}
@@ -126,8 +127,8 @@ export default function NotificationBell() {
                       n.read_at ? 'text-slate-600' : 'bg-brand-50/40'
                     }`}
                   >
-                    <div className="flex items-start gap-2">
-                      <span className="shrink-0 text-base leading-none mt-0.5">{iconFor(n.kind)}</span>
+                    <div className="flex items-start gap-2.5">
+                      <span className="shrink-0 mt-0.5">{iconFor(n.kind)}</span>
                       <div className="min-w-0 flex-1">
                         <div className={`text-sm ${n.read_at ? 'text-slate-700' : 'font-medium text-slate-900'}`}>
                           {n.message}
@@ -148,9 +149,9 @@ export default function NotificationBell() {
 }
 
 function iconFor(kind: string) {
-  if (kind === 'submission_created') return '📥';
-  if (kind === 'submission_approved') return '✅';
-  return '❌';
+  if (kind === 'submission_created') return <Inbox size={16} className="text-brand-700" />;
+  if (kind === 'submission_approved') return <CheckCircle2 size={16} className="text-emerald-600" />;
+  return <XCircle size={16} className="text-red-600" />;
 }
 
 function timeAgo(iso: string) {

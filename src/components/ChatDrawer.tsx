@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { X, Send, ArrowRight } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { SECTION_LABEL } from '../lib/consolidated';
 import type { SubmissionSection } from '../lib/types';
@@ -69,12 +70,14 @@ export default function ChatDrawer({ open, onClose }: { open: boolean; onClose: 
       <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" onClick={onClose} />
       <div className="relative bg-white w-full max-w-md h-full flex flex-col shadow-2xl border-l border-slate-200 animate-[slideIn_180ms_ease-out]">
         {/* Header */}
-        <div className="bg-gradient-to-br from-brand-700 to-brand-900 text-white px-5 py-4 flex items-center justify-between">
+        <div className="bg-brand-700 text-white px-5 py-4 flex items-center justify-between">
           <div>
-            <div className="text-xs uppercase tracking-wider text-white/70">Assistant</div>
-            <div className="text-lg font-bold">Ask the document hub</div>
+            <div className="text-[11px] uppercase tracking-wider text-white/60 font-medium">Assistant</div>
+            <div className="text-base font-semibold tracking-tight mt-0.5">Ask the document hub</div>
           </div>
-          <button onClick={onClose} className="text-white/80 hover:text-white text-2xl leading-none">×</button>
+          <button onClick={onClose} aria-label="Close" className="rounded-md hover:bg-white/10 w-8 h-8 flex items-center justify-center transition">
+            <X size={18} />
+          </button>
         </div>
 
         {/* Messages */}
@@ -83,10 +86,10 @@ export default function ChatDrawer({ open, onClose }: { open: boolean; onClose: 
             <div className="space-y-3">
               <div className="card-tight bg-white">
                 <div className="text-sm text-slate-700 leading-relaxed">
-                  👋 Ask anything about your sensor docs. I'll search the consolidated references and surface the most relevant sections.
+                  Ask anything about your sensor docs. I&rsquo;ll search the consolidated references and surface the most relevant sections.
                 </div>
                 <div className="text-xs text-slate-500 mt-2">
-                  Right now I'm running keyword search. A smarter, AI-synthesised answer is coming once your team enables it.
+                  Currently using keyword search. A synthesised AI answer is coming once your team enables it.
                 </div>
               </div>
               <div className="text-xs text-slate-500 mt-3 mb-1">Try one:</div>
@@ -123,13 +126,14 @@ export default function ChatDrawer({ open, onClose }: { open: boolean; onClose: 
                     <button key={h.document_id} onClick={() => openHitWith(t.query, h.document_id)}
                             className="card-tight bg-white hover:border-brand-700 transition text-left w-full">
                       <div className="flex items-center gap-2 flex-wrap mb-1">
-                        <span className="text-base">📘</span>
                         <span className="font-semibold text-slate-900 truncate">{h.document_title.trim()}</span>
                         <span className="badge-blue">{SECTION_LABEL[h.section]}</span>
                       </div>
                       <div className="text-xs text-slate-600 leading-relaxed line-clamp-3"
                            dangerouslySetInnerHTML={{ __html: hl(h.snippet, t.query) }} />
-                      <div className="text-xs text-brand-700 font-medium mt-1.5">Open →</div>
+                      <div className="inline-flex items-center gap-1 text-xs text-brand-700 font-medium mt-1.5">
+                        Open <ArrowRight size={12} strokeWidth={2.25} />
+                      </div>
                     </button>
                   ))}
                 </>
@@ -148,9 +152,9 @@ export default function ChatDrawer({ open, onClose }: { open: boolean; onClose: 
               placeholder="Ask a question about a sensor…"
               className="flex-1 rounded-xl border border-slate-300 px-3 py-2.5 text-sm focus:border-brand-700 focus:ring-2 focus:ring-brand-700/20 outline-none"
             />
-            <button type="submit" disabled={!input.trim()}
-                    className="rounded-xl bg-gradient-to-br from-brand-700 to-brand-900 text-white px-4 py-2.5 text-sm font-semibold disabled:opacity-50">
-              Send
+            <button type="submit" disabled={!input.trim()} aria-label="Send"
+                    className="rounded-xl bg-brand-700 hover:bg-brand-800 text-white w-10 h-10 flex items-center justify-center disabled:opacity-50 transition">
+              <Send size={16} />
             </button>
           </form>
           {turns.length > 0 && (

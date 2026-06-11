@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { useState } from 'react';
+import { Factory } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth, isAdmin } from '../lib/auth';
 import PageHeader from '../components/PageHeader';
@@ -38,7 +39,7 @@ export default function PlantList() {
         {(data ?? []).map((p: any) => (
           <Link to={`/plants/${p.id}`} key={p.id} className="card hover:border-brand-700 hover:shadow-md transition group">
             <div className="flex items-start gap-3">
-              <div className="bg-brand-50 text-brand-700 group-hover:bg-brand-700 group-hover:text-white transition rounded-lg w-11 h-11 flex items-center justify-center shrink-0 text-lg">🏭</div>
+              <div className="bg-brand-50 text-brand-700 group-hover:bg-brand-700 group-hover:text-white transition rounded-md w-10 h-10 flex items-center justify-center shrink-0"><Factory size={16} strokeWidth={2} /></div>
               <div className="min-w-0 flex-1">
                 <div className="font-semibold text-slate-900 truncate">{p.name}</div>
                 <div className="muted truncate">{p.location || 'No location'}</div>

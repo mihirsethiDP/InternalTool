@@ -173,7 +173,7 @@ export default function ConsolidatedViewer() {
         {/* Sidebar */}
         <aside className="space-y-3">
           <div className="card-tight">
-            <div className="text-xs uppercase tracking-wide font-semibold text-slate-500 mb-2">📄 Original PDFs</div>
+            <div className="text-xs uppercase tracking-wide font-semibold text-slate-500 mb-2">Original PDFs</div>
             {(sources.data ?? []).length === 0 && <div className="muted text-sm">No source files yet.</div>}
             {(sources.data ?? []).map((s: any) => (
               <button key={s.id} onClick={() => openSource(s.storage_path)}

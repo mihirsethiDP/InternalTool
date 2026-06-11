@@ -1,6 +1,7 @@
 import { useParams, Link } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
+import { Cpu } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { runSearch } from '../lib/search';
 import { DocCard } from '../components/DocCard';
@@ -177,7 +178,7 @@ function SensorsSection({ plantId, equipment, sensors, canEdit, onChanged }: any
                 {g.sensors.map((s: any) => (
                   <Link to={`/sensors/${s.sensor_models?.id}`} key={s.id} className="card-tight hover:border-brand-700 transition group">
                     <div className="flex items-start gap-3">
-                      <div className="bg-brand-50 text-brand-700 rounded-lg w-10 h-10 flex items-center justify-center shrink-0">🔧</div>
+                      <div className="bg-brand-50 text-brand-700 rounded-md w-9 h-9 flex items-center justify-center shrink-0"><Cpu size={16} strokeWidth={2} /></div>
                       <div className="min-w-0 flex-1">
                         <div className="text-xs text-slate-500">{s.sensor_models?.sensor_makes?.name}</div>
                         <div className="font-semibold text-slate-900 truncate">{s.sensor_models?.model_no || s.sensor_models?.name || 'Unknown'}</div>
