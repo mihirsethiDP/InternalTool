@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { FileText } from 'lucide-react';
+import SegmentedFilter from '../components/SegmentedFilter';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../lib/auth';
 import PageHeader from '../components/PageHeader';
@@ -69,20 +70,16 @@ export default function MySubmissions() {
         }
       />
 
-      <div className="flex items-center gap-2 flex-wrap">
-        <span className="muted text-xs mr-1 self-center">Show:</span>
-        {(['all', 'pending', 'approved', 'rejected'] as const).map((s) => (
-          <button
-            key={s}
-            onClick={() => setFilter(s)}
-            className={`rounded-full px-3 py-1 text-xs font-medium border transition ${
-              filter === s ? 'bg-brand-700 text-white border-brand-700' : 'bg-white text-slate-700 border-slate-200 hover:border-brand-700 hover:text-brand-700'
-            }`}
-          >
-            {s[0].toUpperCase() + s.slice(1)}
-          </button>
-        ))}
-      </div>
+      <SegmentedFilter
+        value={filter}
+        onChange={setFilter}
+        options={[
+          { value: 'all', label: 'All' },
+          { value: 'pending', label: 'Pending', count: counts.data?.pending ?? 0, tone: 'amber' },
+          { value: 'approved', label: 'Approved', count: counts.data?.approved ?? 0, tone: 'emerald' },
+          { value: 'rejected', label: 'Rejected', count: counts.data?.rejected ?? 0, tone: 'red' },
+        ]}
+      />
 
       <div className="space-y-3">
         {(submissions.data ?? []).map((s: any) => (
