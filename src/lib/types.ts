@@ -88,7 +88,9 @@ export interface DocumentRow {
 }
 
 export type SubmissionStatus = 'pending' | 'approved' | 'rejected';
-export type SubmissionSection = 'manual' | 'install' | 'troubleshooting' | 'datasheet' | 'other';
+export type SubmissionSection =
+  | 'manual' | 'install' | 'troubleshooting' | 'datasheet' | 'calibration'
+  | 'cleaning' | 'spares' | 'ppm' | 'wiring' | 'safety' | 'other';
 
 export interface DocumentSubmission {
   id: string;

@@ -11,30 +11,40 @@
 
 import type { SubmissionSection } from './types';
 
-export const SECTION_ORDER: SubmissionSection[] = ['manual', 'install', 'troubleshooting', 'datasheet', 'other'];
+export const SECTION_ORDER: SubmissionSection[] = [
+  'troubleshooting', 'manual', 'install', 'datasheet', 'calibration',
+  'cleaning', 'spares', 'ppm', 'wiring', 'safety', 'other',
+];
 
 export const SECTION_LABEL: Record<SubmissionSection, string> = {
   manual: 'Sensor Manual',
   install: 'Installation Guide',
   troubleshooting: 'Troubleshooting Steps',
   datasheet: 'Technical Data Sheet',
+  calibration: 'Calibration Procedure',
+  cleaning: 'Cleaning & Maintenance',
+  spares: 'Spares & Consumables',
+  ppm: 'PPM Schedule',
+  wiring: 'Wiring & Communication',
+  safety: 'Safety & Handling',
   other: 'Other',
 };
 
 export type Sections = Record<SubmissionSection, string>;
 
-const EMPTY_SECTIONS = (): Sections => ({ manual: '', install: '', troubleshooting: '', datasheet: '', other: '' });
+const EMPTY_SECTIONS = (): Sections => ({
+  manual: '', install: '', troubleshooting: '', datasheet: '', calibration: '',
+  cleaning: '', spares: '', ppm: '', wiring: '', safety: '', other: '',
+});
 
 export function parseSections(md: string | null | undefined): Sections {
   const out = EMPTY_SECTIONS();
   if (!md) return out;
   const lines = md.split('\n');
   let current: SubmissionSection | null = null;
-  const buffers: Record<SubmissionSection, string[]> = {
-    manual: [], install: [], troubleshooting: [], datasheet: [], other: [],
-  };
+  const buffers = Object.fromEntries(SECTION_ORDER.map((s) => [s, []])) as unknown as Record<SubmissionSection, string[]>;
   for (const line of lines) {
-    const m = line.match(/^##\s+(manual|install|troubleshooting|datasheet|other)\b/i);
+    const m = line.match(/^##\s+(manual|install|troubleshooting|datasheet|calibration|cleaning|spares|ppm|wiring|safety|other)\b/i);
     if (m) {
       current = m[1].toLowerCase() as SubmissionSection;
       continue;

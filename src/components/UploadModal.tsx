@@ -146,12 +146,20 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
     setProgress(55);
 
     // Map document_type.key → section name used by consolidated docs
-    const typeKey = selectedType?.key;
-    const targetSection =
-      typeKey === 'sensor_manual' ? 'manual' :
-      typeKey === 'installation_guide' ? 'install' :
-      typeKey === 'troubleshooting' ? 'troubleshooting' :
-      typeKey === 'datasheet' ? 'datasheet' : 'other';
+    const typeKey = selectedType?.key as string | undefined;
+    const sectionMap: Record<string, string> = {
+      sensor_manual: 'manual',
+      installation_guide: 'install',
+      troubleshooting: 'troubleshooting',
+      datasheet: 'datasheet',
+      calibration_procedure: 'calibration',
+      cleaning_maintenance: 'cleaning',
+      spares_list: 'spares',
+      ppm_schedule: 'ppm',
+      wiring_comm: 'wiring',
+      safety_handling: 'safety',
+    };
+    const targetSection = sectionMap[typeKey ?? ''] ?? 'other';
 
     setStatus('Submitting for review…');
     const insert = await supabase.from('document_submissions').insert({

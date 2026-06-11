@@ -1,5 +1,5 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Plus, MessageSquare } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth, canUpload, isAdmin } from '../lib/auth';
@@ -18,6 +18,19 @@ function Inner() {
   const nav = useNavigate();
   const upload = useUpload();
   const [chatOpen, setChatOpen] = useState(false);
+  const [chatSeed, setChatSeed] = useState<string | null>(null);
+
+  // Anywhere in the app can open the assistant via:
+  //   window.dispatchEvent(new CustomEvent('dp:open-chat', { detail: { q: 'optional question' } }))
+  useEffect(() => {
+    function onOpenChat(e: Event) {
+      const detail = (e as CustomEvent).detail;
+      setChatSeed(detail?.q ?? null);
+      setChatOpen(true);
+    }
+    window.addEventListener('dp:open-chat', onOpenChat);
+    return () => window.removeEventListener('dp:open-chat', onOpenChat);
+  }, []);
 
   async function signOut() { await supabase.auth.signOut(); nav('/login'); }
 
@@ -63,16 +76,25 @@ function Inner() {
         DigitalPaani · Internal Document Hub
       </footer>
 
-      {/* Floating chat launcher */}
+      {/* Floating chat launcher — primary action of the tool, made prominent */}
       <button
         onClick={() => setChatOpen(true)}
         aria-label="Open assistant"
-        className="fixed bottom-6 right-6 z-40 bg-brand-700 text-white rounded-full w-12 h-12 shadow-md hover:shadow-lg hover:bg-brand-800 transition flex items-center justify-center"
+        className="group fixed bottom-6 right-6 z-40 inline-flex items-center gap-2.5 bg-brand-700 hover:bg-brand-800 text-white rounded-full pl-4 pr-5 py-3.5 shadow-lg hover:shadow-xl transition"
       >
-        <MessageSquare size={20} strokeWidth={2} />
+        <span className="relative flex">
+          <MessageSquare size={20} strokeWidth={2} />
+          <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-emerald-400 ring-2 ring-brand-700 animate-pulse" />
+        </span>
+        <span className="text-sm font-semibold tracking-tight">Ask the Assistant</span>
       </button>
 
-      <ChatDrawer open={chatOpen} onClose={() => setChatOpen(false)} />
+      <ChatDrawer
+        open={chatOpen}
+        onClose={() => setChatOpen(false)}
+        seed={chatSeed}
+        onSeedConsumed={() => setChatSeed(null)}
+      />
     </div>
   );
 }

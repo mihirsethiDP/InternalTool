@@ -26,9 +26,9 @@ export default function ConsolidatedEditor() {
   const nav = useNavigate();
   const qc = useQueryClient();
 
-  const [sections, setSections] = useState<Record<SubmissionSection, string>>({
-    manual: '', install: '', troubleshooting: '', datasheet: '', other: '',
-  });
+  const [sections, setSections] = useState<Record<SubmissionSection, string>>(
+    () => Object.fromEntries(SECTION_ORDER.map((s) => [s, ''])) as Record<SubmissionSection, string>
+  );
   const [busy, setBusy] = useState(false);
   const [savedAt, setSavedAt] = useState<string | null>(null);
 

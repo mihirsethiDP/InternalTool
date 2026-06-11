@@ -14,6 +14,7 @@ import { ReviewQueueList, ReviewQueueDetail } from './pages/ReviewQueue';
 import ConsolidatedViewer from './pages/ConsolidatedViewer';
 import ConsolidatedEditor from './pages/ConsolidatedEditor';
 import Profile from './pages/Profile';
+import DocsGuide from './pages/DocsGuide';
 import { useAuth } from './lib/auth';
 
 function Protected({ children }: { children: JSX.Element }) {
@@ -42,6 +43,7 @@ export default function App() {
         <Route path="consolidated/:id" element={<ConsolidatedViewer />} />
         <Route path="consolidated/:id/edit" element={<ConsolidatedEditor />} />
         <Route path="profile" element={<Profile />} />
+        <Route path="docs-guide" element={<DocsGuide />} />
         <Route path="admin" element={<Admin />} />
         <Route path="*" element={<div className="p-6">Not found.</div>} />
       </Route>

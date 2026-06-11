@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { X, Send, ArrowRight } from 'lucide-react';
+import { X, Send, ArrowRight, ExternalLink } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { SECTION_LABEL } from '../lib/consolidated';
 import type { SubmissionSection } from '../lib/types';
@@ -17,13 +17,18 @@ type Turn =
   | { role: 'bot'; query: string; hits: Hit[]; loading?: boolean };
 
 const SUGGESTIONS = [
-  'How do I troubleshoot H2S poisoning on the ORP sensor?',
-  'What does the VizSens-ODO datasheet say about cleaning?',
-  'BT-UL echo loss',
-  'Calibration procedure for pH sensor',
+  'UPCS-MAG-110 shows empty pipe error',
+  'OCEMS pH reading is drifting',
+  'How do I clean the EC probe?',
+  'Flow meter shows zero despite flow',
 ];
 
-export default function ChatDrawer({ open, onClose }: { open: boolean; onClose: () => void }) {
+export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
+  open: boolean;
+  onClose: () => void;
+  seed?: string | null;
+  onSeedConsumed?: () => void;
+}) {
   const nav = useNavigate();
   const [input, setInput] = useState('');
   const [turns, setTurns] = useState<Turn[]>([]);
@@ -32,6 +37,15 @@ export default function ChatDrawer({ open, onClose }: { open: boolean; onClose: 
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [turns]);
+
+  // A seed question (from the homepage CTA etc.) fires once on open
+  useEffect(() => {
+    if (open && seed) {
+      send(seed);
+      onSeedConsumed?.();
+    }
+    // eslint-disable-next-line
+  }, [open, seed]);
 
   async function send(query: string) {
     const q = query.trim();
@@ -114,8 +128,15 @@ export default function ChatDrawer({ open, onClose }: { open: boolean; onClose: 
               {t.loading ? (
                 <div className="card-tight bg-white text-sm text-slate-500"><span className="animate-pulse">Searching…</span></div>
               ) : t.hits.length === 0 ? (
-                <div className="card-tight bg-white text-sm text-slate-600">
-                  I couldn't find anything for that question. Try rephrasing with the sensor's make or model.
+                <div className="card-tight bg-white text-sm text-slate-600 space-y-2.5">
+                  <div>Nothing in our documentation matches that. Try rephrasing with the sensor&rsquo;s make or model — or check the web:</div>
+                  <a
+                    href={`https://www.google.com/search?q=${encodeURIComponent(t.query + ' sensor troubleshooting')}`}
+                    target="_blank" rel="noreferrer"
+                    className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 hover:border-brand-700 hover:text-brand-700 px-3 py-1.5 text-xs font-medium text-slate-700 transition"
+                  >
+                    Search the web for this <ExternalLink size={12} />
+                  </a>
                 </div>
               ) : (
                 <>
