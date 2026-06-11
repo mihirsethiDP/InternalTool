@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { useMemo, useState } from 'react';
 import { Cpu } from 'lucide-react';
+import { FilterBar, FilterSearch, FilterSelect, FilterClear } from '../components/FilterBar';
 import { supabase } from '../lib/supabase';
 import { useAuth, canUpload } from '../lib/auth';
 import PageHeader from '../components/PageHeader';
@@ -76,38 +77,28 @@ export default function SensorModelList() {
         )}
       />
 
-      <div className="card space-y-4">
-        <div>
-          <label className="label">Search</label>
-          <input className="input" placeholder="Make, model, or description…" value={q} onChange={(e) => { setQ(e.target.value); setPage(0); }} />
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div>
-            <label className="label">Category</label>
-            <select className="input" value={cat} onChange={(e) => { setCat(e.target.value); setPage(0); }}>
-              <option value="">All categories</option>
-              {cats.data?.map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="label">Make</label>
-            <select className="input" value={makeId} onChange={(e) => { setMakeId(e.target.value); setModelId(''); setPage(0); }}>
-              <option value="">All makes</option>
-              {makes.data?.map((m: any) => <option key={m.id} value={m.id}>{m.name}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="label">Model</label>
-            <select className="input" value={modelId} onChange={(e) => { setModelId(e.target.value); setPage(0); }} disabled={!makeId}>
-              <option value="">{makeId ? 'All models' : 'Pick a make first'}</option>
-              {(models.data ?? []).map((m: any) => (
-                <option key={m.id} value={m.id}>{m.model_no || m.name}</option>
-              ))}
-            </select>
-          </div>
-        </div>
-        {hasFilter && <button onClick={reset} className="btn-ghost btn-sm">Clear filters</button>}
-      </div>
+      <FilterBar>
+        <FilterSearch
+          value={q}
+          onChange={(v) => { setQ(v); setPage(0); }}
+          placeholder="Search make, model, or description…"
+        />
+        <FilterSelect value={cat} active={Boolean(cat)} onChange={(v) => { setCat(v); setPage(0); }}>
+          <option value="">All categories</option>
+          {cats.data?.map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </FilterSelect>
+        <FilterSelect value={makeId} active={Boolean(makeId)} onChange={(v) => { setMakeId(v); setModelId(''); setPage(0); }}>
+          <option value="">All makes</option>
+          {makes.data?.map((m: any) => <option key={m.id} value={m.id}>{m.name}</option>)}
+        </FilterSelect>
+        <FilterSelect value={modelId} active={Boolean(modelId)} disabled={!makeId} onChange={(v) => { setModelId(v); setPage(0); }}>
+          <option value="">{makeId ? 'All models' : 'Model'}</option>
+          {(models.data ?? []).map((m: any) => (
+            <option key={m.id} value={m.id}>{m.model_no || m.name}</option>
+          ))}
+        </FilterSelect>
+        {hasFilter && <FilterClear onClick={reset} />}
+      </FilterBar>
 
       {Object.keys(grouped).length === 0 && (
         <div className="card text-sm text-slate-500 text-center">No models match.</div>

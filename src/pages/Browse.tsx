@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase';
 import { runSearch } from '../lib/search';
 import { DocCard } from '../components/DocCard';
 import PageHeader from '../components/PageHeader';
+import { FilterBar, FilterSearch, FilterSelect, FilterClear } from '../components/FilterBar';
 
 // Doc types that imply "this is about a sensor" — make/model filters become useful.
 const SENSOR_DOC_KEYS = new Set([
@@ -60,57 +61,37 @@ export default function Browse() {
         stats={[{ label: 'Results', value: results.data?.hits.length ?? 0 }]}
       />
 
-      {/* Search + filters card */}
-      <div className="card space-y-4">
-        <div>
-          <label className="label">Search</label>
-          <input
-            className="input"
-            placeholder="Search across all document contents…"
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-          />
-        </div>
-
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <div>
-            <label className="label">Document type</label>
-            <select className="input" value={type} onChange={(e) => { setType(e.target.value); if (!SENSOR_DOC_KEYS.has(e.target.value)) { setMake(''); setModel(''); setCategory(''); } }}>
-              <option value="">All types</option>
-              {types.data?.map((t: any) => <option key={t.id} value={t.key}>{t.label}</option>)}
-            </select>
-          </div>
-
-          {showSensorFilters && (
-            <>
-              <div>
-                <label className="label">Sensor category</label>
-                <select className="input" value={category} onChange={(e) => setCategory(e.target.value)}>
-                  <option value="">All categories</option>
-                  {cats.data?.map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="label">Make</label>
-                <select className="input" value={make} onChange={(e) => { setMake(e.target.value); setModel(''); }}>
-                  <option value="">All makes</option>
-                  {makes.data?.map((m: any) => <option key={m.id} value={m.id}>{m.name}</option>)}
-                </select>
-              </div>
-              {make && (
-                <div className="md:col-span-2">
-                  <label className="label">Model</label>
-                  <select className="input" value={model} onChange={(e) => setModel(e.target.value)}>
-                    <option value="">All models from this make</option>
-                    {models.data?.map((m: any) => <option key={m.id} value={m.id}>{m.model_no || m.name}</option>)}
-                  </select>
-                </div>
-              )}
-            </>
-          )}
-        </div>
-        {hasFilter && <button onClick={reset} className="btn-ghost btn-sm">Clear all</button>}
-      </div>
+      {/* Search + filters toolbar */}
+      <FilterBar>
+        <FilterSearch
+          value={q}
+          onChange={setQ}
+          placeholder="Search across all document contents…"
+        />
+        <FilterSelect value={type} active={Boolean(type)} onChange={(v) => { setType(v); if (!SENSOR_DOC_KEYS.has(v)) { setMake(''); setModel(''); setCategory(''); } }}>
+          <option value="">All types</option>
+          {types.data?.map((t: any) => <option key={t.id} value={t.key}>{t.label}</option>)}
+        </FilterSelect>
+        {showSensorFilters && (
+          <>
+            <FilterSelect value={category} active={Boolean(category)} onChange={setCategory}>
+              <option value="">All categories</option>
+              {cats.data?.map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </FilterSelect>
+            <FilterSelect value={make} active={Boolean(make)} onChange={(v) => { setMake(v); setModel(''); }}>
+              <option value="">All makes</option>
+              {makes.data?.map((m: any) => <option key={m.id} value={m.id}>{m.name}</option>)}
+            </FilterSelect>
+            {make && (
+              <FilterSelect value={model} active={Boolean(model)} onChange={setModel}>
+                <option value="">All models</option>
+                {models.data?.map((m: any) => <option key={m.id} value={m.id}>{m.model_no || m.name}</option>)}
+              </FilterSelect>
+            )}
+          </>
+        )}
+        {hasFilter && <FilterClear onClick={reset} label="Clear all" />}
+      </FilterBar>
 
       {/* Results */}
       <div className="space-y-3">
