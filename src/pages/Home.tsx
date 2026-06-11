@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import {
   Search as SearchIcon, MessageSquare, Wrench, Gauge, FlaskConical,
   ArrowRight, FileText,
@@ -25,6 +26,7 @@ function askAssistant(q?: string) {
 export default function Home() {
   const [q, setQ] = useState('');
   const nav = useNavigate();
+  const { t } = useTranslation();
 
   const search = useQuery({
     queryKey: ['search', q],
@@ -68,13 +70,13 @@ export default function Home() {
       {/* Hero — troubleshooting first */}
       <section className="text-center max-w-3xl mx-auto pt-2">
         <div className="inline-flex items-center gap-1.5 text-[11px] uppercase tracking-wider text-brand-700 font-semibold mb-4">
-          Sensor troubleshooting hub
+          {t('home.eyebrow')}
         </div>
         <h1 className="text-3xl md:text-4xl font-semibold tracking-tight text-slate-900 mb-3">
-          Sensor acting up? <span className="text-brand-700">Start here.</span>
+          {t('home.title1')} <span className="text-brand-700">{t('home.title2')}</span>
         </h1>
         <p className="text-slate-600 text-base mb-7">
-          Describe the problem and get troubleshooting steps from verified vendor documentation — or search every manual, datasheet, and procedure we have.
+          {t('home.subtitle')}
         </p>
 
         {/* Assistant CTA — the primary action */}
@@ -83,17 +85,17 @@ export default function Home() {
             <div>
               <div className="flex items-center gap-2 text-white font-semibold tracking-tight">
                 <MessageSquare size={18} />
-                Ask the Assistant
+                {t('home.askTitle')}
               </div>
               <p className="text-white/70 text-sm mt-1 max-w-md">
-                Describe the issue in your own words — it finds the matching troubleshooting steps.
+                {t('home.askSubtitle')}
               </p>
             </div>
             <button
               onClick={() => askAssistant()}
               className="inline-flex items-center gap-2 bg-white text-brand-700 hover:bg-slate-100 rounded-lg px-4 py-2.5 text-sm font-semibold transition shrink-0"
             >
-              Start a conversation <ArrowRight size={15} />
+              {t('home.start')} <ArrowRight size={15} />
             </button>
           </div>
           <div className="flex gap-2 flex-wrap mt-4">
@@ -116,7 +118,7 @@ export default function Home() {
               type="text"
               value={q}
               onChange={(e) => setQ(e.target.value)}
-              placeholder="Or search the documentation directly…"
+              placeholder={t('home.searchPlaceholder')}
               className="w-full pl-12 pr-20 py-3.5 text-base rounded-xl border border-slate-300 bg-white shadow-sm focus:border-brand-700 focus:ring-2 focus:ring-brand-700/15 outline-none transition"
             />
             <SearchIcon size={18} strokeWidth={2} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -140,10 +142,10 @@ export default function Home() {
           ))}
           {search.data && search.data.hits.length === 0 && !search.isLoading && (
             <div className="card text-sm text-slate-600 text-center space-y-2">
-              <div>No matches in our documentation.</div>
+              <div>{t('home.noMatches')}</div>
               <div className="flex items-center justify-center gap-3">
                 <button onClick={() => askAssistant(q)} className="text-brand-700 font-medium hover:underline text-sm">
-                  Ask the Assistant
+                  {t('home.askAssistant')}
                 </button>
                 <span className="text-slate-300">·</span>
                 <a
@@ -151,7 +153,7 @@ export default function Home() {
                   target="_blank" rel="noreferrer"
                   className="text-brand-700 font-medium hover:underline text-sm"
                 >
-                  Search the web
+                  {t('home.searchWeb')}
                 </a>
               </div>
             </div>
@@ -163,8 +165,8 @@ export default function Home() {
       {!q && (pilots.data ?? []).length > 0 && (
         <section className="max-w-5xl mx-auto">
           <div className="flex items-baseline justify-between mb-3">
-            <h2 className="section-title mb-0">Pilot sensors</h2>
-            <span className="muted text-xs">Fully documented</span>
+            <h2 className="section-title mb-0">{t('home.pilotTitle')}</h2>
+            <span className="muted text-xs">{t('home.pilotBadge')}</span>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {(pilots.data ?? []).map((p: any) => (
@@ -193,7 +195,7 @@ export default function Home() {
       {/* Recently updated */}
       {!q && (
         <section className="max-w-5xl mx-auto">
-          <h2 className="section-title">Recently updated</h2>
+          <h2 className="section-title">{t('home.recentTitle')}</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
             {(recent.data ?? []).map((d: any) => (
               <button
@@ -209,14 +211,14 @@ export default function Home() {
                     {d.sensor_models?.sensor_makes?.name} {d.sensor_models?.model_no}
                   </div>
                   <div className="text-xs text-slate-500 mt-0.5">
-                    Updated {new Date(d.last_updated_at).toLocaleDateString()}
+                    {t('home.updated')} {new Date(d.last_updated_at).toLocaleDateString()}
                   </div>
                 </div>
               </button>
             ))}
             {(recent.data ?? []).length === 0 && (
               <div className="card text-sm text-slate-500 col-span-full text-center">
-                No sensor references yet. Submissions approved in the Review queue will appear here.
+                {t('home.noRecent')}
               </div>
             )}
           </div>
@@ -227,8 +229,8 @@ export default function Home() {
       {!q && (
         <div className="text-center text-xs text-slate-400 flex items-center justify-center gap-1.5">
           <Wrench size={12} />
-          Documentation incomplete for a sensor? See the
-          <button onClick={() => nav('/docs-guide')} className="text-brand-700 hover:underline font-medium">procurement playbook</button>
+          {t('home.playbookHint')}
+          <button onClick={() => nav('/docs-guide')} className="text-brand-700 hover:underline font-medium">{t('home.playbookLink')}</button>
         </div>
       )}
     </div>

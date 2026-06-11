@@ -1,15 +1,17 @@
 import { useQuery } from '@tanstack/react-query';
 import { useParams, useSearchParams, useNavigate, Link } from 'react-router-dom';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   ArrowLeft, PencilLine, FileText, BookOpen, Wrench, ClipboardList,
   FileSpreadsheet, Layers, ChevronUp, ChevronDown, ExternalLink,
   FlaskConical, Droplets, Package, CalendarClock, Cable, ShieldAlert,
-  CheckCircle2, Circle, FileStack, BookOpenText,
+  CheckCircle2, Circle, FileStack, BookOpenText, Globe,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth, isAdmin } from '../lib/auth';
 import { SECTION_LABEL, SECTION_ORDER, parseSections } from '../lib/consolidated';
+import { LANGUAGES } from '../i18n';
 import type { SubmissionSection } from '../lib/types';
 
 export const SECTION_ICON: Record<SubmissionSection, React.ReactNode> = {
@@ -38,6 +40,8 @@ export default function ConsolidatedViewer() {
   const [params] = useSearchParams();
   const nav = useNavigate();
   const { profile } = useAuth();
+  const { t, i18n } = useTranslation();
+  const [docLang, setDocLang] = useState<string>(i18n.language || 'en');
   const initialQuery = params.get('q') ?? '';
   // If the user arrived from search with a query, open the consolidated view
   // directly so the highlight lands. Otherwise default to the documents view.
@@ -78,7 +82,28 @@ export default function ConsolidatedViewer() {
     enabled: Boolean(cdoc.data?.sensor_model_id),
   });
 
-  const sections = useMemo(() => parseSections(cdoc.data?.content_markdown), [cdoc.data?.content_markdown]);
+  // Cached translation for the chosen language (English needs none)
+  const translation = useQuery({
+    queryKey: ['doc-translation', id, docLang],
+    queryFn: async () => {
+      if (docLang === 'en') return null;
+      const { data } = await supabase
+        .from('consolidated_doc_translations')
+        .select('content_markdown')
+        .eq('consolidated_doc_id', id)
+        .eq('lang', docLang)
+        .maybeSingle();
+      return data;
+    },
+    enabled: Boolean(id) && docLang !== 'en',
+  });
+
+  const translationMissing = docLang !== 'en' && !translation.isLoading && !translation.data;
+  const effectiveMarkdown = (docLang !== 'en' && translation.data?.content_markdown)
+    ? translation.data.content_markdown
+    : cdoc.data?.content_markdown;
+
+  const sections = useMemo(() => parseSections(effectiveMarkdown), [effectiveMarkdown]);
   const presentSections = SECTION_ORDER.filter((s) => sections[s]);
 
   const sourcesBySection = useMemo(() => {
@@ -169,7 +194,7 @@ export default function ConsolidatedViewer() {
       <div className="bg-brand-700 text-white rounded-xl px-6 py-5 shadow-sm">
         <div className="flex items-start justify-between gap-4 flex-wrap">
           <div>
-            <div className="text-[11px] uppercase tracking-wider text-white/60 mb-1.5 font-medium">Sensor documentation</div>
+            <div className="text-[11px] uppercase tracking-wider text-white/60 mb-1.5 font-medium">{t('viewer.eyebrow')}</div>
             <h1 className="text-2xl md:text-3xl font-semibold tracking-tight">{title}</h1>
             <div className="flex items-center gap-2 mt-2.5 flex-wrap">
               {sm?.sensor_categories?.name && (
@@ -185,11 +210,11 @@ export default function ConsolidatedViewer() {
           </div>
           <div className="flex gap-2 shrink-0">
             <button onClick={() => nav(-1)} className="inline-flex items-center gap-1.5 bg-white/10 hover:bg-white/20 text-white rounded-md px-3 py-2 text-sm transition">
-              <ArrowLeft size={15} /> Back
+              <ArrowLeft size={15} /> {t('viewer.back')}
             </button>
             {isAdmin(profile) && (
               <button onClick={() => nav(`/consolidated/${id}/edit`)} className="inline-flex items-center gap-1.5 bg-white text-brand-700 hover:bg-slate-100 rounded-md px-3 py-2 text-sm font-medium transition">
-                <PencilLine size={15} /> Edit
+                <PencilLine size={15} /> {t('viewer.edit')}
               </button>
             )}
           </div>
@@ -207,7 +232,7 @@ export default function ConsolidatedViewer() {
                 mode === 'docs' ? 'bg-brand-700 text-white' : 'bg-white text-slate-700 hover:text-brand-700'
               }`}
             >
-              <FileStack size={14} /> Documents
+              <FileStack size={14} /> {t('viewer.documents')}
             </button>
             <button
               onClick={() => setMode('consolidated')}
@@ -215,7 +240,7 @@ export default function ConsolidatedViewer() {
                 mode === 'consolidated' ? 'bg-brand-700 text-white' : 'bg-white text-slate-700 hover:text-brand-700'
               }`}
             >
-              <BookOpenText size={14} /> Consolidated view
+              <BookOpenText size={14} /> {t('viewer.consolidated')}
             </button>
           </div>
 
@@ -242,11 +267,22 @@ export default function ConsolidatedViewer() {
 
           {mode === 'consolidated' && (
             <div className="flex items-center gap-2">
+              <div className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 pl-2 pr-1 py-0.5">
+                <Globe size={14} className="text-slate-400" />
+                <select
+                  value={docLang}
+                  onChange={(e) => setDocLang(e.target.value)}
+                  className="text-sm py-1 outline-none bg-transparent"
+                  title={t('viewer.language')}
+                >
+                  {LANGUAGES.map((l) => <option key={l.code} value={l.code}>{l.native}</option>)}
+                </select>
+              </div>
               <input
                 className="rounded-md border border-slate-300 px-3 py-1.5 text-sm w-48 focus:border-brand-700 focus:ring-2 focus:ring-brand-700/15 outline-none"
                 value={highlight}
                 onChange={(e) => setHighlight(e.target.value)}
-                placeholder="Highlight in document…"
+                placeholder={t('viewer.highlight')}
               />
               {highlight && (
                 <>
@@ -275,7 +311,7 @@ export default function ConsolidatedViewer() {
             <>
               {docSections.length === 0 && (
                 <div className="card text-sm text-slate-500 text-center py-10">
-                  No documents yet for this sensor.
+                  {t('viewer.noDocs')}
                 </div>
               )}
               {docSections.map((s) => (
@@ -313,7 +349,7 @@ export default function ConsolidatedViewer() {
                   className="w-full bg-white rounded-xl border border-dashed border-slate-300 hover:border-brand-700 text-slate-600 hover:text-brand-700 px-5 py-4 text-sm font-medium inline-flex items-center justify-center gap-2 transition"
                 >
                   <BookOpenText size={16} />
-                  Prefer one continuous document? Open the consolidated view
+                  {t('viewer.preferConsolidated')}
                 </button>
               )}
             </>
@@ -322,9 +358,14 @@ export default function ConsolidatedViewer() {
           {/* CONSOLIDATED MODE */}
           {mode === 'consolidated' && (
             <>
+              {translationMissing && (
+                <div className="rounded-lg bg-amber-50 border border-amber-200 text-amber-900 text-sm px-4 py-2.5">
+                  {t('viewer.translationMissing')}
+                </div>
+              )}
               {presentSections.length === 0 && (
                 <div className="card text-sm text-slate-500 text-center py-10">
-                  No consolidated content yet. Approved submissions will be merged in here.
+                  {t('viewer.noConsolidated')}
                 </div>
               )}
               {presentSections.map((s) => (
@@ -354,7 +395,7 @@ export default function ConsolidatedViewer() {
         <aside className="space-y-3">
           <div className="bg-white rounded-xl border border-slate-200 overflow-hidden lg:sticky lg:top-16">
             <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
-              <span className="text-xs uppercase tracking-wide font-semibold text-slate-500">Documentation status</span>
+              <span className="text-xs uppercase tracking-wide font-semibold text-slate-500">{t('viewer.docStatus')}</span>
               <span className={`text-xs font-semibold ${coveredCount === CHECKLIST_SECTIONS.length ? 'text-emerald-600' : 'text-amber-600'}`}>
                 {coveredCount}/{CHECKLIST_SECTIONS.length}
               </span>
@@ -372,9 +413,9 @@ export default function ConsolidatedViewer() {
             {coveredCount < CHECKLIST_SECTIONS.length && (
               <div className="px-4 py-3 border-t border-slate-100 bg-amber-50/50">
                 <div className="text-xs text-amber-900 leading-relaxed">
-                  Documentation incomplete.{' '}
+                  {t('viewer.incomplete')}{' '}
                   <Link to="/docs-guide" className="font-semibold underline hover:text-amber-700">
-                    How to procure missing documents
+                    {t('viewer.howToProcure')}
                   </Link>
                 </div>
               </div>

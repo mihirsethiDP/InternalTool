@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { X, Send, ArrowRight, ExternalLink } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { SECTION_LABEL } from '../lib/consolidated';
@@ -30,6 +31,7 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
   onSeedConsumed?: () => void;
 }) {
   const nav = useNavigate();
+  const { t } = useTranslation();
   const [input, setInput] = useState('');
   const [turns, setTurns] = useState<Turn[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -86,8 +88,8 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
         {/* Header */}
         <div className="bg-brand-700 text-white px-5 py-4 flex items-center justify-between">
           <div>
-            <div className="text-[11px] uppercase tracking-wider text-white/60 font-medium">Assistant</div>
-            <div className="text-base font-semibold tracking-tight mt-0.5">Ask the document hub</div>
+            <div className="text-[11px] uppercase tracking-wider text-white/60 font-medium">{t('chat.assistant')}</div>
+            <div className="text-base font-semibold tracking-tight mt-0.5">{t('chat.title')}</div>
           </div>
           <button onClick={onClose} aria-label="Close" className="rounded-md hover:bg-white/10 w-8 h-8 flex items-center justify-center transition">
             <X size={18} />
@@ -100,13 +102,13 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
             <div className="space-y-3">
               <div className="card-tight bg-white">
                 <div className="text-sm text-slate-700 leading-relaxed">
-                  Ask anything about your sensor docs. I&rsquo;ll search the consolidated references and surface the most relevant sections.
+                  {t('chat.intro')}
                 </div>
                 <div className="text-xs text-slate-500 mt-2">
-                  Currently using keyword search. A synthesised AI answer is coming once your team enables it.
+                  {t('chat.note')}
                 </div>
               </div>
-              <div className="text-xs text-slate-500 mt-3 mb-1">Try one:</div>
+              <div className="text-xs text-slate-500 mt-3 mb-1">{t('chat.tryOne')}</div>
               <div className="flex flex-col gap-1.5">
                 {SUGGESTIONS.map((s) => (
                   <button key={s} onClick={() => send(s)}
@@ -118,42 +120,42 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
             </div>
           )}
 
-          {turns.map((t, i) => t.role === 'user' ? (
+          {turns.map((turn, i) => turn.role === 'user' ? (
             <div key={i} className="flex justify-end">
-              <div className="max-w-[80%] bg-brand-700 text-white rounded-2xl rounded-tr-md px-4 py-2 text-sm">{t.text}</div>
+              <div className="max-w-[80%] bg-brand-700 text-white rounded-2xl rounded-tr-md px-4 py-2 text-sm">{turn.text}</div>
             </div>
           ) : (
             <div key={i} className="space-y-2">
-              <div className="text-xs text-slate-500 px-1">Assistant</div>
-              {t.loading ? (
-                <div className="card-tight bg-white text-sm text-slate-500"><span className="animate-pulse">Searching…</span></div>
-              ) : t.hits.length === 0 ? (
+              <div className="text-xs text-slate-500 px-1">{t('chat.assistant')}</div>
+              {turn.loading ? (
+                <div className="card-tight bg-white text-sm text-slate-500"><span className="animate-pulse">…</span></div>
+              ) : turn.hits.length === 0 ? (
                 <div className="card-tight bg-white text-sm text-slate-600 space-y-2.5">
-                  <div>Nothing in our documentation matches that. Try rephrasing with the sensor&rsquo;s make or model — or check the web:</div>
+                  <div>{t('chat.nothing')}</div>
                   <a
-                    href={`https://www.google.com/search?q=${encodeURIComponent(t.query + ' sensor troubleshooting')}`}
+                    href={`https://www.google.com/search?q=${encodeURIComponent(turn.query + ' sensor troubleshooting')}`}
                     target="_blank" rel="noreferrer"
                     className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 hover:border-brand-700 hover:text-brand-700 px-3 py-1.5 text-xs font-medium text-slate-700 transition"
                   >
-                    Search the web for this <ExternalLink size={12} />
+                    {t('chat.searchWeb')} <ExternalLink size={12} />
                   </a>
                 </div>
               ) : (
                 <>
                   <div className="card-tight bg-white text-sm text-slate-700">
-                    I found <strong>{t.hits.length}</strong> reference{t.hits.length === 1 ? '' : 's'} that might help:
+                    {t('chat.found', { count: turn.hits.length })}
                   </div>
-                  {t.hits.map((h) => (
-                    <button key={h.document_id} onClick={() => openHitWith(t.query, h.document_id)}
+                  {turn.hits.map((h) => (
+                    <button key={h.document_id} onClick={() => openHitWith(turn.query, h.document_id)}
                             className="card-tight bg-white hover:border-brand-700 transition text-left w-full">
                       <div className="flex items-center gap-2 flex-wrap mb-1">
                         <span className="font-semibold text-slate-900 truncate">{h.document_title.trim()}</span>
                         <span className="badge-blue">{SECTION_LABEL[h.section]}</span>
                       </div>
                       <div className="text-xs text-slate-600 leading-relaxed line-clamp-3"
-                           dangerouslySetInnerHTML={{ __html: hl(h.snippet, t.query) }} />
+                           dangerouslySetInnerHTML={{ __html: hl(h.snippet, turn.query) }} />
                       <div className="inline-flex items-center gap-1 text-xs text-brand-700 font-medium mt-1.5">
-                        Open <ArrowRight size={12} strokeWidth={2.25} />
+                        {t('chat.open')} <ArrowRight size={12} strokeWidth={2.25} />
                       </div>
                     </button>
                   ))}
@@ -170,7 +172,7 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
               autoFocus
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder="Ask a question about a sensor…"
+              placeholder={t('chat.placeholder')}
               className="flex-1 rounded-xl border border-slate-300 px-3 py-2.5 text-sm focus:border-brand-700 focus:ring-2 focus:ring-brand-700/20 outline-none"
             />
             <button type="submit" disabled={!input.trim()} aria-label="Send"
@@ -180,7 +182,7 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
           </form>
           {turns.length > 0 && (
             <button onClick={() => setTurns([])} className="text-xs text-slate-500 hover:text-brand-700 mt-2">
-              Clear conversation
+              {t('chat.clearConversation')}
             </button>
           )}
         </div>

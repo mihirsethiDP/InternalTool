@@ -1,5 +1,6 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Plus, MessageSquare } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth, canUpload, isAdmin } from '../lib/auth';
@@ -16,6 +17,7 @@ const navCls = ({ isActive }: { isActive: boolean }) =>
 function Inner() {
   const { profile, email } = useAuth();
   const nav = useNavigate();
+  const { t } = useTranslation();
   const upload = useUpload();
   const [chatOpen, setChatOpen] = useState(false);
   const [chatSeed, setChatSeed] = useState<string | null>(null);
@@ -48,11 +50,11 @@ function Inner() {
           </NavLink>
           <div className="w-px h-6 bg-white/15" />
           <nav className="flex items-center gap-1">
-            <NavLink to="/" end className={navCls}>Search</NavLink>
-            <NavLink to="/browse" className={navCls}>Browse</NavLink>
-            <NavLink to="/sensors" className={navCls}>Sensors</NavLink>
-            {canUpload(profile) && !isAdmin(profile) && <NavLink to="/my-submissions" className={navCls}>Uploads</NavLink>}
-            {isAdmin(profile) && <NavLink to="/admin" className={navCls}>Admin</NavLink>}
+            <NavLink to="/" end className={navCls}>{t('nav.search')}</NavLink>
+            <NavLink to="/browse" className={navCls}>{t('nav.browse')}</NavLink>
+            <NavLink to="/sensors" className={navCls}>{t('nav.sensors')}</NavLink>
+            {canUpload(profile) && !isAdmin(profile) && <NavLink to="/my-submissions" className={navCls}>{t('nav.uploads')}</NavLink>}
+            {isAdmin(profile) && <NavLink to="/admin" className={navCls}>{t('nav.admin')}</NavLink>}
           </nav>
           <div className="ml-auto flex items-center gap-2">
             {canUpload(profile) && (
@@ -61,7 +63,7 @@ function Inner() {
                 className="inline-flex items-center gap-1.5 bg-white text-brand-700 hover:bg-slate-100 transition rounded-md px-3 py-1.5 text-sm font-medium"
               >
                 <Plus size={16} strokeWidth={2.25} />
-                Upload
+                {t('nav.upload')}
               </button>
             )}
             <NotificationBell />
@@ -86,7 +88,7 @@ function Inner() {
           <MessageSquare size={20} strokeWidth={2} />
           <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-emerald-400 ring-2 ring-brand-700 animate-pulse" />
         </span>
-        <span className="text-sm font-semibold tracking-tight">Ask the Assistant</span>
+        <span className="text-sm font-semibold tracking-tight">{t('chat.launcher')}</span>
       </button>
 
       <ChatDrawer
