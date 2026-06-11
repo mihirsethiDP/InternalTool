@@ -6,6 +6,7 @@ import { useAuth, canUpload, isAdmin } from '../lib/auth';
 import { UploadProvider, useUpload } from './UploadModal';
 import NotificationBell from './NotificationBell';
 import ChatDrawer from './ChatDrawer';
+import UserMenu from './UserMenu';
 
 const navCls = ({ isActive }: { isActive: boolean }) =>
   `px-3 py-2 rounded-md text-sm font-medium transition ${
@@ -19,7 +20,6 @@ function Inner() {
   const [chatOpen, setChatOpen] = useState(false);
 
   async function signOut() { await supabase.auth.signOut(); nav('/login'); }
-  const initials = (email || 'U').split('@')[0].slice(0, 2).toUpperCase();
 
   return (
     <div className="min-h-full flex flex-col bg-slate-50">
@@ -52,21 +52,7 @@ function Inner() {
               </button>
             )}
             <NotificationBell />
-            <div className="w-px h-6 bg-white/15 mx-1" />
-            <div className="hidden md:flex items-center gap-2.5 pl-1 pr-2">
-              <span className="bg-white text-brand-700 w-7 h-7 rounded-full flex items-center justify-center text-xs font-semibold tracking-tight">
-                {initials}
-              </span>
-              <div className="leading-tight">
-                <div className="text-xs font-medium">{email}</div>
-                {profile?.role && (
-                  <div className="text-[10px] uppercase tracking-wider text-white/60">{profile.role}</div>
-                )}
-              </div>
-            </div>
-            <button onClick={signOut} className="text-sm text-white/70 hover:text-white px-2 py-1">
-              Sign out
-            </button>
+            <UserMenu profile={profile} email={email} onSignOut={signOut} />
           </div>
         </div>
       </header>
