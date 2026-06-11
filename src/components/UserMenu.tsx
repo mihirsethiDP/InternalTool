@@ -42,7 +42,7 @@ export default function UserMenu({ profile, email, onSignOut }: Props) {
       </button>
 
       {open && (
-        <div className="absolute right-0 mt-2 w-64 rounded-xl bg-white shadow-xl border border-slate-200 overflow-hidden z-50">
+        <div className="absolute right-0 mt-2 w-64 rounded-xl bg-white text-slate-900 shadow-xl border border-slate-200 overflow-hidden z-50">
           <div className="px-4 py-3 border-b border-slate-100">
             <div className="text-sm font-semibold text-slate-900 truncate">{display}</div>
             <div className="text-xs text-slate-500 truncate">{email}</div>
@@ -65,7 +65,7 @@ export default function UserMenu({ profile, email, onSignOut }: Props) {
             <select
               value={i18n.language}
               onChange={(e) => setLanguage(e.target.value)}
-              className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm focus:border-brand-700 outline-none"
+              className="w-full rounded-md border border-slate-300 bg-white text-slate-900 px-2 py-1.5 text-sm focus:border-brand-700 outline-none"
             >
               {LANGUAGES.map((l) => <option key={l.code} value={l.code}>{l.native}</option>)}
             </select>
