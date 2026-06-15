@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { X, Send, ArrowRight, ExternalLink } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { runSearch } from '../lib/search';
 import { SECTION_LABEL } from '../lib/consolidated';
 import type { SubmissionSection } from '../lib/types';
 
@@ -15,7 +17,7 @@ interface Hit {
 }
 type Turn =
   | { role: 'user'; text: string }
-  | { role: 'bot'; query: string; hits: Hit[]; loading?: boolean };
+  | { role: 'bot'; query: string; hits: Hit[]; loading?: boolean; narrowedLabel?: string };
 
 const SUGGESTIONS = [
   'UPCS-MAG-110 shows empty pipe error',
@@ -72,6 +74,26 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
       if (error) console.warn('chat_search error', error);
       return copy;
     });
+  }
+
+  // Re-scope a bot turn to a specific sensor (+ its category general guidance)
+  async function narrowTurn(turnIndex: number, query: string, modelId: string, generalModelId: string | null, label: string) {
+    setTurns((t) => t.map((turn, i) => (i === turnIndex && turn.role === 'bot') ? { ...turn, loading: true } : turn));
+    const [spec, gen] = await Promise.all([
+      runSearch(query, { sensor_model_id: modelId }),
+      generalModelId ? runSearch(query, { sensor_model_id: generalModelId }) : Promise.resolve({ hits: [] }),
+    ]);
+    const seen = new Set<string>();
+    const hits: Hit[] = [...spec.hits, ...gen.hits]
+      .filter((h) => { const k = h.document_id; if (seen.has(k)) return false; seen.add(k); return true; })
+      .map((h) => ({
+        document_id: h.document_id,
+        document_title: (h.document_title ?? '').trim(),
+        section: (h.type_label as SubmissionSection) ?? 'other',
+        snippet: h.snippet,
+        rank: h.rank,
+      }));
+    setTurns((t) => t.map((turn, i) => (i === turnIndex && turn.role === 'bot') ? { ...turn, hits, loading: false, narrowedLabel: label } : turn));
   }
 
   function openHitWith(query: string, id: string) {
@@ -143,7 +165,9 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
               ) : (
                 <>
                   <div className="card-tight bg-white text-sm text-slate-700">
-                    {t('chat.found', { count: turn.hits.length })}
+                    {turn.narrowedLabel
+                      ? <>Showing results for <strong>{turn.narrowedLabel}</strong>.</>
+                      : t('chat.found', { count: turn.hits.length })}
                   </div>
                   {turn.hits.map((h) => (
                     <button key={h.document_id} onClick={() => openHitWith(turn.query, h.document_id)}
@@ -160,6 +184,11 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
                     </button>
                   ))}
                 </>
+              )}
+
+              {/* Narrow-to-sensor probe, only under the most recent answered turn */}
+              {!turn.loading && i === turns.length - 1 && !turn.narrowedLabel && (
+                <NarrowRow onPick={(modelId, generalModelId, label) => narrowTurn(i, turn.query, modelId, generalModelId, label)} />
               )}
             </div>
           ))}
@@ -191,6 +220,49 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
       <style>{`
         @keyframes slideIn { from { transform: translateX(20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
       `}</style>
+    </div>
+  );
+}
+
+// "Know the sensor?" probe shown under the latest answer.
+function NarrowRow({ onPick }: { onPick: (modelId: string, generalModelId: string | null, label: string) => void }) {
+  const [makeId, setMakeId] = useState('');
+  const makes = useQuery({ queryKey: ['makes'], queryFn: async () => (await supabase.from('sensor_makes').select('id,name').order('name')).data ?? [] });
+  const models = useQuery({
+    queryKey: ['models-by-make', makeId],
+    queryFn: async () => makeId
+      ? (await supabase.from('sensor_models').select('id, model_no, name, category_id').eq('make_id', makeId).eq('is_general', false).order('model_no')).data ?? []
+      : [],
+    enabled: Boolean(makeId),
+  });
+  const generalModels = useQuery({
+    queryKey: ['general-models'],
+    queryFn: async () => (await supabase.from('sensor_models').select('id, category_id').eq('is_general', true)).data ?? [],
+  });
+
+  function pick(modelId: string) {
+    const m = (models.data ?? []).find((x: any) => x.id === modelId);
+    if (!m) return;
+    const makeName = (makes.data ?? []).find((x: any) => x.id === makeId)?.name ?? '';
+    const generalModelId = (generalModels.data ?? []).find((g: any) => g.category_id === m.category_id)?.id ?? null;
+    onPick(modelId, generalModelId, `${makeName} ${m.model_no || m.name}`.trim());
+  }
+
+  return (
+    <div className="bg-brand-50/70 border border-brand-100 rounded-lg px-3 py-2.5 space-y-2">
+      <div className="text-xs text-slate-600 font-medium">Know the sensor? Narrow to your make &amp; model:</div>
+      <div className="flex gap-2 flex-wrap">
+        <select className="rounded-md border border-slate-300 bg-white px-2 py-1.5 text-xs outline-none focus:border-brand-700"
+          value={makeId} onChange={(e) => setMakeId(e.target.value)}>
+          <option value="">Make…</option>
+          {makes.data?.map((m: any) => <option key={m.id} value={m.id}>{m.name}</option>)}
+        </select>
+        <select className="rounded-md border border-slate-300 bg-white px-2 py-1.5 text-xs outline-none focus:border-brand-700 disabled:opacity-50"
+          value="" onChange={(e) => pick(e.target.value)} disabled={!makeId}>
+          <option value="">{makeId ? 'Model…' : 'Pick a make first'}</option>
+          {models.data?.map((m: any) => <option key={m.id} value={m.id}>{m.model_no || m.name}</option>)}
+        </select>
+      </div>
     </div>
   );
 }
