@@ -87,7 +87,7 @@ export interface DocumentRow {
   size_bytes: number | null;
 }
 
-export type SubmissionStatus = 'pending' | 'approved' | 'rejected';
+export type SubmissionStatus = 'pending' | 'approved' | 'rejected' | 'changes_requested';
 export type SubmissionSection =
   | 'manual' | 'install' | 'troubleshooting' | 'datasheet' | 'calibration'
   | 'cleaning' | 'spares' | 'ppm' | 'wiring' | 'safety' | 'other';

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Bell, Inbox, CheckCircle2, XCircle } from 'lucide-react';
+import { Bell, Inbox, CheckCircle2, XCircle, RotateCcw } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../lib/auth';
 
@@ -151,6 +151,7 @@ export default function NotificationBell() {
 function iconFor(kind: string) {
   if (kind === 'submission_created') return <Inbox size={16} className="text-brand-700" />;
   if (kind === 'submission_approved') return <CheckCircle2 size={16} className="text-emerald-600" />;
+  if (kind === 'submission_changes_requested') return <RotateCcw size={16} className="text-orange-600" />;
   return <XCircle size={16} className="text-red-600" />;
 }
 

@@ -17,7 +17,7 @@ import {
 ========================================================= */
 export function ReviewQueueList() {
   const { profile } = useAuth();
-  const [status, setStatus] = useState<'pending' | 'approved' | 'rejected' | 'all'>('pending');
+  const [status, setStatus] = useState<'pending' | 'changes_requested' | 'approved' | 'rejected' | 'all'>('pending');
 
   const subs = useQuery({
     queryKey: ['review-queue', status],
@@ -36,7 +36,7 @@ export function ReviewQueueList() {
     queryKey: ['review-queue-counts'],
     queryFn: async () => {
       const r: any = {};
-      for (const s of ['pending', 'approved', 'rejected'] as const) {
+      for (const s of ['pending', 'changes_requested', 'approved', 'rejected'] as const) {
         const { count } = await supabase
           .from('document_submissions').select('id', { count: 'exact', head: true }).eq('status', s);
         r[s] = count ?? 0;
@@ -56,6 +56,7 @@ export function ReviewQueueList() {
         onChange={setStatus}
         options={[
           { value: 'pending', label: 'Pending', count: counts.data?.pending ?? 0, tone: 'amber' },
+          { value: 'changes_requested', label: 'Changes', count: counts.data?.changes_requested ?? 0, tone: 'amber' },
           { value: 'approved', label: 'Approved', count: counts.data?.approved ?? 0, tone: 'emerald' },
           { value: 'rejected', label: 'Rejected', count: counts.data?.rejected ?? 0, tone: 'red' },
           { value: 'all', label: 'All' },
@@ -91,9 +92,10 @@ export function ReviewQueueList() {
 }
 
 function StatusPill({ s }: { s: string }) {
-  if (s === 'pending') return <span className="badge bg-amber-100 text-amber-800">⏳ Pending</span>;
-  if (s === 'approved') return <span className="badge bg-emerald-100 text-emerald-800">✓ Approved</span>;
-  return <span className="badge bg-red-100 text-red-700">✕ Rejected</span>;
+  if (s === 'pending') return <span className="badge bg-amber-100 text-amber-800">Pending</span>;
+  if (s === 'approved') return <span className="badge bg-emerald-100 text-emerald-800">Approved</span>;
+  if (s === 'changes_requested') return <span className="badge bg-orange-100 text-orange-800">Changes requested</span>;
+  return <span className="badge bg-red-100 text-red-700">Rejected</span>;
 }
 
 /* =========================================================
@@ -109,6 +111,8 @@ export function ReviewQueueDetail() {
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [approveOpen, setApproveOpen] = useState(false);
   const [rejectOpen, setRejectOpen] = useState(false);
+  const [changesOpen, setChangesOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
 
   const sub = useQuery({
     queryKey: ['submission', id],
@@ -178,14 +182,20 @@ export function ReviewQueueDetail() {
           </span>
         </div>
         {s.status === 'pending' && (
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap">
             <button onClick={saveEdits} className="btn-secondary btn-sm">Save edits</button>
+            <button onClick={() => setChangesOpen(true)} className="btn btn-sm bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-100">Request changes</button>
             <button onClick={() => setRejectOpen(true)} className="btn btn-sm bg-red-50 text-red-700 border border-red-200 hover:bg-red-100">Reject</button>
             <button onClick={() => setApproveOpen(true)} className="btn-primary btn-sm">Approve…</button>
           </div>
         )}
-        {s.status !== 'pending' && s.reviewer_notes && (
-          <div className="text-xs text-slate-600"><strong>Note:</strong> {s.reviewer_notes}</div>
+        {s.status !== 'pending' && (
+          <div className="flex items-center gap-3 flex-wrap">
+            {s.reviewer_notes && <div className="text-xs text-slate-600"><strong>Note:</strong> {s.reviewer_notes}</div>}
+            {(s.status === 'rejected' || s.status === 'changes_requested') && s.storage_path && (
+              <button onClick={() => setDeleteOpen(true)} className="text-xs text-red-600 hover:underline">Delete file permanently</button>
+            )}
+          </div>
         )}
       </div>
 
@@ -238,8 +248,14 @@ export function ReviewQueueDetail() {
       {approveOpen && (
         <ApproveModal submission={s} editedText={editedText} onClose={() => setApproveOpen(false)} onDone={() => nav('/review')} />
       )}
+      {changesOpen && (
+        <RequestChangesModal submission={s} editedText={editedText} onClose={() => setChangesOpen(false)} onDone={() => nav('/review')} />
+      )}
       {rejectOpen && (
         <RejectModal submission={s} onClose={() => setRejectOpen(false)} onDone={() => nav('/review')} />
+      )}
+      {deleteOpen && (
+        <DeleteFileModal submission={s} onClose={() => setDeleteOpen(false)} onDone={() => nav('/review')} />
       )}
     </div>
   );
@@ -377,7 +393,73 @@ function ApproveModal({ submission, editedText, onClose, onDone }: any) {
 }
 
 /* =========================================================
-   Reject modal
+   Request changes modal — sends back to the maker; keeps the file
+========================================================= */
+function RequestChangesModal({ submission, editedText, onClose, onDone }: any) {
+  const qc = useQueryClient();
+  const [note, setNote] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function confirm() {
+    if (!note.trim()) { setErr('Tell the maker what needs to change.'); return; }
+    setBusy(true); setErr(null);
+    try {
+      // Keep the file; persist any edits the checker already made; send back.
+      const upd = await supabase.from('document_submissions').update({
+        status: 'changes_requested',
+        decision: 'changes_requested',
+        reviewer_notes: note.trim(),
+        reviewed_at: new Date().toISOString(),
+        extracted_text: editedText,
+      }).eq('id', submission.id);
+      if (upd.error) throw upd.error;
+
+      try {
+        if (submission.uploaded_by) {
+          await supabase.from('notifications').insert({
+            recipient_id: submission.uploaded_by,
+            kind: 'submission_changes_requested',
+            submission_id: submission.id,
+            message: `Changes requested on "${submission.title}" — ${note.trim()}`,
+          });
+        }
+      } catch (e) { console.warn('notify maker failed', e); }
+
+      qc.invalidateQueries({ queryKey: ['review-queue'] });
+      qc.invalidateQueries({ queryKey: ['review-queue-counts'] });
+      qc.invalidateQueries({ queryKey: ['my-submissions'] });
+      onDone();
+    } catch (e: any) {
+      setErr(e.message || String(e));
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-4" onClick={(e) => e.stopPropagation()}>
+        <div>
+          <h3 className="text-lg font-bold">Request changes</h3>
+          <p className="text-sm text-slate-500">The submission goes back to the maker to revise and resubmit. Nothing is deleted.</p>
+        </div>
+        <div>
+          <label className="label">What needs to change? <span className="text-red-500">*</span></label>
+          <textarea className="input min-h-24" value={note} onChange={(e) => setNote(e.target.value)}
+            placeholder="e.g. This is the wrong revision of the manual — please upload Rev 3, and the troubleshooting table on p.4 is cut off." />
+        </div>
+        {err && <div className="text-sm text-red-700 bg-red-50 border border-red-100 rounded px-3 py-2">{err}</div>}
+        <div className="flex justify-end gap-2">
+          <button onClick={onClose} className="btn-ghost">Cancel</button>
+          <button onClick={confirm} disabled={busy} className="btn bg-amber-600 text-white hover:bg-amber-700">{busy ? 'Sending…' : 'Send back for changes'}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* =========================================================
+   Reject modal — soft archive; the file is RETAINED
 ========================================================= */
 function RejectModal({ submission, onClose, onDone }: any) {
   const qc = useQueryClient();
@@ -388,22 +470,15 @@ function RejectModal({ submission, onClose, onDone }: any) {
   async function confirm() {
     setBusy(true); setErr(null);
     try {
-      // Delete the file from Storage
-      if (submission.storage_path) {
-        const { error: storageErr } = await supabase.storage.from('documents').remove([submission.storage_path]);
-        if (storageErr) console.warn('storage delete:', storageErr);
-      }
-      // Mark rejected
+      // Soft archive — keep the file and the record; no storage deletion.
       const upd = await supabase.from('document_submissions').update({
         status: 'rejected',
         decision: 'rejected',
         reviewer_notes: note || null,
         reviewed_at: new Date().toISOString(),
-        storage_path: null,
       }).eq('id', submission.id);
       if (upd.error) throw upd.error;
 
-      // Notify the maker
       try {
         if (submission.uploaded_by) {
           await supabase.from('notifications').insert({
@@ -430,17 +505,60 @@ function RejectModal({ submission, onClose, onDone }: any) {
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-4" onClick={(e) => e.stopPropagation()}>
         <div>
           <h3 className="text-lg font-bold">Reject submission</h3>
-          <p className="text-sm text-slate-500">The PDF will be deleted from storage. The maker will see your note.</p>
+          <p className="text-sm text-slate-500">Archives the submission as rejected. The file is retained — you can still delete it permanently later if needed. If the maker just needs to fix something, use <strong>Request changes</strong> instead.</p>
         </div>
         <div>
-          <label className="label">Reason</label>
+          <label className="label">Reason (optional)</label>
           <textarea className="input min-h-24" value={note} onChange={(e) => setNote(e.target.value)}
-            placeholder="Duplicate of existing content; please don't re-upload." />
+            placeholder="Not relevant to this sensor / superseded by another document." />
         </div>
         {err && <div className="text-sm text-red-700 bg-red-50 border border-red-100 rounded px-3 py-2">{err}</div>}
         <div className="flex justify-end gap-2">
           <button onClick={onClose} className="btn-ghost">Cancel</button>
-          <button onClick={confirm} disabled={busy} className="btn bg-red-600 text-white hover:bg-red-700">{busy ? 'Rejecting…' : 'Reject & delete'}</button>
+          <button onClick={confirm} disabled={busy} className="btn bg-red-600 text-white hover:bg-red-700">{busy ? 'Rejecting…' : 'Reject'}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* =========================================================
+   Delete file permanently — explicit purge of a non-pending submission
+========================================================= */
+function DeleteFileModal({ submission, onClose, onDone }: any) {
+  const qc = useQueryClient();
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function confirm() {
+    setBusy(true); setErr(null);
+    try {
+      if (submission.storage_path) {
+        const { error: storageErr } = await supabase.storage.from('documents').remove([submission.storage_path]);
+        if (storageErr) console.warn('storage delete:', storageErr);
+      }
+      const upd = await supabase.from('document_submissions').update({ storage_path: null }).eq('id', submission.id);
+      if (upd.error) throw upd.error;
+      qc.invalidateQueries({ queryKey: ['review-queue'] });
+      qc.invalidateQueries({ queryKey: ['submission', submission.id] });
+      onDone();
+    } catch (e: any) {
+      setErr(e.message || String(e));
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-4" onClick={(e) => e.stopPropagation()}>
+        <div>
+          <h3 className="text-lg font-bold">Delete file permanently?</h3>
+          <p className="text-sm text-slate-500">This removes the uploaded file from storage for good. The submission record and its notes are kept for audit. Use this only for junk or sensitive uploads.</p>
+        </div>
+        {err && <div className="text-sm text-red-700 bg-red-50 border border-red-100 rounded px-3 py-2">{err}</div>}
+        <div className="flex justify-end gap-2">
+          <button onClick={onClose} className="btn-ghost">Cancel</button>
+          <button onClick={confirm} disabled={busy} className="btn bg-red-600 text-white hover:bg-red-700">{busy ? 'Deleting…' : 'Delete permanently'}</button>
         </div>
       </div>
     </div>
