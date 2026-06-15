@@ -6,7 +6,7 @@ import {
   ArrowLeft, PencilLine, FileText, Wrench, Layers, ChevronUp, ChevronDown,
   ExternalLink, FlaskConical, Droplets, CalendarClock, CheckCircle2, Circle,
   FileStack, BookOpenText, History, CheckCheck, ScanSearch, Zap, Settings,
-  Beaker, Cog, Hammer, Activity, MapPin, Terminal,
+  Beaker, Cog, Hammer, Activity, MapPin, Terminal, Globe2,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth, isAdmin } from '../lib/auth';
@@ -65,11 +65,29 @@ export default function ConsolidatedViewer() {
     queryFn: async () => {
       const { data } = await supabase
         .from('consolidated_docs')
-        .select('*, sensor_models(model_no, sensor_makes(name), sensor_categories(name))')
+        .select('*, sensor_models(model_no, category_id, is_general, sensor_makes(name), sensor_categories(name))')
         .eq('id', id)
         .maybeSingle();
       return data;
     },
+  });
+
+  // General (category-level) guidance to layer under a specific model.
+  const isGeneralDoc = Boolean(cdoc.data?.sensor_models?.is_general);
+  const categoryId = cdoc.data?.sensor_models?.category_id ?? null;
+  const generalDoc = useQuery({
+    queryKey: ['general-doc', categoryId],
+    queryFn: async () => {
+      if (!categoryId) return null;
+      const { data } = await supabase
+        .from('consolidated_docs')
+        .select('content_markdown, sensor_models!inner(category_id, is_general)')
+        .eq('sensor_models.category_id', categoryId)
+        .eq('sensor_models.is_general', true)
+        .maybeSingle();
+      return data;
+    },
+    enabled: Boolean(categoryId) && !isGeneralDoc,
   });
 
   const sources = useQuery({
@@ -91,7 +109,11 @@ export default function ConsolidatedViewer() {
   // migration 018 + scripts/translate-docs.mjs. When enabled, this is where
   // the cached translation would be loaded based on a language picker.
   const sections = useMemo(() => parseSections(cdoc.data?.content_markdown), [cdoc.data?.content_markdown]);
-  const presentSections = SECTION_ORDER.filter((s) => sections[s]);
+  const generalSections = useMemo(() => parseSections(generalDoc.data?.content_markdown), [generalDoc.data?.content_markdown]);
+  const [showGeneral, setShowGeneral] = useState(true);
+  const hasGeneral = SECTION_ORDER.some((s) => generalSections[s]);
+  // A section is shown if the model has content, or (when general is on) general has content.
+  const presentSections = SECTION_ORDER.filter((s) => sections[s] || (showGeneral && !isGeneralDoc && generalSections[s]));
 
   // Source files (inputs) grouped by their document TYPE — manuals, datasheets, etc.
   const sourcesByDocType = useMemo(() => {
@@ -123,7 +145,7 @@ export default function ConsolidatedViewer() {
       marks[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
     }, 80);
     return () => clearTimeout(t);
-  }, [highlight, cdoc.data?.content_markdown, mode]);
+  }, [highlight, cdoc.data?.content_markdown, generalDoc.data?.content_markdown, showGeneral, mode]);
 
   // Track in-view section (consolidated mode only)
   useEffect(() => {
@@ -260,6 +282,17 @@ export default function ConsolidatedViewer() {
 
           {mode === 'consolidated' && (
             <div className="flex items-center gap-2">
+              {!isGeneralDoc && hasGeneral && (
+                <button
+                  onClick={() => setShowGeneral((v) => !v)}
+                  className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs font-medium transition ${
+                    showGeneral ? 'bg-brand-700 text-white border-brand-700' : 'bg-white text-slate-600 border-slate-200 hover:border-brand-700'
+                  }`}
+                  title="Show general category-level guidance alongside this model"
+                >
+                  <Globe2 size={13} /> General guidance
+                </button>
+              )}
               <input
                 className="rounded-md border border-slate-300 px-3 py-1.5 text-sm w-48 focus:border-brand-700 focus:ring-2 focus:ring-brand-700/15 outline-none"
                 value={highlight}
@@ -358,10 +391,28 @@ export default function ConsolidatedViewer() {
                     </span>
                     <h2 className="text-sm font-semibold text-brand-900 tracking-tight">{SECTION_LABEL[s]}</h2>
                   </div>
-                  <div
-                    className="doc-prose px-6 py-5"
-                    dangerouslySetInnerHTML={{ __html: renderMarkdown(sections[s], highlight) }}
-                  />
+
+                  {/* Model-specific content */}
+                  {sections[s] && (
+                    <div
+                      className="doc-prose px-6 py-5"
+                      dangerouslySetInnerHTML={{ __html: renderMarkdown(sections[s], highlight) }}
+                    />
+                  )}
+
+                  {/* General (category-level) guidance, layered below */}
+                  {showGeneral && !isGeneralDoc && generalSections[s] && (
+                    <div className={`px-6 py-5 bg-slate-50/70 ${sections[s] ? 'border-t border-slate-200' : ''}`}>
+                      <div className="inline-flex items-center gap-1.5 text-[11px] uppercase tracking-wide font-semibold text-slate-500 mb-2">
+                        <Globe2 size={12} />
+                        General {cdoc.data?.sensor_models?.sensor_categories?.name} guidance
+                      </div>
+                      <div
+                        className="doc-prose"
+                        dangerouslySetInnerHTML={{ __html: renderMarkdown(generalSections[s], highlight) }}
+                      />
+                    </div>
+                  )}
                 </section>
               ))}
             </>

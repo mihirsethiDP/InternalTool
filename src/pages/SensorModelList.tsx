@@ -28,6 +28,7 @@ export default function SensorModelList() {
       let qb = supabase
         .from('sensor_models')
         .select('id, model_no, name, sensor_makes(name), sensor_categories(name)')
+        .eq('is_general', false)
         .order('model_no')
         .limit(2000);
       if (cat) qb = qb.eq('category_id', cat);

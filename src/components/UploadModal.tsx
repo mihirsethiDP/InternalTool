@@ -46,6 +46,8 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
   const [typeId, setTypeId] = useState('');
   const [sensorModelId, setSensorModelId] = useState(defaults.sensor_model_id ?? '');
   const [makeId, setMakeId] = useState('');
+  const [scope, setScope] = useState<'model' | 'general'>('model');
+  const [categoryId, setCategoryId] = useState('');
   const [suggestedSection, setSuggestedSection] = useState('');
   const [vendorUrl, setVendorUrl] = useState('');
   const [dragOver, setDragOver] = useState(false);
@@ -64,8 +66,14 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
   const makes = useQuery({ queryKey: ['makes'], queryFn: async () => (await supabase.from('sensor_makes').select('id,name').order('name')).data ?? [] });
   const models = useQuery({
     queryKey: ['models-by-make', makeId],
-    queryFn: async () => makeId ? ((await supabase.from('sensor_models').select('id, model_no, name').eq('make_id', makeId).order('model_no')).data ?? []) : [],
+    queryFn: async () => makeId ? ((await supabase.from('sensor_models').select('id, model_no, name').eq('make_id', makeId).eq('is_general', false).order('model_no')).data ?? []) : [],
     enabled: Boolean(makeId),
+  });
+  const categories = useQuery({ queryKey: ['cats'], queryFn: async () => (await supabase.from('sensor_categories').select('id,name').order('name')).data ?? [] });
+  // Map category -> its synthetic "general" sensor_model id
+  const generalModels = useQuery({
+    queryKey: ['general-models'],
+    queryFn: async () => (await supabase.from('sensor_models').select('id, category_id').eq('is_general', true)).data ?? [],
   });
 
   // Recent picks (type & make only — plants gone)
@@ -109,10 +117,21 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
   function pickFile(f: File | null) { setFile(f); setError(null); }
   function onDrop(e: React.DragEvent) { e.preventDefault(); setDragOver(false); const f = e.dataTransfer.files?.[0]; if (f) pickFile(f); }
 
+  // Resolve the sensor_model_id the submission attaches to.
+  const generalModelId = scope === 'general'
+    ? (generalModels.data ?? []).find((g: any) => g.category_id === categoryId)?.id
+    : null;
+  const resolvedModelId = scope === 'general' ? generalModelId : sensorModelId;
+
   function valid(): string | null {
     if (!file) return 'Choose a file.';
     if (!typeId) return 'Pick a document type.';
-    if (!sensorModelId) return 'Pick the sensor (make + model) this document is for.';
+    if (scope === 'general') {
+      if (!categoryId) return 'Pick the sensor category this general guidance applies to.';
+      if (!generalModelId) return 'No general entry exists for that category yet — run migration 022.';
+    } else if (!sensorModelId) {
+      return 'Pick the sensor (make + model) this document is for.';
+    }
     return null;
   }
 
@@ -155,7 +174,7 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
     const insert = await supabase.from('document_submissions').insert({
       title,
       type_id: typeId,
-      sensor_model_id: sensorModelId,
+      sensor_model_id: resolvedModelId,
       storage_path: storagePath,
       vendor_url: vendorUrl || null,
       size_bytes: file.size,
@@ -271,46 +290,72 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
           </div>
 
           <div className="rounded-2xl bg-slate-50 border border-slate-200 p-5 space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="text-xs uppercase tracking-wide font-semibold text-slate-500">Which sensor is this for?</div>
-              <button type="button" className="text-xs text-brand-700 font-medium hover:underline" onClick={() => setShowAddSensor(true)}>
-                + Can't find it? Add new sensor
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div className="text-xs uppercase tracking-wide font-semibold text-slate-500">What does this apply to?</div>
+              {scope === 'model' && (
+                <button type="button" className="text-xs text-brand-700 font-medium hover:underline" onClick={() => setShowAddSensor(true)}>
+                  + Can't find it? Add new sensor
+                </button>
+              )}
+            </div>
+
+            {/* Scope toggle */}
+            <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden bg-white">
+              <button type="button" onClick={() => setScope('model')}
+                className={`px-3 py-1.5 text-xs font-medium transition ${scope === 'model' ? 'bg-brand-700 text-white' : 'text-slate-600 hover:text-brand-700'}`}>
+                A specific model
+              </button>
+              <button type="button" onClick={() => setScope('general')}
+                className={`px-3 py-1.5 text-xs font-medium transition border-l border-slate-200 ${scope === 'general' ? 'bg-brand-700 text-white' : 'text-slate-600 hover:text-brand-700'}`}>
+                All sensors of a category (general)
               </button>
             </div>
 
-            {recentMakeIds.length > 0 && (
-              <div className="flex flex-wrap gap-1.5">
-                <span className="text-xs text-slate-500 self-center mr-1">Recent makes:</span>
-                {recentMakeIds.map((mid) => {
-                  const m = labelOf(makes.data, mid);
-                  if (!m) return null;
-                  const active = makeId === mid;
-                  return (
-                    <button type="button" key={mid} onClick={() => { setMakeId(mid); setSensorModelId(''); }}
-                      className={`rounded-full px-3 py-1 text-xs font-medium border transition ${active ? 'bg-brand-700 text-white border-brand-700' : 'bg-white text-slate-700 border-slate-200 hover:border-brand-700 hover:text-brand-700'}`}>
-                      {m.name}
-                    </button>
-                  );
-                })}
+            {scope === 'general' ? (
+              <div>
+                <label className="label">Sensor category <span className="text-red-500">*</span></label>
+                <select className="input" value={categoryId} onChange={(e) => setCategoryId(e.target.value)} required>
+                  <option value="">— Select category —</option>
+                  {categories.data?.map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+                <div className="text-xs text-slate-500 mt-1.5">This guidance will show on every sensor in the category, alongside model-specific content.</div>
               </div>
+            ) : (
+              <>
+                {recentMakeIds.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    <span className="text-xs text-slate-500 self-center mr-1">Recent makes:</span>
+                    {recentMakeIds.map((mid) => {
+                      const m = labelOf(makes.data, mid);
+                      if (!m) return null;
+                      const active = makeId === mid;
+                      return (
+                        <button type="button" key={mid} onClick={() => { setMakeId(mid); setSensorModelId(''); }}
+                          className={`rounded-full px-3 py-1 text-xs font-medium border transition ${active ? 'bg-brand-700 text-white border-brand-700' : 'bg-white text-slate-700 border-slate-200 hover:border-brand-700 hover:text-brand-700'}`}>
+                          {m.name}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div>
+                    <label className="label">Make <span className="text-red-500">*</span></label>
+                    <select className="input" value={makeId} onChange={(e) => { setMakeId(e.target.value); setSensorModelId(''); }}>
+                      <option value="">— Select make —</option>
+                      {makes.data?.map((m: any) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="label">Model <span className="text-red-500">*</span></label>
+                    <select className="input" value={sensorModelId} onChange={(e) => setSensorModelId(e.target.value)} disabled={!makeId}>
+                      <option value="">{makeId ? '— Select model —' : 'Pick a make first'}</option>
+                      {models.data?.map((m: any) => <option key={m.id} value={m.id}>{m.model_no || m.name}</option>)}
+                    </select>
+                  </div>
+                </div>
+              </>
             )}
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div>
-                <label className="label">Make <span className="text-red-500">*</span></label>
-                <select className="input" value={makeId} onChange={(e) => { setMakeId(e.target.value); setSensorModelId(''); }} required>
-                  <option value="">— Select make —</option>
-                  {makes.data?.map((m: any) => <option key={m.id} value={m.id}>{m.name}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="label">Model <span className="text-red-500">*</span></label>
-                <select className="input" value={sensorModelId} onChange={(e) => setSensorModelId(e.target.value)} disabled={!makeId} required>
-                  <option value="">{makeId ? '— Select model —' : 'Pick a make first'}</option>
-                  {models.data?.map((m: any) => <option key={m.id} value={m.id}>{m.model_no || m.name}</option>)}
-                </select>
-              </div>
-            </div>
 
             <div>
               <label className="label">Suggested category (optional)</label>

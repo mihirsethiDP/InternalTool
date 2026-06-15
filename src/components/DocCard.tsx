@@ -22,7 +22,7 @@ export function DocCard({ hit, query }: { hit: SearchHit; query?: string }) {
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 flex-wrap">
-            <h3 className="font-semibold text-slate-900 truncate">{hit.document_title}</h3>
+            <h3 className="font-semibold text-slate-900 truncate">{hit.document_title?.trim()}</h3>
             {hit.type_label && <span className="badge-blue">{hit.type_label}</span>}
             {hit.page_number != null && <span className="badge">p.{hit.page_number}</span>}
           </div>
