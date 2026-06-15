@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { X, Send, ArrowRight, ExternalLink } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { runSearch } from '../lib/search';
+import { logUnanswered } from '../lib/telemetry';
 import { SECTION_LABEL } from '../lib/consolidated';
 import type { SubmissionSection } from '../lib/types';
 
@@ -61,6 +62,9 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
       { role: 'bot', query: q, hits: [], loading: true },
     ]);
     const { data, error } = await supabase.rpc('chat_search', { q, p_limit: 5 });
+    if (!error && ((data as Hit[]) ?? []).length === 0) {
+      logUnanswered({ query: q, source: 'chat' });
+    }
     setTurns((t) => {
       const copy = [...t];
       // replace the last loading bot turn

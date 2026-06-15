@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+import { logUnanswered } from '../lib/telemetry';
 import {
   Search as SearchIcon, MessageSquare, Wrench, Gauge, FlaskConical,
   ArrowRight, FileText,
@@ -79,6 +80,16 @@ export default function Home() {
   const activeSearch = modelId ? narrowed : search;
   const hits = activeSearch.data?.hits ?? [];
   function clearNarrow() { setMakeId(''); setModelId(''); }
+
+  // Log a query that settles with zero results (debounced so half-typed
+  // fragments aren't recorded). Feeds the "what's missing" demand signal.
+  useEffect(() => {
+    if (q.trim().length < 3 || activeSearch.isLoading || !activeSearch.data || hits.length > 0) return;
+    const handle = setTimeout(() => {
+      logUnanswered({ query: q, source: 'search', sensorModelId: modelId || null });
+    }, 1200);
+    return () => clearTimeout(handle);
+  }, [q, modelId, hits.length, activeSearch.isLoading, activeSearch.data]);
 
   // Pilot sensors — fully documented, surfaced as quick entry points
   const pilots = useQuery({
