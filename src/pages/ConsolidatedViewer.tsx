@@ -12,6 +12,7 @@ import { supabase } from '../lib/supabase';
 import { useAuth, isAdmin } from '../lib/auth';
 import { SECTION_LABEL, SECTION_ORDER, parseSections } from '../lib/consolidated';
 import RevisionHistory from '../components/RevisionHistory';
+import AnswerFeedback from '../components/AnswerFeedback';
 import type { SubmissionSection } from '../lib/types';
 
 export const SECTION_ICON: Record<SubmissionSection, React.ReactNode> = {
@@ -416,6 +417,18 @@ export default function ConsolidatedViewer() {
                 </section>
               ))}
             </>
+          )}
+
+          {/* Answer feedback — did this actually solve the operator's problem? */}
+          {((mode === 'consolidated' && presentSections.length > 0) || (mode === 'docs' && docTypeGroups.length > 0)) && (
+            <div className="bg-white rounded-xl border border-slate-200 px-5 py-4">
+              <AnswerFeedback
+                query={highlight || undefined}
+                consolidatedDocId={id}
+                sensorModelId={cdoc.data?.sensor_model_id}
+                source="viewer"
+              />
+            </div>
           )}
         </div>
 
