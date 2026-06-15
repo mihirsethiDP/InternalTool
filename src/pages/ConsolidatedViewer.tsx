@@ -6,11 +6,12 @@ import {
   ArrowLeft, PencilLine, FileText, BookOpen, Wrench, ClipboardList,
   FileSpreadsheet, Layers, ChevronUp, ChevronDown, ExternalLink,
   FlaskConical, Droplets, Package, CalendarClock, Cable, ShieldAlert,
-  CheckCircle2, Circle, FileStack, BookOpenText,
+  CheckCircle2, Circle, FileStack, BookOpenText, History,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth, isAdmin } from '../lib/auth';
 import { SECTION_LABEL, SECTION_ORDER, parseSections } from '../lib/consolidated';
+import RevisionHistory from '../components/RevisionHistory';
 import type { SubmissionSection } from '../lib/types';
 
 export const SECTION_ICON: Record<SubmissionSection, React.ReactNode> = {
@@ -46,6 +47,7 @@ export default function ConsolidatedViewer() {
   const [mode, setMode] = useState<ViewMode>(initialQuery ? 'consolidated' : 'docs');
   const [highlight, setHighlight] = useState(initialQuery);
   const [activeSection, setActiveSection] = useState<SubmissionSection | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const sectionRefs = useRef<Partial<Record<SubmissionSection, HTMLElement | null>>>({});
@@ -192,6 +194,11 @@ export default function ConsolidatedViewer() {
             <button onClick={() => nav(-1)} className="inline-flex items-center gap-1.5 bg-white/10 hover:bg-white/20 text-white rounded-md px-3 py-2 text-sm transition">
               <ArrowLeft size={15} /> {t('viewer.back')}
             </button>
+            {isAdmin(profile) && (
+              <button onClick={() => setHistoryOpen(true)} className="inline-flex items-center gap-1.5 bg-white/10 hover:bg-white/20 text-white rounded-md px-3 py-2 text-sm transition">
+                <History size={15} /> History
+              </button>
+            )}
             {isAdmin(profile) && (
               <button onClick={() => nav(`/consolidated/${id}/edit`)} className="inline-flex items-center gap-1.5 bg-white text-brand-700 hover:bg-slate-100 rounded-md px-3 py-2 text-sm font-medium transition">
                 <PencilLine size={15} /> {t('viewer.edit')}
@@ -412,6 +419,16 @@ export default function ConsolidatedViewer() {
           outline-offset: 1px;
         }
       `}</style>
+
+      {historyOpen && cdoc.data && (
+        <RevisionHistory
+          docId={id!}
+          sensorModelId={cdoc.data.sensor_model_id}
+          currentMarkdown={cdoc.data.content_markdown ?? ''}
+          onClose={() => setHistoryOpen(false)}
+          onReverted={() => setHistoryOpen(false)}
+        />
+      )}
     </div>
   );
 }

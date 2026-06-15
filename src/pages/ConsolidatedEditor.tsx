@@ -9,8 +9,9 @@ import { supabase } from '../lib/supabase';
 import { useAuth, isAdmin } from '../lib/auth';
 import PageHeader from '../components/PageHeader';
 import {
-  SECTION_LABEL, SECTION_ORDER, parseSections, renderSections, chunkSections,
+  SECTION_LABEL, SECTION_ORDER, parseSections, renderSections,
 } from '../lib/consolidated';
+import { writeConsolidated } from '../lib/consolidatedWrite';
 import type { SubmissionSection } from '../lib/types';
 
 /**
@@ -55,27 +56,13 @@ export default function ConsolidatedEditor() {
     setBusy(true);
     try {
       const merged = renderSections(sections);
-      const upd = await supabase.from('consolidated_docs').update({
-        content_markdown: merged,
-        last_updated_at: new Date().toISOString(),
-      }).eq('id', id);
-      if (upd.error) throw upd.error;
-
-      // Rebuild chunks
-      await supabase.from('consolidated_doc_chunks').delete().eq('consolidated_doc_id', id);
-      const chunks = chunkSections(sections);
-      if (chunks.length) {
-        for (let i = 0; i < chunks.length; i += 50) {
-          const batch = chunks.slice(i, i + 50).map((c) => ({
-            consolidated_doc_id: id,
-            sensor_model_id: cdoc.data.sensor_model_id,
-            section: c.section,
-            chunk_text: c.text,
-          }));
-          const { error } = await supabase.from('consolidated_doc_chunks').insert(batch);
-          if (error) throw error;
-        }
-      }
+      await writeConsolidated({
+        docId: id!,
+        sensorModelId: cdoc.data.sensor_model_id,
+        markdown: merged,
+        changeKind: 'edit',
+        note: 'Manual edit',
+      });
       qc.invalidateQueries({ queryKey: ['consolidated-doc', id] });
       qc.invalidateQueries({ queryKey: ['recent-consolidated'] });
       setSavedAt(new Date().toLocaleTimeString());

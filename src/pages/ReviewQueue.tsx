@@ -8,9 +8,9 @@ import { useAuth, isAdmin } from '../lib/auth';
 import PageHeader from '../components/PageHeader';
 import type { SubmissionSection } from '../lib/types';
 import {
-  SECTION_LABEL, SECTION_ORDER, parseSections, replaceSection, appendSection,
-  chunkSections, renderSections,
+  SECTION_LABEL, SECTION_ORDER, replaceSection, appendSection,
 } from '../lib/consolidated';
+import { writeConsolidated } from '../lib/consolidatedWrite';
 
 /* =========================================================
    List page — /review
@@ -295,28 +295,14 @@ function ApproveModal({ submission, editedText, onClose, onDone }: any) {
         : appendSection(cdoc.content_markdown, section, editedText,
             `Appended from "${submission.title}" on ${new Date().toLocaleDateString()}`);
 
-      // 3. Save updated markdown
-      const upd = await supabase.from('consolidated_docs')
-        .update({ content_markdown: merged, last_updated_at: new Date().toISOString() })
-        .eq('id', cdoc.id);
-      if (upd.error) throw upd.error;
-
-      // 4. Rebuild chunks for this consolidated doc
-      const sections = parseSections(merged);
-      const chunks = chunkSections(sections);
-      await supabase.from('consolidated_doc_chunks').delete().eq('consolidated_doc_id', cdoc.id);
-      if (chunks.length) {
-        for (let i = 0; i < chunks.length; i += 50) {
-          const batch = chunks.slice(i, i + 50).map((c) => ({
-            consolidated_doc_id: cdoc.id,
-            sensor_model_id: sensorModelId,
-            section: c.section,
-            chunk_text: c.text,
-          }));
-          const { error } = await supabase.from('consolidated_doc_chunks').insert(batch);
-          if (error) throw error;
-        }
-      }
+      // 3. Save markdown + rebuild chunks + record a revision snapshot
+      await writeConsolidated({
+        docId: cdoc.id,
+        sensorModelId,
+        markdown: merged,
+        changeKind: 'approval',
+        note: `Approved "${submission.title}" into ${SECTION_LABEL[section]} (${mode})${note ? ` — ${note}` : ''}`,
+      });
 
       // 5. Mark submission approved
       const decision = mode === 'replace' ? 'replace_section' : 'append_section';
@@ -564,6 +550,3 @@ function DeleteFileModal({ submission, onClose, onDone }: any) {
     </div>
   );
 }
-
-// Re-export helpers if needed externally
-export { parseSections, renderSections };
