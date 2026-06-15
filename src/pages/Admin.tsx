@@ -6,7 +6,7 @@ import { useAuth, isAdmin } from '../lib/auth';
 import PageHeader from '../components/PageHeader';
 import { ReviewQueueList } from './ReviewQueue';
 
-type AdminTab = 'review' | 'consolidated' | 'users' | 'types';
+type AdminTab = 'review' | 'consolidated' | 'categories' | 'users' | 'types';
 
 export default function Admin() {
   const { profile } = useAuth();
@@ -43,12 +43,14 @@ export default function Admin() {
       <div className="border-b border-slate-200 flex gap-1 overflow-x-auto">
         <Tab name="review" active={tab} onClick={setTab} badge={pending.data ?? 0}>Review queue</Tab>
         <Tab name="consolidated" active={tab} onClick={setTab}>Consolidated references</Tab>
+        <Tab name="categories" active={tab} onClick={setTab}>Categories</Tab>
         <Tab name="users" active={tab} onClick={setTab}>Users</Tab>
         <Tab name="types" active={tab} onClick={setTab}>Document types</Tab>
       </div>
 
       {tab === 'review' && <ReviewQueueList />}
       {tab === 'consolidated' && <ConsolidatedDocsPanel />}
+      {tab === 'categories' && <CategoriesPanel />}
       {tab === 'users' && <UsersPanel onChanged={() => qc.invalidateQueries({ queryKey: ['admin-users'] })} />}
       {tab === 'types' && <TypesPanel />}
     </div>
@@ -107,6 +109,59 @@ function ConsolidatedDocsPanel() {
           </Link>
         ))}
       </div>
+    </div>
+  );
+}
+
+function CategoriesPanel() {
+  const qc = useQueryClient();
+  const [name, setName] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const cats = useQuery({
+    queryKey: ['admin-categories'],
+    queryFn: async () => (await supabase
+      .from('sensor_categories')
+      .select('id, name, sensor_models(count)')
+      .order('name')).data ?? [],
+  });
+
+  async function add(e: React.FormEvent) {
+    e.preventDefault();
+    const n = name.trim();
+    if (!n) return;
+    setBusy(true); setErr(null);
+    const { error } = await supabase.from('sensor_categories').insert({ name: n });
+    setBusy(false);
+    if (error) { setErr(error.message); return; }
+    setName('');
+    // A general entry is auto-created by the DB trigger.
+    qc.invalidateQueries({ queryKey: ['admin-categories'] });
+    qc.invalidateQueries({ queryKey: ['cats'] });
+    qc.invalidateQueries({ queryKey: ['general-models'] });
+  }
+
+  return (
+    <div className="card space-y-4">
+      <p className="text-xs text-slate-500">
+        Adding a category instantly creates its <strong>General {`{category}`} guidance</strong> entry, so you can
+        start filing category-level content right away.
+      </p>
+      <form onSubmit={add} className="flex gap-2 flex-wrap">
+        <input className="input flex-1 min-w-56" placeholder="New category (e.g. Gas Analysers)"
+          value={name} onChange={(e) => setName(e.target.value)} />
+        <button className="btn-primary" disabled={busy}>{busy ? 'Adding…' : 'Add category'}</button>
+      </form>
+      {err && <div className="text-sm text-red-700 bg-red-50 border border-red-100 rounded px-3 py-2">{err}</div>}
+      <ul className="divide-y divide-slate-100 text-sm">
+        {(cats.data ?? []).map((c: any) => (
+          <li key={c.id} className="py-2 flex items-center justify-between">
+            <span className="font-medium text-slate-800">{c.name}</span>
+            <span className="muted text-xs">{(c.sensor_models?.[0]?.count ?? 0)} model(s)</span>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
