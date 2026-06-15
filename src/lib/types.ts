@@ -88,9 +88,13 @@ export interface DocumentRow {
 }
 
 export type SubmissionStatus = 'pending' | 'approved' | 'rejected' | 'changes_requested';
+// Output WORK-TYPE sections of a consolidated reference (the 14-category
+// maintenance/diagnostic taxonomy + 'other'). Distinct from a document's
+// input form (document_types).
 export type SubmissionSection =
-  | 'manual' | 'install' | 'troubleshooting' | 'datasheet' | 'calibration'
-  | 'cleaning' | 'spares' | 'ppm' | 'wiring' | 'safety' | 'other';
+  | 'troubleshooting' | 'cleaning' | 'calibration' | 'verification' | 'inspection'
+  | 'electrical' | 'configuration' | 'consumable' | 'component' | 'preventive'
+  | 'corrective' | 'data_quality' | 'install_improve' | 'software' | 'other';
 
 export interface DocumentSubmission {
   id: string;

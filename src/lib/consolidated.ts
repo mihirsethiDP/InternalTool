@@ -1,41 +1,65 @@
 // Helpers for the consolidated-doc workflow.
-// A consolidated doc is plain markdown organised into five fixed sections:
-//   ## manual
-//   ## install
-//   ## troubleshooting
-//   ## datasheet
-//   ## other
-// Each section's body is everything between its ## header and the next ##
-// header. Sections in this fixed order are always present (possibly empty)
-// so replace / append operations are predictable.
+//
+// A consolidated reference is the OUTPUT: operator-facing content organised
+// by WORK TYPE (the 14-category maintenance/diagnostic taxonomy below), NOT
+// by the form of the source document. Raw uploads (manual, datasheet, install
+// guide) are INPUTS — kept as source files — and their content is filed into
+// these work-type sections at approval time.
+//
+// Stored as plain markdown with one "## <section-key>" header per section.
 
 import type { SubmissionSection } from './types';
 
+// Troubleshooting first (the tool's purpose), then operator work-types.
 export const SECTION_ORDER: SubmissionSection[] = [
-  'troubleshooting', 'manual', 'install', 'datasheet', 'calibration',
-  'cleaning', 'spares', 'ppm', 'wiring', 'safety', 'other',
+  'troubleshooting', 'cleaning', 'calibration', 'verification', 'inspection',
+  'electrical', 'configuration', 'consumable', 'component', 'preventive',
+  'corrective', 'data_quality', 'install_improve', 'software', 'other',
 ];
 
 export const SECTION_LABEL: Record<SubmissionSection, string> = {
-  manual: 'Sensor Manual',
-  install: 'Installation Guide',
-  troubleshooting: 'Troubleshooting Steps',
-  datasheet: 'Technical Data Sheet',
-  calibration: 'Calibration Procedure',
-  cleaning: 'Cleaning & Maintenance',
-  spares: 'Spares & Consumables',
-  ppm: 'PPM Schedule',
-  wiring: 'Wiring & Communication',
-  safety: 'Safety & Handling',
+  troubleshooting: 'Troubleshooting',
+  cleaning: 'Cleaning',
+  calibration: 'Calibration',
+  verification: 'Verification & Validation',
+  inspection: 'Inspection',
+  electrical: 'Electrical & Signal Checks',
+  configuration: 'Configuration',
+  consumable: 'Consumable Replacement',
+  component: 'Component Replacement',
+  preventive: 'Preventive Maintenance',
+  corrective: 'Corrective Maintenance',
+  data_quality: 'Data Quality Management',
+  install_improve: 'Installation Improvement',
+  software: 'Software & Firmware',
   other: 'Other',
+};
+
+// One-line description of each work type (used as helper text in pickers).
+export const SECTION_HINT: Record<SubmissionSection, string> = {
+  troubleshooting: 'Abnormal readings, no-data, fault codes, root-cause analysis',
+  cleaning: 'Probe / housing / flow-cell cleaning, wiper & auto-clean checks',
+  calibration: 'Zero, span, multi-point, field & lab calibration, records',
+  verification: 'Cross-checks, drift / response / accuracy / repeatability checks',
+  inspection: 'Physical, cable, mounting, sampling-point, environmental inspection',
+  electrical: 'Power, signal output, noise, communication, data-mapping checks',
+  configuration: 'Range, units, alarms, sampling rate, damping, compensation',
+  consumable: 'Electrolyte, membrane, reagent, reference solution, filters',
+  component: 'Probe, cable, transmitter, battery, wiper, pump/tubing replacement',
+  preventive: 'PM schedule, calibration-due tracking, spare planning',
+  corrective: 'Fault repair, reinstallation, bypass, post-repair validation',
+  data_quality: 'Outlier detection, data gaps, validation rules, health scoring',
+  install_improve: 'Relocation, protection, sample conditioning, flow correction',
+  software: 'Firmware update, parameter backup, reset, diagnostic-log review',
+  other: 'Anything that does not fit the categories above',
 };
 
 export type Sections = Record<SubmissionSection, string>;
 
-const EMPTY_SECTIONS = (): Sections => ({
-  manual: '', install: '', troubleshooting: '', datasheet: '', calibration: '',
-  cleaning: '', spares: '', ppm: '', wiring: '', safety: '', other: '',
-});
+const EMPTY_SECTIONS = (): Sections =>
+  Object.fromEntries(SECTION_ORDER.map((s) => [s, ''])) as unknown as Sections;
+
+const SECTION_RE = new RegExp(`^##\\s+(${SECTION_ORDER.join('|')})\\b`, 'i');
 
 export function parseSections(md: string | null | undefined): Sections {
   const out = EMPTY_SECTIONS();
@@ -44,7 +68,7 @@ export function parseSections(md: string | null | undefined): Sections {
   let current: SubmissionSection | null = null;
   const buffers = Object.fromEntries(SECTION_ORDER.map((s) => [s, []])) as unknown as Record<SubmissionSection, string[]>;
   for (const line of lines) {
-    const m = line.match(/^##\s+(manual|install|troubleshooting|datasheet|calibration|cleaning|spares|ppm|wiring|safety|other)\b/i);
+    const m = line.match(SECTION_RE);
     if (m) {
       current = m[1].toLowerCase() as SubmissionSection;
       continue;

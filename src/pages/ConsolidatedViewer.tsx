@@ -3,10 +3,10 @@ import { useParams, useSearchParams, useNavigate, Link } from 'react-router-dom'
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
-  ArrowLeft, PencilLine, FileText, BookOpen, Wrench, ClipboardList,
-  FileSpreadsheet, Layers, ChevronUp, ChevronDown, ExternalLink,
-  FlaskConical, Droplets, Package, CalendarClock, Cable, ShieldAlert,
-  CheckCircle2, Circle, FileStack, BookOpenText, History,
+  ArrowLeft, PencilLine, FileText, Wrench, Layers, ChevronUp, ChevronDown,
+  ExternalLink, FlaskConical, Droplets, CalendarClock, CheckCircle2, Circle,
+  FileStack, BookOpenText, History, CheckCheck, ScanSearch, Zap, Settings,
+  Beaker, Cog, Hammer, Activity, MapPin, Terminal,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth, isAdmin } from '../lib/auth';
@@ -15,22 +15,27 @@ import RevisionHistory from '../components/RevisionHistory';
 import type { SubmissionSection } from '../lib/types';
 
 export const SECTION_ICON: Record<SubmissionSection, React.ReactNode> = {
-  manual: <BookOpen size={15} strokeWidth={2} />,
-  install: <ClipboardList size={15} strokeWidth={2} />,
   troubleshooting: <Wrench size={15} strokeWidth={2} />,
-  datasheet: <FileSpreadsheet size={15} strokeWidth={2} />,
-  calibration: <FlaskConical size={15} strokeWidth={2} />,
   cleaning: <Droplets size={15} strokeWidth={2} />,
-  spares: <Package size={15} strokeWidth={2} />,
-  ppm: <CalendarClock size={15} strokeWidth={2} />,
-  wiring: <Cable size={15} strokeWidth={2} />,
-  safety: <ShieldAlert size={15} strokeWidth={2} />,
+  calibration: <FlaskConical size={15} strokeWidth={2} />,
+  verification: <CheckCheck size={15} strokeWidth={2} />,
+  inspection: <ScanSearch size={15} strokeWidth={2} />,
+  electrical: <Zap size={15} strokeWidth={2} />,
+  configuration: <Settings size={15} strokeWidth={2} />,
+  consumable: <Beaker size={15} strokeWidth={2} />,
+  component: <Cog size={15} strokeWidth={2} />,
+  preventive: <CalendarClock size={15} strokeWidth={2} />,
+  corrective: <Hammer size={15} strokeWidth={2} />,
+  data_quality: <Activity size={15} strokeWidth={2} />,
+  install_improve: <MapPin size={15} strokeWidth={2} />,
+  software: <Terminal size={15} strokeWidth={2} />,
   other: <Layers size={15} strokeWidth={2} />,
 };
 
-// Categories that count toward "documentation completeness"
+// Operator-critical work types that count toward "documentation completeness"
 const CHECKLIST_SECTIONS: SubmissionSection[] = [
-  'troubleshooting', 'manual', 'install', 'datasheet', 'calibration', 'cleaning', 'spares', 'ppm',
+  'troubleshooting', 'cleaning', 'calibration', 'verification',
+  'inspection', 'electrical', 'configuration', 'preventive',
 ];
 
 type ViewMode = 'docs' | 'consolidated';
@@ -73,7 +78,7 @@ export default function ConsolidatedViewer() {
       if (!cdoc.data?.sensor_model_id) return [];
       const { data } = await supabase
         .from('document_submissions')
-        .select('id, title, storage_path, target_section, reviewed_at, page_count')
+        .select('id, title, storage_path, reviewed_at, page_count, document_types(label)')
         .eq('sensor_model_id', cdoc.data.sensor_model_id)
         .eq('status', 'approved')
         .order('reviewed_at', { ascending: false });
@@ -88,19 +93,20 @@ export default function ConsolidatedViewer() {
   const sections = useMemo(() => parseSections(cdoc.data?.content_markdown), [cdoc.data?.content_markdown]);
   const presentSections = SECTION_ORDER.filter((s) => sections[s]);
 
-  const sourcesBySection = useMemo(() => {
-    const g: Partial<Record<SubmissionSection, any[]>> = {};
-    for (const s of (sources.data ?? [])) {
-      const k = (s.target_section ?? 'other') as SubmissionSection;
+  // Source files (inputs) grouped by their document TYPE — manuals, datasheets, etc.
+  const sourcesByDocType = useMemo(() => {
+    const g: Record<string, any[]> = {};
+    for (const s of (sources.data ?? []) as any[]) {
+      const dt = Array.isArray(s.document_types) ? s.document_types[0] : s.document_types;
+      const k = dt?.label || 'Other document';
       (g[k] ??= []).push(s);
     }
     return g;
   }, [sources.data]);
+  const docTypeGroups = Object.keys(sourcesByDocType);
 
-  const docSections = SECTION_ORDER.filter((s) => (sourcesBySection[s]?.length ?? 0) > 0);
-
-  // Completeness: section is "covered" if it has source docs or consolidated content
-  const covered = (s: SubmissionSection) => Boolean(sections[s]) || (sourcesBySection[s]?.length ?? 0) > 0;
+  // Completeness is measured on OUTPUT work-type content only.
+  const covered = (s: SubmissionSection) => Boolean(sections[s]);
   const coveredCount = CHECKLIST_SECTIONS.filter(covered).length;
 
   // Re-scan highlights (consolidated mode only)
@@ -285,22 +291,22 @@ export default function ConsolidatedViewer() {
           {/* DOCUMENTS MODE: originals grouped by category */}
           {mode === 'docs' && (
             <>
-              {docSections.length === 0 && (
+              {docTypeGroups.length === 0 && (
                 <div className="card text-sm text-slate-500 text-center py-10">
                   {t('viewer.noDocs')}
                 </div>
               )}
-              {docSections.map((s) => (
-                <section key={s} className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+              {docTypeGroups.map((label) => (
+                <section key={label} className="bg-white rounded-xl border border-slate-200 overflow-hidden">
                   <div className="flex items-center gap-2.5 px-5 py-3 bg-brand-50/60 border-b border-slate-200">
                     <span className="bg-brand-700 text-white rounded-md w-7 h-7 flex items-center justify-center shrink-0">
-                      {SECTION_ICON[s]}
+                      <FileText size={15} strokeWidth={2} />
                     </span>
-                    <h2 className="text-sm font-semibold text-brand-900 tracking-tight">{SECTION_LABEL[s]}</h2>
-                    <span className="muted text-xs ml-auto">{sourcesBySection[s]!.length}</span>
+                    <h2 className="text-sm font-semibold text-brand-900 tracking-tight">{label}</h2>
+                    <span className="muted text-xs ml-auto">{sourcesByDocType[label].length}</span>
                   </div>
                   <div className="p-3 grid grid-cols-1 md:grid-cols-2 gap-2">
-                    {sourcesBySection[s]!.map((doc: any) => (
+                    {sourcesByDocType[label].map((doc: any) => (
                       <button key={doc.id} onClick={() => openSource(doc.storage_path)}
                               className="group flex items-start gap-2.5 text-left rounded-lg border border-slate-200 hover:border-brand-700 p-3 transition">
                         <span className="bg-brand-50 text-brand-700 rounded-md w-9 h-9 flex items-center justify-center shrink-0">

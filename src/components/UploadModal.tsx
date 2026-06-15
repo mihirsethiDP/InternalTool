@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useMemo, useState, ReactNode } fr
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import { extractPdfText, chunkPage } from '../lib/pdf';
+import { SECTION_ORDER, SECTION_LABEL } from '../lib/consolidated';
 import AddSensorModal from './AddSensorModal';
 
 interface UploadDefaults {
@@ -45,6 +46,7 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
   const [typeId, setTypeId] = useState('');
   const [sensorModelId, setSensorModelId] = useState(defaults.sensor_model_id ?? '');
   const [makeId, setMakeId] = useState('');
+  const [suggestedSection, setSuggestedSection] = useState('');
   const [vendorUrl, setVendorUrl] = useState('');
   const [dragOver, setDragOver] = useState(false);
   const [showAddSensor, setShowAddSensor] = useState(false);
@@ -145,21 +147,9 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
     }
     setProgress(55);
 
-    // Map document_type.key → section name used by consolidated docs
-    const typeKey = selectedType?.key as string | undefined;
-    const sectionMap: Record<string, string> = {
-      sensor_manual: 'manual',
-      installation_guide: 'install',
-      troubleshooting: 'troubleshooting',
-      datasheet: 'datasheet',
-      calibration_procedure: 'calibration',
-      cleaning_maintenance: 'cleaning',
-      spares_list: 'spares',
-      ppm_schedule: 'ppm',
-      wiring_comm: 'wiring',
-      safety_handling: 'safety',
-    };
-    const targetSection = sectionMap[typeKey ?? ''] ?? 'other';
+    // Output work-type section is decoupled from the input document form.
+    // The maker may suggest one; the checker confirms/changes it at approval.
+    const targetSection = suggestedSection || null;
 
     setStatus('Submitting for review…');
     const insert = await supabase.from('document_submissions').insert({
@@ -320,6 +310,15 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
                   {models.data?.map((m: any) => <option key={m.id} value={m.id}>{m.model_no || m.name}</option>)}
                 </select>
               </div>
+            </div>
+
+            <div>
+              <label className="label">Suggested category (optional)</label>
+              <select className="input" value={suggestedSection} onChange={(e) => setSuggestedSection(e.target.value)}>
+                <option value="">— Let the reviewer decide —</option>
+                {SECTION_ORDER.map((s) => <option key={s} value={s}>{SECTION_LABEL[s]}</option>)}
+              </select>
+              <div className="text-xs text-slate-500 mt-1.5">Which work type does this content help with? The reviewer confirms or changes this when approving.</div>
             </div>
 
             <div>

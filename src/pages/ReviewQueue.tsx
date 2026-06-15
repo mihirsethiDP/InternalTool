@@ -8,7 +8,7 @@ import { useAuth, isAdmin } from '../lib/auth';
 import PageHeader from '../components/PageHeader';
 import type { SubmissionSection } from '../lib/types';
 import {
-  SECTION_LABEL, SECTION_ORDER, replaceSection, appendSection,
+  SECTION_LABEL, SECTION_ORDER, SECTION_HINT, replaceSection, appendSection,
 } from '../lib/consolidated';
 import { writeConsolidated } from '../lib/consolidatedWrite';
 
@@ -266,7 +266,7 @@ export function ReviewQueueDetail() {
 ========================================================= */
 function ApproveModal({ submission, editedText, onClose, onDone }: any) {
   const qc = useQueryClient();
-  const [section, setSection] = useState<SubmissionSection>(submission.target_section || 'manual');
+  const [section, setSection] = useState<SubmissionSection>(submission.target_section || 'troubleshooting');
   const [mode, setMode] = useState<'replace' | 'append'>('replace');
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
@@ -346,10 +346,11 @@ function ApproveModal({ submission, editedText, onClose, onDone }: any) {
           <p className="text-sm text-slate-500">Choose which section of the consolidated reference receives this content.</p>
         </div>
         <div>
-          <label className="label">Target section</label>
+          <label className="label">Work-type section</label>
           <select className="input" value={section} onChange={(e) => setSection(e.target.value as SubmissionSection)}>
             {SECTION_ORDER.map((s) => <option key={s} value={s}>{SECTION_LABEL[s]}</option>)}
           </select>
+          <div className="text-xs text-slate-500 mt-1.5">{SECTION_HINT[section]}</div>
         </div>
         <div>
           <label className="label">Merge mode</label>
