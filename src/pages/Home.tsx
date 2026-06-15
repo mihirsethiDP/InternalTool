@@ -25,14 +25,60 @@ function askAssistant(q?: string) {
 
 export default function Home() {
   const [q, setQ] = useState('');
+  const [makeId, setMakeId] = useState('');
+  const [modelId, setModelId] = useState('');
   const nav = useNavigate();
   const { t } = useTranslation();
 
+  // Reference data for the "narrow to your sensor" probe
+  const makes = useQuery({ queryKey: ['makes'], queryFn: async () => (await supabase.from('sensor_makes').select('id,name').order('name')).data ?? [] });
+  const models = useQuery({
+    queryKey: ['models-by-make', makeId],
+    queryFn: async () => makeId
+      ? (await supabase.from('sensor_models').select('id, model_no, name, category_id').eq('make_id', makeId).eq('is_general', false).order('model_no')).data ?? []
+      : [],
+    enabled: Boolean(makeId),
+  });
+  const generalModels = useQuery({
+    queryKey: ['general-models'],
+    queryFn: async () => (await supabase.from('sensor_models').select('id, category_id').eq('is_general', true)).data ?? [],
+  });
+
+  const selectedModel = (models.data ?? []).find((m: any) => m.id === modelId);
+  const generalModelId = selectedModel
+    ? (generalModels.data ?? []).find((g: any) => g.category_id === selectedModel.category_id)?.id
+    : null;
+
+  // Unfiltered general/symptom search
   const search = useQuery({
     queryKey: ['search', q],
     queryFn: () => runSearch(q),
-    enabled: q.length > 0,
+    enabled: q.length > 0 && !modelId,
   });
+
+  // Narrowed search: the chosen model + its category's general guidance only
+  const narrowed = useQuery({
+    queryKey: ['search-narrowed', q, modelId, generalModelId],
+    queryFn: async () => {
+      const [specific, general] = await Promise.all([
+        runSearch(q, { sensor_model_id: modelId }),
+        generalModelId ? runSearch(q, { sensor_model_id: generalModelId }) : Promise.resolve({ hits: [] }),
+      ]);
+      const seen = new Set<string>();
+      const hits = [...specific.hits, ...general.hits].filter((h) => {
+        const k = h.document_id + (h.page_number ?? '');
+        if (seen.has(k)) return false;
+        seen.add(k);
+        return true;
+      });
+      return { hits };
+    },
+    enabled: q.length > 0 && Boolean(modelId),
+  });
+
+  const activeSearch = modelId ? narrowed : search;
+  const hits = activeSearch.data?.hits ?? [];
+  function clearNarrow() { setMakeId(''); setModelId(''); }
 
   // Pilot sensors — fully documented, surfaced as quick entry points
   const pilots = useQuery({
@@ -134,15 +180,49 @@ export default function Home() {
       {/* Search results */}
       {q && (
         <section className="space-y-3 max-w-4xl mx-auto">
-          <div className="muted">
-            {search.isLoading ? 'Searching…' : `${search.data?.hits.length ?? 0} result(s) for "${q}"`}
+          {/* Probe: narrow to the exact sensor if the operator knows it */}
+          <div className="bg-brand-50/70 border border-brand-100 rounded-xl px-4 py-3">
+            {!modelId ? (
+              <div className="flex items-center gap-3 flex-wrap">
+                <span className="text-sm text-slate-700 font-medium">Know the sensor? Narrow to your make &amp; model:</span>
+                <select
+                  className="rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-sm outline-none focus:border-brand-700"
+                  value={makeId}
+                  onChange={(e) => { setMakeId(e.target.value); setModelId(''); }}
+                >
+                  <option value="">Make…</option>
+                  {makes.data?.map((m: any) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                </select>
+                <select
+                  className="rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-sm outline-none focus:border-brand-700 disabled:opacity-50"
+                  value={modelId}
+                  onChange={(e) => setModelId(e.target.value)}
+                  disabled={!makeId}
+                >
+                  <option value="">{makeId ? 'Model…' : 'Pick a make first'}</option>
+                  {models.data?.map((m: any) => <option key={m.id} value={m.id}>{m.model_no || m.name}</option>)}
+                </select>
+              </div>
+            ) : (
+              <div className="flex items-center gap-3 flex-wrap text-sm">
+                <span className="text-slate-700">
+                  Showing results for <strong>{makes.data?.find((m: any) => m.id === makeId)?.name} {selectedModel?.model_no || selectedModel?.name}</strong>
+                  {generalModelId && <span className="text-slate-500"> + general guidance</span>}
+                </span>
+                <button onClick={clearNarrow} className="text-brand-700 font-medium hover:underline">Show all sensors</button>
+              </div>
+            )}
           </div>
-          {(search.data?.hits ?? []).map((h) => (
+
+          <div className="muted">
+            {activeSearch.isLoading ? 'Searching…' : `${hits.length} result(s) for "${q}"`}
+          </div>
+          {hits.map((h) => (
             <DocCard key={`${h.document_id}-${h.page_number}`} hit={h} query={q} />
           ))}
-          {search.data && search.data.hits.length === 0 && !search.isLoading && (
+          {!activeSearch.isLoading && hits.length === 0 && (
             <div className="card text-sm text-slate-600 text-center space-y-2">
-              <div>{t('home.noMatches')}</div>
+              <div>{modelId ? 'Nothing for that sensor matches your search.' : t('home.noMatches')}</div>
               <div className="flex items-center justify-center gap-3">
                 <button onClick={() => askAssistant(q)} className="text-brand-700 font-medium hover:underline text-sm">
                   {t('home.askAssistant')}
