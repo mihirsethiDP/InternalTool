@@ -5,13 +5,14 @@ import { supabase } from '../lib/supabase';
 import { useAuth, isAdmin } from '../lib/auth';
 import PageHeader from '../components/PageHeader';
 import { ReviewQueueList } from './ReviewQueue';
+import InsightsPanel from '../components/InsightsPanel';
 
-type AdminTab = 'review' | 'consolidated' | 'categories' | 'users' | 'types';
+type AdminTab = 'insights' | 'review' | 'consolidated' | 'categories' | 'users' | 'types';
 
 export default function Admin() {
   const { profile } = useAuth();
   const qc = useQueryClient();
-  const [tab, setTab] = useState<AdminTab>('review');
+  const [tab, setTab] = useState<AdminTab>('insights');
 
   // Pending count for the tab badge (works for admins only, RLS allows it)
   const pending = useQuery({
@@ -41,6 +42,7 @@ export default function Admin() {
 
       {/* Tabs */}
       <div className="border-b border-slate-200 flex gap-1 overflow-x-auto">
+        <Tab name="insights" active={tab} onClick={setTab}>Insights</Tab>
         <Tab name="review" active={tab} onClick={setTab} badge={pending.data ?? 0}>Review queue</Tab>
         <Tab name="consolidated" active={tab} onClick={setTab}>Consolidated references</Tab>
         <Tab name="categories" active={tab} onClick={setTab}>Categories</Tab>
@@ -48,6 +50,7 @@ export default function Admin() {
         <Tab name="types" active={tab} onClick={setTab}>Document types</Tab>
       </div>
 
+      {tab === 'insights' && <InsightsPanel />}
       {tab === 'review' && <ReviewQueueList />}
       {tab === 'consolidated' && <ConsolidatedDocsPanel />}
       {tab === 'categories' && <CategoriesPanel />}
