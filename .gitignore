@@ -9,3 +9,6 @@ _tmp
 .vscode
 .idea
 .claude/
+
+# Unrelated separate project living in this directory — never track it here
+illuminati-estates-redesign/
