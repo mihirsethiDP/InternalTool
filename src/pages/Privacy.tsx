@@ -18,11 +18,12 @@ export default function Privacy() {
         <div className="bg-white rounded-2xl border border-slate-200 p-8 prose-policy">
           <div className="text-xs uppercase tracking-wider text-brand-700 font-semibold mb-2">DigitalPaani</div>
           <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Privacy Notice — Internal Document Hub</h1>
-          <p className="text-sm text-slate-500 mt-1">Last updated: [DATE] · Applies to the internal Sensor Troubleshooting Hub</p>
+          <p className="text-sm text-slate-500 mt-1">Last updated: 16 June 2026 · Applies to the internal Sensor Troubleshooting Hub</p>
 
           <Section title="1. Who this applies to">
-            This tool is an internal application of <strong>[DigitalPaani legal entity name]</strong> (“we”, “us”),
-            available only to authorised employees and personnel. It is not a public or customer-facing service.
+            This tool is an internal application of <strong>Digital Ecoinnovision Pvt. Ltd.</strong> (“DigitalPaani”,
+            “we”, “us”), available only to authorised employees and personnel. It is not a public or customer-facing
+            service.
           </Section>
 
           <Section title="2. Information we collect">
@@ -57,9 +58,11 @@ export default function Privacy() {
           </Section>
 
           <Section title="6. Retention">
-            We keep your information for as long as you are an authorised user and as long as needed for the tool’s
-            purpose, after which it is removed or anonymised in line with our internal data-retention practice
-            <strong>[confirm retention period]</strong>.
+            <ul>
+              <li><strong>Account data</strong> (email, name, role) is retained while you remain an authorised user and removed when your access ends.</li>
+              <li><strong>Feedback and search activity</strong> linked to you are retained for up to <strong>12 months</strong>, after which they are anonymised (the link to you is removed while aggregate, non-identifying statistics may be kept).</li>
+              <li><strong>Documents and library content</strong> are retained as business records for as long as they remain useful to the tool.</li>
+            </ul>
           </Section>
 
           <Section title="7. Security">
@@ -70,7 +73,7 @@ export default function Privacy() {
           <Section title="8. Your rights">
             Subject to applicable law (including India’s Digital Personal Data Protection Act, 2023), you may request
             access to, correction of, or erasure of your personal data, and may raise a grievance. To do so, contact
-            our Grievance Officer / data contact at <strong>[grievance-officer name and email]</strong>.
+            our Grievance Officer, <strong>Mansi Jain (mansi.jain@digitalpaani.com)</strong>.
           </Section>
 
           <Section title="9. Changes">
@@ -78,7 +81,7 @@ export default function Privacy() {
           </Section>
 
           <Section title="10. Contact">
-            Questions about this notice or your data: <strong>[contact email]</strong>.
+            Questions about this notice or your data: <strong>support@digitalpaani.com</strong>.
           </Section>
 
           <p className="text-xs text-slate-400 mt-8 border-t border-slate-100 pt-4">
