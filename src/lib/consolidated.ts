@@ -54,6 +54,28 @@ export const SECTION_HINT: Record<SubmissionSection, string> = {
   other: 'Anything that does not fit the categories above',
 };
 
+// Operator-critical work types that count toward "documentation completeness".
+// A newly-added sensor has none of these, so it reads as incomplete until filled.
+export const CHECKLIST_SECTIONS: SubmissionSection[] = [
+  'troubleshooting', 'cleaning', 'calibration', 'verification',
+  'inspection', 'electrical', 'configuration', 'preventive',
+];
+
+export interface Coverage {
+  covered: number;
+  total: number;
+  missing: SubmissionSection[];
+  complete: boolean;
+}
+
+/** Documentation coverage of a sensor's OWN consolidated content. */
+export function coverageOf(markdown: string | null | undefined): Coverage {
+  const s = parseSections(markdown);
+  const missing = CHECKLIST_SECTIONS.filter((x) => !s[x]);
+  const covered = CHECKLIST_SECTIONS.length - missing.length;
+  return { covered, total: CHECKLIST_SECTIONS.length, missing, complete: missing.length === 0 };
+}
+
 export type Sections = Record<SubmissionSection, string>;
 
 const EMPTY_SECTIONS = (): Sections =>

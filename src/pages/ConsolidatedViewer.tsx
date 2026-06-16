@@ -10,7 +10,7 @@ import {
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth, isAdmin } from '../lib/auth';
-import { SECTION_LABEL, SECTION_ORDER, parseSections } from '../lib/consolidated';
+import { SECTION_LABEL, SECTION_ORDER, parseSections, CHECKLIST_SECTIONS } from '../lib/consolidated';
 import RevisionHistory from '../components/RevisionHistory';
 import AnswerFeedback from '../components/AnswerFeedback';
 import type { SubmissionSection } from '../lib/types';
@@ -32,12 +32,6 @@ export const SECTION_ICON: Record<SubmissionSection, React.ReactNode> = {
   software: <Terminal size={15} strokeWidth={2} />,
   other: <Layers size={15} strokeWidth={2} />,
 };
-
-// Operator-critical work types that count toward "documentation completeness"
-const CHECKLIST_SECTIONS: SubmissionSection[] = [
-  'troubleshooting', 'cleaning', 'calibration', 'verification',
-  'inspection', 'electrical', 'configuration', 'preventive',
-];
 
 type ViewMode = 'docs' | 'consolidated';
 

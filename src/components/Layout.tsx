@@ -53,6 +53,7 @@ function Inner() {
             <NavLink to="/" end className={navCls}>{t('nav.search')}</NavLink>
             <NavLink to="/browse" className={navCls}>{t('nav.browse')}</NavLink>
             <NavLink to="/sensors" className={navCls}>{t('nav.sensors')}</NavLink>
+            {canUpload(profile) && <NavLink to="/coverage" className={navCls}>Coverage</NavLink>}
             {canUpload(profile) && !isAdmin(profile) && <NavLink to="/my-submissions" className={navCls}>{t('nav.uploads')}</NavLink>}
             {isAdmin(profile) && <NavLink to="/admin" className={navCls}>{t('nav.admin')}</NavLink>}
           </nav>

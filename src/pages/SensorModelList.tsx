@@ -7,11 +7,13 @@ import { supabase } from '../lib/supabase';
 import { useAuth, canUpload } from '../lib/auth';
 import PageHeader from '../components/PageHeader';
 import AddSensorModal from '../components/AddSensorModal';
+import { coverageOf } from '../lib/consolidated';
 
 const PAGE_SIZE = 24;
 
 export default function SensorModelList() {
   const { profile } = useAuth();
+  const showCoverage = canUpload(profile);
   const [q, setQ] = useState('');
   const [cat, setCat] = useState('');
   const [makeId, setMakeId] = useState('');
@@ -34,6 +36,18 @@ export default function SensorModelList() {
       if (cat) qb = qb.eq('category_id', cat);
       if (makeId) qb = qb.eq('make_id', makeId);
       return (await qb).data ?? [];
+    },
+  });
+
+  // Coverage map (uploaders/admins only): sensor_model_id -> covered/total
+  const coverage = useQuery({
+    queryKey: ['coverage-map'],
+    enabled: showCoverage,
+    queryFn: async () => {
+      const { data } = await supabase.from('consolidated_docs').select('sensor_model_id, content_markdown');
+      const map: Record<string, ReturnType<typeof coverageOf>> = {};
+      for (const d of data ?? []) map[(d as any).sensor_model_id] = coverageOf((d as any).content_markdown);
+      return map;
     },
   });
 
@@ -120,6 +134,7 @@ export default function SensorModelList() {
                     <div className="text-xs text-slate-500">{m.sensor_makes?.name ?? '—'}</div>
                     <div className="font-semibold text-slate-900 truncate">{m.model_no || m.name || 'Untitled'}</div>
                     {m.name && m.model_no && <div className="text-xs text-slate-500 truncate mt-0.5">{m.name}</div>}
+                    {showCoverage && <CoverageChip cov={coverage.data?.[m.id]} />}
                   </div>
                 </div>
               </Link>
@@ -140,5 +155,17 @@ export default function SensorModelList() {
 
       {showAdd && <AddSensorModal onClose={() => setShowAdd(false)} />}
     </div>
+  );
+}
+
+function CoverageChip({ cov }: { cov?: { covered: number; total: number; complete: boolean } }) {
+  const c = cov ?? { covered: 0, total: 8, complete: false };
+  if (c.complete) {
+    return <span className="inline-block mt-1.5 badge-green text-[10px]">Docs complete</span>;
+  }
+  return (
+    <span className="inline-block mt-1.5 rounded-full bg-amber-100 text-amber-800 text-[10px] font-medium px-2 py-0.5">
+      Docs {c.covered}/{c.total}
+    </span>
   );
 }
