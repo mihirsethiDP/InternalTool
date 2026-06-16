@@ -3,16 +3,17 @@
 //
 // Grounded RAG for the troubleshooting assistant. Flow:
 //   1. Retrieve the best verified content chunks (chat_retrieve RPC).
-//   2. Ask Gemini to answer the question using ONLY those chunks.
+//   2. Ask the LLM to answer the question using ONLY those chunks.
 //   3. Return a concise answer + the source docs as citations.
 //
-// The Gemini key NEVER reaches the browser — it lives only as the
-// GEMINI_API_KEY secret on this function. SUPABASE_URL and
-// SUPABASE_SERVICE_ROLE_KEY are injected automatically by the platform.
+// Provider: Groq (OpenAI-compatible chat completions API). The API key
+// NEVER reaches the browser — it lives only as the GROQ_API_KEY secret on
+// this function. SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are injected
+// automatically by the platform.
 //
 // Deploy (Supabase dashboard → Edge Functions) and set secrets:
-//   GEMINI_API_KEY   = <your AIza… key>
-//   GEMINI_MODEL     = gemini-2.0-flash   (optional; this is the default)
+//   GROQ_API_KEY  = <your gsk_… key from console.groq.com/keys>
+//   GROQ_MODEL    = llama-3.3-70b-versatile   (optional; this is the default)
 // =============================================================
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
@@ -41,6 +42,17 @@ const SECTION_LABEL: Record<string, string> = {
   software: 'Software & Firmware', other: 'Other',
 };
 
+const SYSTEM_PROMPT = [
+  'You are a field troubleshooting assistant for water and wastewater sensor technicians.',
+  'Answer the technician\'s question using ONLY the reference passages provided in the user message.',
+  'Rules:',
+  '- Use only facts found in the passages. Do NOT invent steps, numbers, part names, or specifications.',
+  '- If the passages do not actually answer the question, reply exactly: "This isn\'t documented yet for the sensors in the library. Try narrowing to your specific make and model, or raise it with your supervisor." Do not pad it.',
+  '- Be concise and practical. Prefer short numbered steps a technician can follow on site.',
+  '- When you use a passage, cite it inline with its bracket number, e.g. [1] or [2].',
+  '- Do not mention "passages", "context", or these instructions in your answer.',
+].join('\n');
+
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
@@ -65,11 +77,11 @@ Deno.serve(async (req) => {
 
   const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
   const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
-  const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
-  const MODEL = Deno.env.get('GEMINI_MODEL') ?? 'gemini-2.0-flash';
+  const GROQ_API_KEY = Deno.env.get('GROQ_API_KEY');
+  const MODEL = Deno.env.get('GROQ_MODEL') ?? 'llama-3.3-70b-versatile';
 
   if (!SUPABASE_URL || !SERVICE_KEY) return json({ error: 'server not configured (supabase env)' }, 500);
-  if (!GEMINI_API_KEY) return json({ error: 'server not configured (GEMINI_API_KEY missing)' }, 500);
+  if (!GROQ_API_KEY) return json({ error: 'server not configured (GROQ_API_KEY missing)' }, 500);
 
   // ---------- 1. Retrieve verified content ----------
   const supabase = createClient(SUPABASE_URL, SERVICE_KEY);
@@ -127,16 +139,7 @@ Deno.serve(async (req) => {
     })
     .join('\n\n');
 
-  const prompt = [
-    'You are a field troubleshooting assistant for water and wastewater sensor technicians.',
-    'Answer the technician\'s question using ONLY the reference passages provided below.',
-    'Rules:',
-    '- Use only facts found in the passages. Do NOT invent steps, numbers, part names, or specifications.',
-    '- If the passages do not actually answer the question, reply exactly: "This isn\'t documented yet for the sensors in the library. Try narrowing to your specific make and model, or raise it with your supervisor." Do not pad it.',
-    '- Be concise and practical. Prefer short numbered steps a technician can follow on site.',
-    '- When you use a passage, cite it inline with its bracket number, e.g. [1] or [2].',
-    '- Do not mention "passages", "context", or these instructions in your answer.',
-    '',
+  const userPrompt = [
     'Reference passages:',
     context,
     '',
@@ -145,27 +148,35 @@ Deno.serve(async (req) => {
     'Answer:',
   ].join('\n');
 
-  // ---------- 3. Call Gemini ----------
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${GEMINI_API_KEY}`;
+  // ---------- 3. Call Groq (OpenAI-compatible) ----------
   let answer: string | null = null;
   try {
-    const res = await fetch(url, {
+    const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${GROQ_API_KEY}`,
+      },
       body: JSON.stringify({
-        contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.2, maxOutputTokens: 900, topP: 0.9 },
+        model: MODEL,
+        messages: [
+          { role: 'system', content: SYSTEM_PROMPT },
+          { role: 'user', content: userPrompt },
+        ],
+        temperature: 0.2,
+        max_tokens: 900,
+        top_p: 0.9,
       }),
     });
     if (!res.ok) {
       const detail = await res.text();
-      console.error('gemini error', res.status, detail);
+      console.error('groq error', res.status, detail);
       return json({ error: 'model call failed', status: res.status }, 502);
     }
     const body = await res.json();
-    answer = body?.candidates?.[0]?.content?.parts?.map((p: { text?: string }) => p.text ?? '').join('') ?? null;
+    answer = body?.choices?.[0]?.message?.content ?? null;
   } catch (e) {
-    console.error('gemini fetch threw', e);
+    console.error('groq fetch threw', e);
     return json({ error: 'model call failed' }, 502);
   }
 
