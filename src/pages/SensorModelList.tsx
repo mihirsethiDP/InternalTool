@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useMemo, useState } from 'react';
 import { Cpu } from 'lucide-react';
 import { FilterBar, FilterSearch, FilterSelect, FilterClear } from '../components/FilterBar';
@@ -7,19 +7,24 @@ import { supabase } from '../lib/supabase';
 import { useAuth, canUpload } from '../lib/auth';
 import PageHeader from '../components/PageHeader';
 import AddSensorModal from '../components/AddSensorModal';
-import { coverageOf } from '../lib/consolidated';
+import { coverageOf, SECTION_LABEL } from '../lib/consolidated';
 
 const PAGE_SIZE = 24;
 
 export default function SensorModelList() {
   const { profile } = useAuth();
   const showCoverage = canUpload(profile);
+  const [params] = useSearchParams();
+  const docsParam = params.get('docs'); // 'incomplete' arrives from the Insights "View all" link
+
   const [q, setQ] = useState('');
   const [cat, setCat] = useState('');
   const [makeId, setMakeId] = useState('');
   const [modelId, setModelId] = useState('');
   const [page, setPage] = useState(0);
   const [showAdd, setShowAdd] = useState(false);
+  const [sortMode, setSortMode] = useState<'category' | 'gap'>(docsParam === 'incomplete' ? 'gap' : 'category');
+  const [incompleteOnly, setIncompleteOnly] = useState(docsParam === 'incomplete');
 
   const cats = useQuery({ queryKey: ['cats'], queryFn: async () => (await supabase.from('sensor_categories').select('id,name').order('name')).data ?? [] });
   const makes = useQuery({ queryKey: ['makes'], queryFn: async () => (await supabase.from('sensor_makes').select('id,name').order('name')).data ?? [] });
@@ -39,7 +44,7 @@ export default function SensorModelList() {
     },
   });
 
-  // Coverage map (uploaders/admins only): sensor_model_id -> covered/total
+  // Coverage map (uploaders/admins only): sensor_model_id -> coverage
   const coverage = useQuery({
     queryKey: ['coverage-map'],
     enabled: showCoverage,
@@ -50,20 +55,32 @@ export default function SensorModelList() {
       return map;
     },
   });
+  const covOf = (id: string) => coverage.data?.[id] ?? coverageOf('');
 
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
-    let list = models.data ?? [];
-    if (modelId) list = list.filter((m: any) => m.id === modelId);
-    if (needle) list = list.filter((m: any) => [m.model_no, m.name, m.sensor_makes?.name, m.sensor_categories?.name].filter(Boolean).some((s: string) => s.toLowerCase().includes(needle)));
+    let list = (models.data ?? []) as any[];
+    if (modelId) list = list.filter((m) => m.id === modelId);
+    if (needle) list = list.filter((m) => [m.model_no, m.name, m.sensor_makes?.name, m.sensor_categories?.name].filter(Boolean).some((s: string) => s.toLowerCase().includes(needle)));
+    if (showCoverage && incompleteOnly) list = list.filter((m) => !covOf(m.id).complete);
     return list;
-  }, [q, models.data, modelId]);
+  }, [q, models.data, modelId, incompleteOnly, showCoverage, coverage.data]);
 
-  const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
-  const visible = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
-  function reset() { setQ(''); setCat(''); setMakeId(''); setModelId(''); setPage(0); }
-  const hasFilter = q || cat || makeId || modelId;
+  // Gap view (uploaders/admins): one flat list ranked least-documented first.
+  const ranked = useMemo(() => {
+    if (!(showCoverage && sortMode === 'gap')) return [];
+    return [...filtered].sort((a, b) => covOf(a.id).covered - covOf(b.id).covered);
+  }, [filtered, sortMode, showCoverage, coverage.data]);
 
+  const useGapView = showCoverage && sortMode === 'gap';
+  const pageList = useGapView ? ranked : filtered;
+  const pageCount = Math.max(1, Math.ceil(pageList.length / PAGE_SIZE));
+  const visible = pageList.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+
+  function reset() { setQ(''); setCat(''); setMakeId(''); setModelId(''); setIncompleteOnly(false); setSortMode('category'); setPage(0); }
+  const hasFilter = q || cat || makeId || modelId || incompleteOnly || sortMode === 'gap';
+
+  // Category-grouped view (default / everyone)
   const grouped = useMemo(() => {
     const g: Record<string, any[]> = {};
     for (const m of visible as any[]) {
@@ -78,11 +95,10 @@ export default function SensorModelList() {
       <PageHeader
         eyebrow="Catalog"
         title="Sensor catalog"
-        icon="🔧"
         subtitle={`${models.data?.length ?? 0} models across ${makes.data?.length ?? 0} makes`}
         stats={[
           { label: 'Total models', value: models.data?.length ?? 0 },
-          { label: 'Filtered', value: filtered.length },
+          { label: 'Showing', value: pageList.length },
           { label: 'Makes', value: makes.data?.length ?? 0 },
         ]}
         action={canUpload(profile) && (
@@ -93,11 +109,7 @@ export default function SensorModelList() {
       />
 
       <FilterBar>
-        <FilterSearch
-          value={q}
-          onChange={(v) => { setQ(v); setPage(0); }}
-          placeholder="Search make, model, or description…"
-        />
+        <FilterSearch value={q} onChange={(v) => { setQ(v); setPage(0); }} placeholder="Search make, model, or description…" />
         <FilterSelect value={cat} active={Boolean(cat)} onChange={(v) => { setCat(v); setPage(0); }}>
           <option value="">All categories</option>
           {cats.data?.map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}
@@ -108,18 +120,60 @@ export default function SensorModelList() {
         </FilterSelect>
         <FilterSelect value={modelId} active={Boolean(modelId)} disabled={!makeId} onChange={(v) => { setModelId(v); setPage(0); }}>
           <option value="">{makeId ? 'All models' : 'Model'}</option>
-          {(models.data ?? []).map((m: any) => (
-            <option key={m.id} value={m.id}>{m.model_no || m.name}</option>
-          ))}
+          {(models.data ?? []).map((m: any) => <option key={m.id} value={m.id}>{m.model_no || m.name}</option>)}
         </FilterSelect>
+
+        {/* Documentation controls — uploaders / admins only */}
+        {showCoverage && (
+          <>
+            <FilterSelect value={sortMode} active={sortMode === 'gap'} onChange={(v) => { setSortMode(v as any); setPage(0); }}>
+              <option value="category">Sort: by category</option>
+              <option value="gap">Sort: least documented</option>
+            </FilterSelect>
+            <button
+              onClick={() => { setIncompleteOnly((v) => !v); setPage(0); }}
+              className={`rounded-lg border px-3 py-2 text-sm transition ${incompleteOnly ? 'border-amber-400 bg-amber-50 text-amber-800 font-medium' : 'border-slate-200 bg-slate-50 text-slate-700 hover:border-slate-300'}`}
+            >
+              Incomplete only
+            </button>
+          </>
+        )}
         {hasFilter && <FilterClear onClick={reset} />}
       </FilterBar>
 
-      {Object.keys(grouped).length === 0 && (
+      {pageList.length === 0 && (
         <div className="card text-sm text-slate-500 text-center">No models match.</div>
       )}
 
-      {Object.entries(grouped).map(([category, items]) => (
+      {/* GAP VIEW — flat, ranked least-documented first (uploaders/admins) */}
+      {useGapView && pageList.length > 0 && (
+        <div className="space-y-2">
+          {visible.map((m: any) => {
+            const c = covOf(m.id);
+            return (
+              <Link to={`/sensors/${m.id}`} key={m.id} className="card-tight flex items-center gap-3 hover:border-brand-700 transition group">
+                <div className="bg-brand-50 text-brand-700 rounded-md w-9 h-9 flex items-center justify-center shrink-0"><Cpu size={16} strokeWidth={2} /></div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-semibold text-slate-900 truncate group-hover:text-brand-700 transition">{m.sensor_makes?.name} {m.model_no || m.name}</span>
+                    <span className="badge">{m.sensor_categories?.name ?? '—'}</span>
+                    <CoverageChip cov={c} />
+                  </div>
+                  {!c.complete && c.missing.length > 0 && (
+                    <div className="text-xs text-slate-500 mt-1">Missing: {c.missing.map((s) => SECTION_LABEL[s]).join(' · ')}</div>
+                  )}
+                </div>
+                <div className="hidden sm:block w-24 h-1.5 rounded-full bg-slate-100 overflow-hidden shrink-0">
+                  <div className={`h-full ${c.complete ? 'bg-emerald-500' : 'bg-amber-500'}`} style={{ width: `${(c.covered / c.total) * 100}%` }} />
+                </div>
+              </Link>
+            );
+          })}
+        </div>
+      )}
+
+      {/* CATEGORY VIEW — grouped cards (default / everyone) */}
+      {!useGapView && Object.entries(grouped).map(([category, items]) => (
         <section key={category}>
           <div className="flex items-baseline justify-between mb-3">
             <h2 className="text-sm uppercase tracking-wider font-semibold text-slate-500">{category}</h2>

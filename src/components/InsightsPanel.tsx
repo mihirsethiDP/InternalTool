@@ -185,7 +185,7 @@ export default function InsightsPanel() {
           <div className="w-40 h-2 rounded-full bg-slate-100 overflow-hidden">
             <div className="h-full bg-brand-600" style={{ width: `${cov.total ? (cov.complete / cov.total) * 100 : 0}%` }} />
           </div>
-          <button onClick={() => nav('/coverage')} className="text-sm text-brand-700 font-medium hover:underline inline-flex items-center gap-1">
+          <button onClick={() => nav('/sensors?docs=incomplete')} className="text-sm text-brand-700 font-medium hover:underline inline-flex items-center gap-1">
             View all <ArrowRight size={14} />
           </button>
         </div>
