@@ -68,7 +68,10 @@ export default function Login() {
             </button>
           </form>
         )}
-        <button onClick={() => nav('/')} className="btn-ghost mt-3 text-xs">Back</button>
+        <div className="mt-4 text-center text-xs text-slate-400">
+          By signing in you agree to our{' '}
+          <button onClick={() => nav('/privacy')} className="text-brand-700 hover:underline">Privacy Notice</button>.
+        </div>
       </div>
     </div>
   );

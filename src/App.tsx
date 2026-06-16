@@ -15,6 +15,7 @@ import ConsolidatedViewer from './pages/ConsolidatedViewer';
 import ConsolidatedEditor from './pages/ConsolidatedEditor';
 import Profile from './pages/Profile';
 import DocsGuide from './pages/DocsGuide';
+import Privacy from './pages/Privacy';
 import { useAuth } from './lib/auth';
 
 function Protected({ children }: { children: JSX.Element }) {
@@ -28,6 +29,7 @@ export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
+      <Route path="/privacy" element={<Privacy />} />
       <Route path="/" element={<Protected><Layout /></Protected>}>
         <Route index element={<Home />} />
         <Route path="browse" element={<Browse />} />

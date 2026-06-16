@@ -76,6 +76,8 @@ function Inner() {
 
       <footer className="border-t border-slate-200 bg-white text-xs text-slate-500 py-4 text-center">
         DigitalPaani · Internal Document Hub
+        <span className="mx-2 text-slate-300">·</span>
+        <NavLink to="/privacy" className="hover:text-brand-700 hover:underline">Privacy</NavLink>
       </footer>
 
       {/* Floating chat launcher — primary action of the tool, made prominent */}
