@@ -1,12 +1,13 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { X, Send, ArrowRight, ExternalLink } from 'lucide-react';
+import { X, Send, ArrowRight, ExternalLink, ChevronDown } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { runSearch } from '../lib/search';
 import { logUnanswered } from '../lib/telemetry';
-import { SECTION_LABEL } from '../lib/consolidated';
+import { SECTION_LABEL, parseSections } from '../lib/consolidated';
+import { renderMarkdown } from '../lib/markdown';
 import type { SubmissionSection } from '../lib/types';
 
 interface Hit {
@@ -15,10 +16,27 @@ interface Hit {
   section: SubmissionSection;
   snippet: string;
   rank: number;
+  /** Full text of the matched work-type section, fetched lazily for inline display. */
+  sectionBody?: string;
 }
 type Turn =
   | { role: 'user'; text: string }
   | { role: 'bot'; query: string; hits: Hit[]; loading?: boolean; narrowedLabel?: string };
+
+// Fetch the full matched work-type section for each hit so the assistant can
+// show the relevant verified passage inline, rather than only a teaser snippet
+// that forces the operator into the whole document.
+async function enrichHits(hits: Hit[]): Promise<Hit[]> {
+  const ids = [...new Set(hits.map((h) => h.document_id))];
+  if (ids.length === 0) return hits;
+  const { data } = await supabase
+    .from('consolidated_docs')
+    .select('id, content_markdown')
+    .in('id', ids);
+  const sectionsById = new Map<string, ReturnType<typeof parseSections>>();
+  for (const d of (data ?? []) as any[]) sectionsById.set(d.id, parseSections(d.content_markdown));
+  return hits.map((h) => ({ ...h, sectionBody: sectionsById.get(h.document_id)?.[h.section] || '' }));
+}
 
 const SUGGESTIONS = [
   'UPCS-MAG-110 shows empty pipe error',
@@ -62,16 +80,18 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
       { role: 'bot', query: q, hits: [], loading: true },
     ]);
     const { data, error } = await supabase.rpc('chat_search', { q, p_limit: 5 });
-    if (!error && ((data as Hit[]) ?? []).length === 0) {
+    const rawHits = (data as Hit[]) ?? [];
+    if (!error && rawHits.length === 0) {
       logUnanswered({ query: q, source: 'chat' });
     }
+    const hits = await enrichHits(rawHits);
     setTurns((t) => {
       const copy = [...t];
       // replace the last loading bot turn
       for (let i = copy.length - 1; i >= 0; i--) {
         const turn = copy[i];
         if (turn.role === 'bot' && turn.loading) {
-          copy[i] = { role: 'bot', query: q, hits: (data as Hit[]) ?? [], loading: false };
+          copy[i] = { role: 'bot', query: q, hits, loading: false };
           break;
         }
       }
@@ -88,7 +108,7 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
       generalModelId ? runSearch(query, { sensor_model_id: generalModelId }) : Promise.resolve({ hits: [] }),
     ]);
     const seen = new Set<string>();
-    const hits: Hit[] = [...spec.hits, ...gen.hits]
+    const merged: Hit[] = [...spec.hits, ...gen.hits]
       .filter((h) => { const k = h.document_id; if (seen.has(k)) return false; seen.add(k); return true; })
       .map((h) => ({
         document_id: h.document_id,
@@ -97,12 +117,14 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
         snippet: h.snippet,
         rank: h.rank,
       }));
+    const hits = await enrichHits(merged);
     setTurns((t) => t.map((turn, i) => (i === turnIndex && turn.role === 'bot') ? { ...turn, hits, loading: false, narrowedLabel: label } : turn));
   }
 
-  function openHitWith(query: string, id: string) {
+  function openHit(query: string, hit: Hit) {
     onClose();
-    nav(`/consolidated/${id}?q=${encodeURIComponent(query)}`);
+    const sec = hit.sectionBody ? `&section=${encodeURIComponent(hit.section)}` : '';
+    nav(`/consolidated/${hit.document_id}?q=${encodeURIComponent(query)}${sec}`);
   }
 
   if (!open) return null;
@@ -174,18 +196,7 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
                       : t('chat.found', { count: turn.hits.length })}
                   </div>
                   {turn.hits.map((h) => (
-                    <button key={h.document_id} onClick={() => openHitWith(turn.query, h.document_id)}
-                            className="card-tight bg-white hover:border-brand-700 transition text-left w-full">
-                      <div className="flex items-center gap-2 flex-wrap mb-1">
-                        <span className="font-semibold text-slate-900 truncate">{h.document_title.trim()}</span>
-                        <span className="badge-blue">{SECTION_LABEL[h.section]}</span>
-                      </div>
-                      <div className="text-xs text-slate-600 leading-relaxed line-clamp-3"
-                           dangerouslySetInnerHTML={{ __html: hl(h.snippet, turn.query) }} />
-                      <div className="inline-flex items-center gap-1 text-xs text-brand-700 font-medium mt-1.5">
-                        {t('chat.open')} <ArrowRight size={12} strokeWidth={2.25} />
-                      </div>
-                    </button>
+                    <ChatHit key={h.document_id} hit={h} query={turn.query} onOpen={() => openHit(turn.query, h)} openLabel={t('chat.open')} />
                   ))}
                 </>
               )}
@@ -223,6 +234,19 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
 
       <style>{`
         @keyframes slideIn { from { transform: translateX(20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        .chat-prose { color: #334155; font-size: 0.8rem; line-height: 1.6; }
+        .chat-prose > * + * { margin-top: 0.4rem; }
+        .chat-prose h2 { font-size: 0.82rem; font-weight: 600; color: #193458; margin-top: 0.6rem; }
+        .chat-prose h3 { font-size: 0.8rem; font-weight: 600; color: #2a4470; margin-top: 0.5rem; }
+        .chat-prose ul { list-style: disc; padding-left: 1.1rem; }
+        .chat-prose ol { list-style: decimal; padding-left: 1.1rem; }
+        .chat-prose li { margin: 0.12rem 0; }
+        .chat-prose li::marker { color: #193458; }
+        .chat-prose blockquote { border-left: 3px solid #cbd5e1; padding-left: 0.6rem; color: #475569; }
+        .chat-prose hr { border: none; border-top: 1px dashed #cbd5e1; margin: 0.6rem 0; }
+        .chat-prose .doc-note { display: block; background: #eef2f7; color: #2a4470; border-left: 3px solid #193458; border-radius: 0 5px 5px 0; padding: 0.3rem 0.6rem; font-size: 0.74rem; font-style: italic; }
+        .chat-prose strong { color: #0f2747; font-weight: 600; }
+        .chat-prose mark { background: rgba(255, 213, 0, 0.45); padding: 0 1px; border-radius: 2px; }
       `}</style>
     </div>
   );
@@ -271,12 +295,54 @@ function NarrowRow({ onPick }: { onPick: (modelId: string, generalModelId: strin
   );
 }
 
-function hl(text: string, q?: string) {
-  const escaped = (text ?? '').replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]!));
-  if (!q?.trim()) return escaped;
-  const terms = q.split(/\s+/).map((t) => t.replace(/[^a-zA-Z0-9]/g, '')).filter((t) => t.length > 2);
-  if (terms.length === 0) return escaped;
-  const pattern = terms.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
-  const re = new RegExp(`\\b(?:${pattern})\\w*`, 'gi');
-  return escaped.replace(re, '<mark>$&</mark>');
+// A single answer card: shows the matched work-type section inline (the
+// verified passage that actually answers the question), collapsed when long,
+// with a deep-link straight to that section in the full document.
+const COLLAPSE_CHARS = 360;
+
+function ChatHit({ hit, query, onOpen, openLabel }: {
+  hit: Hit;
+  query: string;
+  onOpen: () => void;
+  openLabel: string;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const body = (hit.sectionBody || hit.snippet || '').trim();
+  const long = body.length > COLLAPSE_CHARS;
+  const html = useMemo(() => renderMarkdown(body, query), [body, query]);
+
+  return (
+    <div className="card-tight bg-white">
+      <div className="flex items-center gap-2 flex-wrap mb-1.5">
+        <span className="font-semibold text-slate-900 truncate text-sm">{hit.document_title.trim()}</span>
+        <span className="badge-blue">{SECTION_LABEL[hit.section]}</span>
+      </div>
+
+      <div className="relative">
+        <div
+          className={`chat-prose ${long && !expanded ? 'max-h-32 overflow-hidden' : ''}`}
+          dangerouslySetInnerHTML={{ __html: html }}
+        />
+        {long && !expanded && (
+          <div className="pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-white to-transparent" />
+        )}
+      </div>
+
+      {long && (
+        <button
+          onClick={() => setExpanded((v) => !v)}
+          className="inline-flex items-center gap-1 text-xs text-slate-500 hover:text-brand-700 mt-1.5 font-medium"
+        >
+          <ChevronDown size={13} className={`transition ${expanded ? 'rotate-180' : ''}`} />
+          {expanded ? 'Show less' : 'Show full section'}
+        </button>
+      )}
+
+      <div className="mt-2 pt-2 border-t border-slate-100">
+        <button onClick={onOpen} className="inline-flex items-center gap-1 text-xs text-brand-700 font-medium hover:gap-1.5 transition-all">
+          {openLabel} <ArrowRight size={12} strokeWidth={2.25} />
+        </button>
+      </div>
+    </div>
+  );
 }

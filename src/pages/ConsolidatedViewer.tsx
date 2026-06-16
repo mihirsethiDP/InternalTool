@@ -11,6 +11,7 @@ import {
 import { supabase } from '../lib/supabase';
 import { useAuth, isAdmin } from '../lib/auth';
 import { SECTION_LABEL, SECTION_ORDER, parseSections, CHECKLIST_SECTIONS } from '../lib/consolidated';
+import { renderMarkdown } from '../lib/markdown';
 import RevisionHistory from '../components/RevisionHistory';
 import AnswerFeedback from '../components/AnswerFeedback';
 import type { SubmissionSection } from '../lib/types';
@@ -42,9 +43,12 @@ export default function ConsolidatedViewer() {
   const { profile } = useAuth();
   const { t } = useTranslation();
   const initialQuery = params.get('q') ?? '';
-  // If the user arrived from search with a query, open the consolidated view
-  // directly so the highlight lands. Otherwise default to the documents view.
-  const [mode, setMode] = useState<ViewMode>(initialQuery ? 'consolidated' : 'docs');
+  // The chat assistant deep-links to a specific work-type section.
+  const initialSection = (params.get('section') as SubmissionSection | null) ?? null;
+  // If the user arrived from search with a query or a target section, open the
+  // consolidated view directly so the highlight / scroll lands. Otherwise
+  // default to the documents view.
+  const [mode, setMode] = useState<ViewMode>(initialQuery || initialSection ? 'consolidated' : 'docs');
   const [highlight, setHighlight] = useState(initialQuery);
   const [activeSection, setActiveSection] = useState<SubmissionSection | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -52,6 +56,7 @@ export default function ConsolidatedViewer() {
   const containerRef = useRef<HTMLDivElement>(null);
   const sectionRefs = useRef<Partial<Record<SubmissionSection, HTMLElement | null>>>({});
   const marksRef = useRef<HTMLElement[]>([]);
+  const didInitialScroll = useRef(false);
   const [matchIdx, setMatchIdx] = useState(0);
   const [matchCount, setMatchCount] = useState(0);
 
@@ -141,6 +146,20 @@ export default function ConsolidatedViewer() {
     }, 80);
     return () => clearTimeout(t);
   }, [highlight, cdoc.data?.content_markdown, generalDoc.data?.content_markdown, showGeneral, mode]);
+
+  // Deep-link from the chat assistant: scroll to the requested work-type
+  // section once, on first load. Fires just before the highlight effect, so a
+  // query match (if any) refines the position; otherwise the section stands.
+  useEffect(() => {
+    if (mode !== 'consolidated' || !initialSection || didInitialScroll.current) return;
+    if (!presentSections.includes(initialSection)) return;
+    const tm = setTimeout(() => {
+      sectionRefs.current[initialSection]?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      setActiveSection(initialSection);
+      didInitialScroll.current = true;
+    }, 60);
+    return () => clearTimeout(tm);
+  }, [mode, initialSection, presentSections.join('|'), cdoc.data?.content_markdown]);
 
   // Track in-view section (consolidated mode only)
   useEffect(() => {
@@ -495,83 +514,4 @@ export default function ConsolidatedViewer() {
       )}
     </div>
   );
-}
-
-/* ---------- Lightweight markdown -> HTML renderer ---------- */
-function renderMarkdown(body: string, q?: string): string {
-  const lines = (body ?? '').split(/\r?\n/);
-  const out: string[] = [];
-  let inList: 'ul' | 'ol' | null = null;
-  let para: string[] = [];
-
-  function closeList() { if (inList) { out.push(`</${inList}>`); inList = null; } }
-  function flushPara() {
-    if (para.length) {
-      out.push(`<p>${inline(para.join(' '))}</p>`);
-      para = [];
-    }
-  }
-
-  for (const raw of lines) {
-    const line = raw.trimEnd();
-
-    if (/^\s*$/.test(line)) { flushPara(); closeList(); continue; }
-
-    const h3 = line.match(/^###\s+(.*)$/);
-    if (h3) { flushPara(); closeList(); out.push(`<h3>${inline(h3[1])}</h3>`); continue; }
-    const h2 = line.match(/^##\s+(.*)$/);
-    if (h2) { flushPara(); closeList(); out.push(`<h2>${inline(h2[1])}</h2>`); continue; }
-
-    if (/^---+\s*$/.test(line)) { flushPara(); closeList(); out.push('<hr/>'); continue; }
-
-    const note = line.match(/^_(.+)_$/);
-    if (note) { flushPara(); closeList(); out.push(`<span class="doc-note">${inline(note[1])}</span>`); continue; }
-
-    const ol = line.match(/^\s*(\d+)[.)]\s+(.*)$/);
-    if (ol) {
-      flushPara();
-      if (inList !== 'ol') { closeList(); out.push('<ol>'); inList = 'ol'; }
-      out.push(`<li>${inline(ol[2])}</li>`);
-      continue;
-    }
-    const ul = line.match(/^\s*[-*•]\s+(.*)$/);
-    if (ul) {
-      flushPara();
-      if (inList !== 'ul') { closeList(); out.push('<ul>'); inList = 'ul'; }
-      out.push(`<li>${inline(ul[1])}</li>`);
-      continue;
-    }
-
-    const bq = line.match(/^>\s?(.*)$/);
-    if (bq) { flushPara(); closeList(); out.push(`<blockquote>${inline(bq[1])}</blockquote>`); continue; }
-
-    closeList();
-    para.push(line);
-  }
-  flushPara();
-  closeList();
-
-  let html = out.join('\n');
-  html = html.replace(/(Issue \d+)(\s*[—-])/g, '<strong>$1</strong>$2');
-  if (q?.trim()) html = applyHighlight(html, q);
-  return html;
-}
-
-function inline(s: string): string {
-  let t = s
-    .replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]!));
-  t = t.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-  t = t.replace(/(?<![\w*])\*([^*]+)\*(?![\w*])/g, '<em>$1</em>');
-  return t;
-}
-
-function applyHighlight(html: string, q: string): string {
-  const terms = q.split(/\s+/).map((t) => t.replace(/[^a-zA-Z0-9]/g, '')).filter((t) => t.length > 1);
-  if (terms.length === 0) return html;
-  const pattern = terms.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
-  const re = new RegExp(`\\b(?:${pattern})\\w*`, 'gi');
-  return html.split(/(<[^>]+>)/).map((seg) => {
-    if (seg.startsWith('<')) return seg;
-    return seg.replace(re, '<mark>$&</mark>');
-  }).join('');
 }
