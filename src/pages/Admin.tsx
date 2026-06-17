@@ -181,22 +181,24 @@ function UsersPanel({ onChanged }: { onChanged: () => void }) {
   return (
     <div className="card">
       <p className="text-xs text-slate-500 mb-3">Anyone who has signed in appears here. Change a user&rsquo;s role to grant upload or admin rights.</p>
-      <table className="w-full text-sm">
-        <thead className="text-left text-xs uppercase text-slate-500"><tr><th>Email</th><th>Role</th><th></th></tr></thead>
-        <tbody>
-          {(users.data ?? []).map((u: any) => (
-            <tr key={u.id} className="border-t border-slate-100">
-              <td className="py-2">{u.email}</td>
-              <td><span className="badge">{u.role}</span></td>
-              <td className="text-right space-x-1">
-                <button className="btn-ghost text-xs" onClick={() => setRole(u.id, 'viewer')}>viewer</button>
-                <button className="btn-ghost text-xs" onClick={() => setRole(u.id, 'uploader')}>uploader</button>
-                <button className="btn-ghost text-xs" onClick={() => setRole(u.id, 'admin')}>admin</button>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <div className="overflow-x-auto -mx-5 px-5">
+        <table className="w-full text-sm min-w-[34rem]">
+          <thead className="text-left text-xs uppercase text-slate-500"><tr><th>Email</th><th>Role</th><th></th></tr></thead>
+          <tbody>
+            {(users.data ?? []).map((u: any) => (
+              <tr key={u.id} className="border-t border-slate-100">
+                <td className="py-2 pr-2">{u.email}</td>
+                <td className="pr-2"><span className="badge">{u.role}</span></td>
+                <td className="text-right space-x-1 whitespace-nowrap">
+                  <button className="btn-ghost text-xs" onClick={() => setRole(u.id, 'viewer')}>viewer</button>
+                  <button className="btn-ghost text-xs" onClick={() => setRole(u.id, 'uploader')}>uploader</button>
+                  <button className="btn-ghost text-xs" onClick={() => setRole(u.id, 'admin')}>admin</button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

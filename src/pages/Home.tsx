@@ -123,22 +123,23 @@ export default function Home() {
   }
 
   return (
-    <div className="space-y-10">
+    <div className="space-y-8 sm:space-y-10">
       {/* Hero — troubleshooting first */}
       <section className="text-center max-w-3xl mx-auto pt-2">
         <div className="inline-flex items-center gap-1.5 text-[11px] uppercase tracking-wider text-brand-700 font-semibold mb-4">
           {t('home.eyebrow')}
         </div>
-        <h1 className="text-3xl md:text-4xl font-semibold tracking-tight text-slate-900 mb-3">
+        <h1 className="text-2xl sm:text-3xl md:text-4xl font-semibold tracking-tight text-slate-900 mb-3">
           {t('home.title1')} <span className="text-brand-700">{t('home.title2')}</span>
         </h1>
-        <p className="text-slate-600 text-base mb-7">
+        <p className="text-slate-600 text-sm sm:text-base mb-7">
           {t('home.subtitle')}
         </p>
 
         {/* Assistant CTA — the primary action */}
-        <div className="bg-brand-700 rounded-2xl p-6 text-left shadow-sm mb-6">
-          <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div className="relative overflow-hidden bg-gradient-to-br from-brand-600 via-brand-700 to-brand-900 rounded-2xl p-5 sm:p-6 text-left shadow-md mb-6">
+          <div aria-hidden className="pointer-events-none absolute -top-12 -right-8 w-44 h-44 rounded-full bg-white/10 blur-3xl" />
+          <div className="relative flex items-start justify-between gap-4 flex-wrap">
             <div>
               <div className="flex items-center gap-2 text-white font-semibold tracking-tight">
                 <MessageSquare size={18} />
@@ -150,12 +151,12 @@ export default function Home() {
             </div>
             <button
               onClick={() => askAssistant()}
-              className="inline-flex items-center gap-2 bg-white text-brand-700 hover:bg-slate-100 rounded-lg px-4 py-2.5 text-sm font-semibold transition shrink-0"
+              className="tap inline-flex items-center gap-2 bg-white text-brand-700 hover:bg-slate-100 rounded-lg px-4 py-2.5 text-sm font-semibold transition shrink-0"
             >
               {t('home.start')} <ArrowRight size={15} />
             </button>
           </div>
-          <div className="flex gap-2 flex-wrap mt-4">
+          <div className="relative flex gap-2 flex-wrap mt-4">
             {PROBLEM_PROMPTS.map((p) => (
               <button
                 key={p}
