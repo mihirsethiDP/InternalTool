@@ -190,9 +190,12 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
     nav(`/consolidated/${hit.document_id}?q=${encodeURIComponent(query)}${sec}`);
   }
 
-  function openCitation(query: string, c: Citation) {
+  function openCitation(query: string, c: Citation, answer?: string) {
     onClose();
-    nav(`/consolidated/${c.document_id}?q=${encodeURIComponent(query)}&section=${encodeURIComponent(c.section)}`);
+    nav(
+      `/consolidated/${c.document_id}?q=${encodeURIComponent(query)}&section=${encodeURIComponent(c.section)}`,
+      { state: answer ? { answer } : undefined },
+    );
   }
 
   if (!open) return null;
@@ -250,7 +253,7 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
                   answer={turn.answer}
                   citations={turn.citations ?? []}
                   narrowedLabel={turn.narrowedLabel}
-                  onOpenCitation={(c) => openCitation(turn.query, c)}
+                  onOpenCitation={(c) => openCitation(turn.query, c, turn.answer ?? undefined)}
                 />
               ) : (turn.hits && turn.hits.length > 0) ? (
                 <>

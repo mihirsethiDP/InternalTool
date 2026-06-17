@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import App from './App';
 import './index.css';
 import './i18n';
+import { AccessibilityProvider } from './lib/accessibility';
 
 const qc = new QueryClient({
   defaultOptions: { queries: { staleTime: 30_000, refetchOnWindowFocus: false } },
@@ -13,9 +14,11 @@ const qc = new QueryClient({
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <QueryClientProvider client={qc}>
-      <HashRouter>
-        <App />
-      </HashRouter>
+      <AccessibilityProvider>
+        <HashRouter>
+          <App />
+        </HashRouter>
+      </AccessibilityProvider>
     </QueryClientProvider>
   </React.StrictMode>
 );

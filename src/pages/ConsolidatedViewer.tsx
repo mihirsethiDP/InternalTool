@@ -1,12 +1,13 @@
 import { useQuery } from '@tanstack/react-query';
-import { useParams, useSearchParams, useNavigate, Link } from 'react-router-dom';
+import { useParams, useSearchParams, useNavigate, useLocation, Link } from 'react-router-dom';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   ArrowLeft, PencilLine, FileText, Wrench, Layers, ChevronUp, ChevronDown,
   ExternalLink, FlaskConical, Droplets, CalendarClock, CheckCircle2, Circle,
   FileStack, BookOpenText, History, CheckCheck, ScanSearch, Zap, Settings,
-  Beaker, Cog, Hammer, Activity, MapPin, Terminal, Globe2,
+  Beaker, Cog, Hammer, Activity, MapPin, Terminal, Globe2, Sparkles, ChevronRight,
+  BookOpen, Cpu, Search as SearchIcon,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth, isAdmin } from '../lib/auth';
@@ -40,11 +41,15 @@ export default function ConsolidatedViewer() {
   const { id } = useParams();
   const [params] = useSearchParams();
   const nav = useNavigate();
+  const location = useLocation();
   const { profile } = useAuth();
   const { t } = useTranslation();
   const initialQuery = params.get('q') ?? '';
   // The chat assistant deep-links to a specific work-type section.
   const initialSection = (params.get('section') as SubmissionSection | null) ?? null;
+  // The chat assistant also passes its synthesized answer via router state, so
+  // the document can show it "in focus" above the full reference.
+  const chatAnswer: string | null = (location.state as any)?.answer ?? null;
   // If the user arrived from search with a query or a target section, open the
   // consolidated view directly so the highlight / scroll lands. Otherwise
   // default to the documents view.
@@ -52,6 +57,13 @@ export default function ConsolidatedViewer() {
   const [highlight, setHighlight] = useState(initialQuery);
   const [activeSection, setActiveSection] = useState<SubmissionSection | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
+  // Focus mode: when arriving from chat with an answer, lead with the answer +
+  // the matched section, and collapse the rest of the document (still one tap
+  // away). Toggled off to read the whole reference.
+  const [focusMode, setFocusMode] = useState<boolean>(Boolean(chatAnswer));
+  const [expanded, setExpanded] = useState<Set<SubmissionSection>>(new Set());
+  const toggleExpand = (s: SubmissionSection) =>
+    setExpanded((prev) => { const n = new Set(prev); n.has(s) ? n.delete(s) : n.add(s); return n; });
 
   const containerRef = useRef<HTMLDivElement>(null);
   const sectionRefs = useRef<Partial<Record<SubmissionSection, HTMLElement | null>>>({});
@@ -114,6 +126,12 @@ export default function ConsolidatedViewer() {
   const hasGeneral = SECTION_ORDER.some((s) => generalSections[s]);
   // A section is shown if the model has content, or (when general is on) general has content.
   const presentSections = SECTION_ORDER.filter((s) => sections[s] || (showGeneral && !isGeneralDoc && generalSections[s]));
+
+  // Focus mode only "engages" when the chat actually pointed us at a section
+  // that exists here — otherwise collapsing every section would hide everything.
+  const matchPresent = Boolean(initialSection && presentSections.includes(initialSection));
+  const focusActive = focusMode && matchPresent;
+  const sectionOpen = (s: SubmissionSection) => !focusActive || s === initialSection || expanded.has(s);
 
   // Source files (inputs) grouped by their document TYPE — manuals, datasheets, etc.
   const sourcesByDocType = useMemo(() => {
@@ -215,82 +233,82 @@ export default function ConsolidatedViewer() {
       <div aria-hidden className="fixed inset-0 -z-10 bg-gradient-to-b from-brand-50 via-slate-50 to-white" />
 
       {/* Hero */}
-      <div className="bg-brand-700 text-white rounded-xl px-6 py-5 shadow-sm">
-        <div className="flex items-start justify-between gap-4 flex-wrap">
-          <div>
-            <div className="text-[11px] uppercase tracking-wider text-white/60 mb-1.5 font-medium">{t('viewer.eyebrow')}</div>
-            <h1 className="text-2xl md:text-3xl font-semibold tracking-tight">{title}</h1>
-            <div className="flex items-center gap-2 mt-2.5 flex-wrap">
+      <div className="relative overflow-hidden rounded-2xl px-5 py-5 sm:px-7 sm:py-6 shadow-md bg-gradient-to-br from-brand-700 via-brand-800 to-brand-900 text-white">
+        {/* decorative glow */}
+        <div aria-hidden className="pointer-events-none absolute -top-16 -right-10 w-56 h-56 rounded-full bg-white/10 blur-3xl" />
+        <div aria-hidden className="pointer-events-none absolute -bottom-20 -left-8 w-48 h-48 rounded-full bg-brand-400/20 blur-3xl" />
+        <div className="relative flex items-start justify-between gap-4 flex-wrap">
+          <div className="min-w-0">
+            <div className="inline-flex items-center gap-1.5 text-[11px] uppercase tracking-wider text-white/70 mb-2 font-semibold">
+              <Cpu size={13} /> {t('viewer.eyebrow')}
+            </div>
+            <h1 className="text-xl sm:text-2xl md:text-3xl font-bold tracking-tight leading-tight">{title}</h1>
+            <div className="flex items-center gap-2 mt-3 flex-wrap">
               {sm?.sensor_categories?.name && (
-                <span className="bg-white/10 text-white/90 rounded-md px-2 py-0.5 text-xs font-medium">{sm.sensor_categories.name}</span>
+                <span className="inline-flex items-center gap-1 bg-white/15 ring-1 ring-white/10 text-white rounded-full px-2.5 py-1 text-xs font-medium">{sm.sensor_categories.name}</span>
               )}
-              <span className="bg-white/10 text-white/90 rounded-md px-2 py-0.5 text-xs font-medium">
-                {(sources.data ?? []).length} document{(sources.data ?? []).length === 1 ? '' : 's'}
+              <span className="inline-flex items-center gap-1 bg-white/15 ring-1 ring-white/10 text-white rounded-full px-2.5 py-1 text-xs font-medium">
+                <FileStack size={12} /> {(sources.data ?? []).length} document{(sources.data ?? []).length === 1 ? '' : 's'}
               </span>
-              <span className="bg-white/10 text-white/90 rounded-md px-2 py-0.5 text-xs font-medium">
-                Updated {new Date(cdoc.data.last_updated_at).toLocaleDateString()}
+              <span className="inline-flex items-center gap-1 bg-white/15 ring-1 ring-white/10 text-white rounded-full px-2.5 py-1 text-xs font-medium">
+                <CalendarClock size={12} /> {new Date(cdoc.data.last_updated_at).toLocaleDateString()}
               </span>
             </div>
           </div>
           <div className="flex gap-2 shrink-0">
-            <button onClick={() => nav(-1)} className="inline-flex items-center gap-1.5 bg-white/10 hover:bg-white/20 text-white rounded-md px-3 py-2 text-sm transition">
-              <ArrowLeft size={15} /> {t('viewer.back')}
+            <button onClick={() => nav(-1)} aria-label={t('viewer.back')} className="tap inline-flex items-center gap-1.5 bg-white/10 hover:bg-white/20 text-white rounded-lg px-3 py-2 text-sm transition">
+              <ArrowLeft size={15} /> <span className="hidden sm:inline">{t('viewer.back')}</span>
             </button>
             {isAdmin(profile) && (
-              <button onClick={() => setHistoryOpen(true)} className="inline-flex items-center gap-1.5 bg-white/10 hover:bg-white/20 text-white rounded-md px-3 py-2 text-sm transition">
-                <History size={15} /> History
+              <button onClick={() => setHistoryOpen(true)} aria-label="History" className="tap inline-flex items-center gap-1.5 bg-white/10 hover:bg-white/20 text-white rounded-lg px-3 py-2 text-sm transition">
+                <History size={15} /> <span className="hidden sm:inline">History</span>
               </button>
             )}
             {isAdmin(profile) && (
-              <button onClick={() => nav(`/consolidated/${id}/edit`)} className="inline-flex items-center gap-1.5 bg-white text-brand-700 hover:bg-slate-100 rounded-md px-3 py-2 text-sm font-medium transition">
-                <PencilLine size={15} /> {t('viewer.edit')}
+              <button onClick={() => nav(`/consolidated/${id}/edit`)} aria-label={t('viewer.edit')} className="tap inline-flex items-center gap-1.5 bg-white text-brand-700 hover:bg-slate-100 rounded-lg px-3 py-2 text-sm font-semibold transition shadow-sm">
+                <PencilLine size={15} /> <span className="hidden sm:inline">{t('viewer.edit')}</span>
               </button>
             )}
           </div>
         </div>
       </div>
 
+      {/* ANSWER IN FOCUS — the chat assistant's synthesized answer, led prominently */}
+      {chatAnswer && mode === 'consolidated' && (
+        <AnswerFocusCard
+          answer={chatAnswer}
+          focusMode={focusActive}
+          canFocus={matchPresent}
+          onToggleFocus={() => setFocusMode((v) => !v)}
+        />
+      )}
+
       {/* Sticky toolbar */}
-      <div className="sticky top-0 z-30 -mx-5 px-5 py-2.5 bg-white/95 backdrop-blur border-b border-slate-200">
-        <div className="flex items-center gap-3 flex-wrap">
+      <div className="sticky top-0 z-30 -mx-5 px-5 py-2.5 bg-white/90 backdrop-blur-md border-b border-slate-200 space-y-2">
+        <div className="flex items-center gap-2 sm:gap-3">
           {/* View mode toggle */}
-          <div className="inline-flex rounded-md border border-slate-200 overflow-hidden">
+          <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden shrink-0 shadow-sm">
             <button
               onClick={() => setMode('docs')}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium transition ${
+              aria-pressed={mode === 'docs'}
+              aria-label={t('viewer.documents')}
+              className={`tap inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold transition ${
                 mode === 'docs' ? 'bg-brand-700 text-white' : 'bg-white text-slate-700 hover:text-brand-700'
               }`}
             >
-              <FileStack size={14} /> {t('viewer.documents')}
+              <FileStack size={14} /> <span className="hidden sm:inline">{t('viewer.documents')}</span>
             </button>
             <button
               onClick={() => setMode('consolidated')}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium transition border-l border-slate-200 ${
+              aria-pressed={mode === 'consolidated'}
+              aria-label={t('viewer.consolidated')}
+              className={`tap inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold transition border-l border-slate-200 ${
                 mode === 'consolidated' ? 'bg-brand-700 text-white' : 'bg-white text-slate-700 hover:text-brand-700'
               }`}
             >
-              <BookOpenText size={14} /> {t('viewer.consolidated')}
+              <BookOpenText size={14} /> <span className="hidden sm:inline">{t('viewer.consolidated')}</span>
             </button>
           </div>
-
-          {mode === 'consolidated' && (
-            <div className="flex items-center gap-1 flex-wrap">
-              {presentSections.map((s) => (
-                <button
-                  key={s}
-                  onClick={() => scrollToSection(s)}
-                  className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium border transition ${
-                    activeSection === s
-                      ? 'bg-brand-700 text-white border-brand-700'
-                      : 'bg-white text-slate-700 border-slate-200 hover:border-brand-700 hover:text-brand-700'
-                  }`}
-                >
-                  {SECTION_ICON[s]}
-                  {SECTION_LABEL[s]}
-                </button>
-              ))}
-            </div>
-          )}
 
           <div className="flex-1" />
 
@@ -299,29 +317,35 @@ export default function ConsolidatedViewer() {
               {!isGeneralDoc && hasGeneral && (
                 <button
                   onClick={() => setShowGeneral((v) => !v)}
-                  className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs font-medium transition ${
+                  aria-pressed={showGeneral}
+                  className={`tap inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition ${
                     showGeneral ? 'bg-brand-700 text-white border-brand-700' : 'bg-white text-slate-600 border-slate-200 hover:border-brand-700'
                   }`}
                   title="Show general category-level guidance alongside this model"
                 >
-                  <Globe2 size={13} /> General guidance
+                  <Globe2 size={13} /> <span className="hidden sm:inline">General guidance</span>
                 </button>
               )}
-              <input
-                className="rounded-md border border-slate-300 px-3 py-1.5 text-sm w-48 focus:border-brand-700 focus:ring-2 focus:ring-brand-700/15 outline-none"
-                value={highlight}
-                onChange={(e) => setHighlight(e.target.value)}
-                placeholder={t('viewer.highlight')}
-              />
+              {/* Find-in-page */}
+              <div className="relative">
+                <SearchIcon size={14} aria-hidden className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  aria-label={t('viewer.highlight')}
+                  className="rounded-lg border border-slate-300 pl-8 pr-3 py-1.5 text-sm w-32 sm:w-48 focus:border-brand-700 focus:ring-2 focus:ring-brand-700/15 outline-none"
+                  value={highlight}
+                  onChange={(e) => setHighlight(e.target.value)}
+                  placeholder={t('viewer.highlight')}
+                />
+              </div>
               {highlight && (
                 <>
-                  <span className="muted text-xs whitespace-nowrap">{matchCount > 0 ? `${matchIdx + 1} / ${matchCount}` : '0'}</span>
-                  <button onClick={() => goTo(matchIdx - 1)} disabled={matchCount === 0} title="Previous match"
-                    className="rounded-md border border-slate-300 bg-white hover:bg-slate-50 disabled:opacity-40 w-7 h-7 flex items-center justify-center">
+                  <span className="muted text-xs whitespace-nowrap hidden sm:inline">{matchCount > 0 ? `${matchIdx + 1} / ${matchCount}` : '0'}</span>
+                  <button onClick={() => goTo(matchIdx - 1)} disabled={matchCount === 0} aria-label="Previous match"
+                    className="rounded-lg border border-slate-300 bg-white hover:bg-slate-50 disabled:opacity-40 w-8 h-8 flex items-center justify-center">
                     <ChevronUp size={14} />
                   </button>
-                  <button onClick={() => goTo(matchIdx + 1)} disabled={matchCount === 0} title="Next match"
-                    className="rounded-md border border-slate-300 bg-white hover:bg-slate-50 disabled:opacity-40 w-7 h-7 flex items-center justify-center">
+                  <button onClick={() => goTo(matchIdx + 1)} disabled={matchCount === 0} aria-label="Next match"
+                    className="rounded-lg border border-slate-300 bg-white hover:bg-slate-50 disabled:opacity-40 w-8 h-8 flex items-center justify-center">
                     <ChevronDown size={14} />
                   </button>
                 </>
@@ -329,6 +353,27 @@ export default function ConsolidatedViewer() {
             </div>
           )}
         </div>
+
+        {/* Section quick-nav — horizontally scrollable on mobile */}
+        {mode === 'consolidated' && presentSections.length > 0 && (
+          <nav aria-label="Jump to section" className="flex items-center gap-1.5 overflow-x-auto pb-1 -mb-1 scrollbar-thin">
+            {presentSections.map((s) => (
+              <button
+                key={s}
+                onClick={() => scrollToSection(s)}
+                aria-current={activeSection === s ? 'true' : undefined}
+                className={`tap inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium border transition whitespace-nowrap shrink-0 ${
+                  activeSection === s
+                    ? 'bg-brand-700 text-white border-brand-700 shadow-sm'
+                    : 'bg-white text-slate-700 border-slate-200 hover:border-brand-700 hover:text-brand-700'
+                }`}
+              >
+                {SECTION_ICON[s]}
+                {SECTION_LABEL[s]}
+              </button>
+            ))}
+          </nav>
+        )}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-5">
@@ -392,43 +437,74 @@ export default function ConsolidatedViewer() {
                   {t('viewer.noConsolidated')}
                 </div>
               )}
-              {presentSections.map((s) => (
+              {focusActive && (
+                <div className="flex items-center gap-2 text-xs text-slate-500 px-1">
+                  <span className="inline-flex items-center gap-1 font-medium text-brand-700"><Sparkles size={13} /> Most relevant section shown</span>
+                  <span className="text-slate-300 hidden sm:inline">·</span>
+                  <span className="hidden sm:inline">others collapsed below — tap to open</span>
+                </div>
+              )}
+              {presentSections.map((s) => {
+                const isMatch = s === initialSection;
+                const open = sectionOpen(s);
+                const collapsible = focusActive && !isMatch;
+                return (
                 <section
                   key={s}
                   data-section={s}
                   ref={(el) => { sectionRefs.current[s] = el; }}
-                  className="bg-white rounded-xl border border-slate-200 overflow-hidden scroll-mt-20"
+                  className={`bg-white rounded-2xl border overflow-hidden scroll-mt-24 transition ${
+                    isMatch && chatAnswer ? 'border-brand-300 ring-2 ring-brand-200 shadow-md' : 'border-slate-200 shadow-sm'
+                  }`}
                 >
-                  <div className="flex items-center gap-2.5 px-6 py-3.5 bg-brand-50/60 border-b border-slate-200">
-                    <span className="bg-brand-700 text-white rounded-md w-7 h-7 flex items-center justify-center shrink-0">
+                  <button
+                    type="button"
+                    onClick={collapsible ? () => toggleExpand(s) : undefined}
+                    aria-expanded={collapsible ? open : undefined}
+                    className={`w-full flex items-center gap-3 px-4 sm:px-6 py-3.5 border-b border-slate-200 text-left ${
+                      isMatch && chatAnswer ? 'bg-gradient-to-r from-brand-50 to-white' : 'bg-slate-50/80'
+                    } ${collapsible ? 'cursor-pointer hover:bg-slate-100/80 transition' : 'cursor-default'}`}
+                  >
+                    <span className="bg-brand-700 text-white rounded-lg w-8 h-8 flex items-center justify-center shrink-0 shadow-sm">
                       {SECTION_ICON[s]}
                     </span>
-                    <h2 className="text-sm font-semibold text-brand-900 tracking-tight">{SECTION_LABEL[s]}</h2>
-                  </div>
+                    <h2 className="text-sm font-semibold text-brand-900 tracking-tight flex-1">{SECTION_LABEL[s]}</h2>
+                    {isMatch && chatAnswer && (
+                      <span className="badge-blue text-[10px] shrink-0">Relevant</span>
+                    )}
+                    {collapsible && (
+                      <ChevronRight size={18} className={`text-slate-400 shrink-0 transition-transform ${open ? 'rotate-90' : ''}`} />
+                    )}
+                  </button>
 
-                  {/* Model-specific content */}
-                  {sections[s] && (
-                    <div
-                      className="doc-prose px-6 py-5"
-                      dangerouslySetInnerHTML={{ __html: renderMarkdown(sections[s], highlight) }}
-                    />
-                  )}
+                  {open && (
+                    <>
+                      {/* Model-specific content */}
+                      {sections[s] && (
+                        <div
+                          className="doc-prose px-4 sm:px-6 py-5"
+                          dangerouslySetInnerHTML={{ __html: renderMarkdown(sections[s], highlight) }}
+                        />
+                      )}
 
-                  {/* General (category-level) guidance, layered below */}
-                  {showGeneral && !isGeneralDoc && generalSections[s] && (
-                    <div className={`px-6 py-5 bg-slate-50/70 ${sections[s] ? 'border-t border-slate-200' : ''}`}>
-                      <div className="inline-flex items-center gap-1.5 text-[11px] uppercase tracking-wide font-semibold text-slate-500 mb-2">
-                        <Globe2 size={12} />
-                        General {cdoc.data?.sensor_models?.sensor_categories?.name} guidance
-                      </div>
-                      <div
-                        className="doc-prose"
-                        dangerouslySetInnerHTML={{ __html: renderMarkdown(generalSections[s], highlight) }}
-                      />
-                    </div>
+                      {/* General (category-level) guidance, layered below */}
+                      {showGeneral && !isGeneralDoc && generalSections[s] && (
+                        <div className={`px-4 sm:px-6 py-5 bg-slate-50/70 ${sections[s] ? 'border-t border-slate-200' : ''}`}>
+                          <div className="inline-flex items-center gap-1.5 text-[11px] uppercase tracking-wide font-semibold text-slate-500 mb-2">
+                            <Globe2 size={12} />
+                            General {cdoc.data?.sensor_models?.sensor_categories?.name} guidance
+                          </div>
+                          <div
+                            className="doc-prose"
+                            dangerouslySetInnerHTML={{ __html: renderMarkdown(generalSections[s], highlight) }}
+                          />
+                        </div>
+                      )}
+                    </>
                   )}
                 </section>
-              ))}
+                );
+              })}
             </>
           )}
 
@@ -512,6 +588,48 @@ export default function ConsolidatedViewer() {
           onReverted={() => setHistoryOpen(false)}
         />
       )}
+    </div>
+  );
+}
+
+// The chat assistant's synthesized answer, surfaced prominently at the top of
+// the document ("in focus"), with a toggle to fold/unfold the rest of the page.
+function AnswerFocusCard({ answer, focusMode, canFocus, onToggleFocus }: {
+  answer: string;
+  focusMode: boolean;
+  canFocus: boolean;
+  onToggleFocus: () => void;
+}) {
+  const html = useMemo(() => renderMarkdown(answer), [answer]);
+  return (
+    <div className="relative overflow-hidden rounded-2xl border border-brand-200 bg-gradient-to-br from-brand-50 via-white to-white shadow-md">
+      <div aria-hidden className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-brand-500 via-brand-700 to-brand-900" />
+      <div className="p-4 sm:p-5">
+        <div className="flex items-center justify-between gap-3 mb-3">
+          <div className="inline-flex items-center gap-2.5 min-w-0">
+            <span className="bg-brand-700 text-white rounded-xl w-9 h-9 flex items-center justify-center shadow-sm shrink-0">
+              <Sparkles size={17} strokeWidth={2} />
+            </span>
+            <div className="min-w-0">
+              <div className="text-sm font-bold text-brand-900 leading-tight">Answer</div>
+              <div className="text-[11px] text-slate-500 mt-0.5">Summarized from this document</div>
+            </div>
+          </div>
+          {canFocus && (
+            <button
+              onClick={onToggleFocus}
+              aria-pressed={focusMode}
+              className="tap inline-flex items-center gap-1.5 rounded-lg border border-brand-200 bg-white px-3 py-1.5 text-xs font-medium text-brand-700 hover:bg-brand-50 transition shrink-0"
+            >
+              {focusMode ? <><BookOpen size={13} /> <span className="hidden sm:inline">Read</span> full document</> : <><Sparkles size={13} /> Focus answer</>}
+            </button>
+          )}
+        </div>
+        <div className="doc-prose text-slate-800" dangerouslySetInnerHTML={{ __html: html }} />
+        <div className="mt-3 pt-2.5 border-t border-brand-100 text-[11px] text-slate-500 inline-flex items-center gap-1.5">
+          <Sparkles size={11} /> AI summary of the verified content below — confirm against the source before acting.
+        </div>
+      </div>
     </div>
   );
 }

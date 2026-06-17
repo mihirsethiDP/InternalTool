@@ -8,6 +8,7 @@ import { UploadProvider, useUpload } from './UploadModal';
 import NotificationBell from './NotificationBell';
 import ChatDrawer from './ChatDrawer';
 import UserMenu from './UserMenu';
+import AccessibilityMenu from './AccessibilityMenu';
 
 const navCls = ({ isActive }: { isActive: boolean }) =>
   `px-3 py-2 rounded-md text-sm font-medium transition ${
@@ -66,6 +67,7 @@ function Inner() {
                 {t('nav.upload')}
               </button>
             )}
+            <AccessibilityMenu />
             <NotificationBell />
             <UserMenu profile={profile} email={email} onSignOut={signOut} />
           </div>

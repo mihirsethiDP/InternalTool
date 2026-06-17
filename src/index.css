@@ -46,3 +46,58 @@ mark { background: #fde68a; padding: 0 2px; border-radius: 2px; }
 
 /* line clamp utility (safe fallback) */
 .line-clamp-3 { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.line-clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+/* =====================================================================
+   Accessibility: text scaling + high-contrast mode (see lib/accessibility)
+   ===================================================================== */
+/* Text scale works by nudging the root font-size; all rem-based sizing
+   (which is most of the app) scales proportionally. Breakpoints are px-based
+   so layout columns are unaffected. */
+html[data-text-scale='large']  { font-size: 18px; }
+html[data-text-scale='xlarge'] { font-size: 20px; }
+
+/* High-contrast mode: darken muted text and strengthen borders/badges so the
+   UI stays legible in bright outdoor light. Scoped to opt-in via the toggle. */
+html[data-contrast='high'] {
+  --tw-shadow-color: transparent;
+}
+html[data-contrast='high'] .text-slate-500,
+html[data-contrast='high'] .text-slate-400,
+html[data-contrast='high'] .muted { color: #1e293b !important; }
+html[data-contrast='high'] .text-white\/75,
+html[data-contrast='high'] .text-white\/60,
+html[data-contrast='high'] .text-white\/90 { color: #ffffff !important; }
+html[data-contrast='high'] .border-slate-200,
+html[data-contrast='high'] .border-slate-100,
+html[data-contrast='high'] .border-slate-300 { border-color: #475569 !important; }
+html[data-contrast='high'] .badge { background: #1e293b; color: #fff; }
+html[data-contrast='high'] .badge-blue { background: #193458; color: #fff; }
+html[data-contrast='high'] mark { background: #fde047; color: #000; outline: 1px solid #a16207; }
+
+/* =====================================================================
+   Keyboard accessibility: visible focus ring for keyboard users only.
+   ===================================================================== */
+:focus-visible {
+  outline: 2px solid #193458;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+html[data-contrast='high'] :focus-visible { outline-color: #000; outline-width: 3px; }
+
+/* Respect users who prefer reduced motion. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Larger default tap targets on touch / small screens (mobile only — desktop
+   layouts above the sm breakpoint are untouched). Scoped to real controls so
+   inline text-buttons aren't distorted; add .tap to opt other targets in. */
+@media (max-width: 639px) {
+  select, .input, .btn, .btn-primary, .btn-secondary, .tap { min-height: 44px; }
+}
