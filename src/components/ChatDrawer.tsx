@@ -239,7 +239,7 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
         role="dialog"
         aria-modal="true"
         aria-label={t('chat.title')}
-        className="relative bg-slate-50 w-full max-w-md h-[100dvh] flex flex-col shadow-2xl animate-[slideIn_180ms_ease-out]"
+        className="relative bg-slate-50 w-full max-w-md h-[100dvh] flex flex-col overflow-hidden shadow-2xl animate-[slideIn_180ms_ease-out]"
       >
         {/* Header */}
         <div className="relative overflow-hidden bg-gradient-to-br from-brand-600 via-brand-700 to-brand-900 text-white px-4 sm:px-5 py-4">
@@ -264,7 +264,7 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
         </div>
 
         {/* Messages */}
-        <div ref={scrollRef} role="log" aria-live="polite" aria-label="Conversation" className="flex-1 overflow-y-auto p-4 space-y-4">
+        <div ref={scrollRef} role="log" aria-live="polite" aria-label="Conversation" className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden p-4 space-y-4">
           {turns.length === 0 && (
             <div className="space-y-4">
               {/* Welcome bubble */}
@@ -287,8 +287,8 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
                       <span className="w-7 h-7 rounded-lg bg-brand-50 text-brand-700 flex items-center justify-center shrink-0 group-hover:bg-brand-700 group-hover:text-white transition">
                         <Wrench size={14} />
                       </span>
-                      <span className="text-slate-700 group-hover:text-brand-800">{s}</span>
-                      <ArrowRight size={14} className="ml-auto text-slate-300 group-hover:text-brand-700 transition shrink-0" />
+                      <span className="flex-1 min-w-0 text-slate-700 group-hover:text-brand-800">{s}</span>
+                      <ArrowRight size={14} className="text-slate-300 group-hover:text-brand-700 transition shrink-0" />
                     </button>
                   ))}
                 </div>
