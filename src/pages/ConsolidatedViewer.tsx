@@ -242,11 +242,15 @@ export default function ConsolidatedViewer() {
             <div className="inline-flex items-center gap-1.5 text-[11px] uppercase tracking-wider text-white/70 mb-2 font-semibold">
               <Cpu size={13} /> {t('viewer.eyebrow')}
             </div>
+            {sm?.sensor_categories?.name && (
+              <div className="mb-2">
+                <span className="inline-flex items-center gap-1.5 bg-white text-brand-800 rounded-full pl-2.5 pr-3 py-1 text-xs font-bold shadow-sm ring-1 ring-white/50 uppercase tracking-wide">
+                  <Layers size={13} strokeWidth={2.5} /> {sm.sensor_categories.name}
+                </span>
+              </div>
+            )}
             <h1 className="text-xl sm:text-2xl md:text-3xl font-bold tracking-tight leading-tight">{title}</h1>
             <div className="flex items-center gap-2 mt-3 flex-wrap">
-              {sm?.sensor_categories?.name && (
-                <span className="inline-flex items-center gap-1 bg-white/15 ring-1 ring-white/10 text-white rounded-full px-2.5 py-1 text-xs font-medium">{sm.sensor_categories.name}</span>
-              )}
               <span className="inline-flex items-center gap-1 bg-white/15 ring-1 ring-white/10 text-white rounded-full px-2.5 py-1 text-xs font-medium">
                 <FileStack size={12} /> {(sources.data ?? []).length} document{(sources.data ?? []).length === 1 ? '' : 's'}
               </span>
@@ -602,31 +606,36 @@ function AnswerFocusCard({ answer, focusMode, canFocus, onToggleFocus }: {
 }) {
   const html = useMemo(() => renderMarkdown(answer), [answer]);
   return (
-    <div className="relative overflow-hidden rounded-2xl border border-brand-200 bg-gradient-to-br from-brand-50 via-white to-white shadow-md">
-      <div aria-hidden className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-brand-500 via-brand-700 to-brand-900" />
-      <div className="p-4 sm:p-5">
+    <div className="relative overflow-hidden rounded-2xl shadow-lg bg-gradient-to-br from-brand-600 via-brand-700 to-brand-900 text-white">
+      {/* decorative glow */}
+      <div aria-hidden className="pointer-events-none absolute -top-14 -right-8 w-44 h-44 rounded-full bg-white/10 blur-3xl" />
+      <div aria-hidden className="pointer-events-none absolute -bottom-16 -left-6 w-40 h-40 rounded-full bg-brand-400/25 blur-3xl" />
+      <div className="relative p-4 sm:p-5">
         <div className="flex items-center justify-between gap-3 mb-3">
           <div className="inline-flex items-center gap-2.5 min-w-0">
-            <span className="bg-brand-700 text-white rounded-xl w-9 h-9 flex items-center justify-center shadow-sm shrink-0">
+            <span className="bg-white/15 ring-1 ring-white/20 text-white rounded-xl w-9 h-9 flex items-center justify-center shrink-0">
               <Sparkles size={17} strokeWidth={2} />
             </span>
             <div className="min-w-0">
-              <div className="text-sm font-bold text-brand-900 leading-tight">Answer</div>
-              <div className="text-[11px] text-slate-500 mt-0.5">Summarized from this document</div>
+              <div className="text-sm font-bold leading-tight">Answer</div>
+              <div className="text-[11px] text-white/70 mt-0.5">Summarized from this document</div>
             </div>
           </div>
           {canFocus && (
             <button
               onClick={onToggleFocus}
               aria-pressed={focusMode}
-              className="tap inline-flex items-center gap-1.5 rounded-lg border border-brand-200 bg-white px-3 py-1.5 text-xs font-medium text-brand-700 hover:bg-brand-50 transition shrink-0"
+              className="tap inline-flex items-center gap-1.5 rounded-lg bg-white/15 ring-1 ring-white/20 hover:bg-white/25 px-3 py-1.5 text-xs font-medium text-white transition shrink-0"
             >
               {focusMode ? <><BookOpen size={13} /> <span className="hidden sm:inline">Read</span> full document</> : <><Sparkles size={13} /> Focus answer</>}
             </button>
           )}
         </div>
-        <div className="doc-prose text-slate-800" dangerouslySetInnerHTML={{ __html: html }} />
-        <div className="mt-3 pt-2.5 border-t border-brand-100 text-[11px] text-slate-500 inline-flex items-center gap-1.5">
+        {/* Answer text in a white panel so the gradient frames it without hurting readability */}
+        <div className="rounded-xl bg-white shadow-sm p-4">
+          <div className="doc-prose text-slate-800" dangerouslySetInnerHTML={{ __html: html }} />
+        </div>
+        <div className="mt-3 text-[11px] text-white/75 inline-flex items-center gap-1.5">
           <Sparkles size={11} /> AI summary of the verified content below — confirm against the source before acting.
         </div>
       </div>
