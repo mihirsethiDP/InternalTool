@@ -376,7 +376,7 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
             </div>
           )}
           <form onSubmit={(e) => { e.preventDefault(); send(input); }} className="flex items-center gap-2">
-            <div className="relative flex-1">
+            <div className="relative flex-1 min-w-0">
               <input
                 ref={inputRef}
                 autoFocus
