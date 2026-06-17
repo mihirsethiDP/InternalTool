@@ -16,6 +16,7 @@ import ConsolidatedEditor from './pages/ConsolidatedEditor';
 import Profile from './pages/Profile';
 import DocsGuide from './pages/DocsGuide';
 import Privacy from './pages/Privacy';
+import RecoveryGate from './components/RecoveryGate';
 import { useAuth } from './lib/auth';
 
 function Protected({ children }: { children: JSX.Element }) {
@@ -27,6 +28,8 @@ function Protected({ children }: { children: JSX.Element }) {
 
 export default function App() {
   return (
+    <>
+    <RecoveryGate />
     <Routes>
       <Route path="/login" element={<Login />} />
       <Route path="/privacy" element={<Privacy />} />
@@ -51,5 +54,6 @@ export default function App() {
         <Route path="*" element={<div className="p-6">Not found.</div>} />
       </Route>
     </Routes>
+    </>
   );
 }
