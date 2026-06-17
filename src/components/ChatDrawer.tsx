@@ -153,6 +153,15 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
     return () => document.removeEventListener('keydown', onKey);
   }, [open, onClose]);
 
+  // Lock background scroll while the drawer is open so the page underneath
+  // (and the fixed drawer) doesn't shift on mobile.
+  useEffect(() => {
+    if (!open) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = prev; };
+  }, [open]);
+
   async function send(query: string) {
     const q = query.trim();
     if (!q) return;
@@ -230,7 +239,7 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
         role="dialog"
         aria-modal="true"
         aria-label={t('chat.title')}
-        className="relative bg-slate-50 w-full max-w-md h-full flex flex-col shadow-2xl animate-[slideIn_180ms_ease-out]"
+        className="relative bg-slate-50 w-full max-w-md h-[100dvh] flex flex-col shadow-2xl animate-[slideIn_180ms_ease-out]"
       >
         {/* Header */}
         <div className="relative overflow-hidden bg-gradient-to-br from-brand-600 via-brand-700 to-brand-900 text-white px-4 sm:px-5 py-4">
@@ -379,7 +388,6 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
             <div className="relative flex-1 min-w-0">
               <input
                 ref={inputRef}
-                autoFocus
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 placeholder={t('chat.placeholder')}
