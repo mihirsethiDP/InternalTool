@@ -181,7 +181,7 @@ function UsersPanel({ onChanged }: { onChanged: () => void }) {
   return (
     <div className="card">
       <p className="text-xs text-slate-500 mb-3">Anyone who has signed in appears here. Change a user&rsquo;s role to grant upload or admin rights.</p>
-      <div className="overflow-x-auto -mx-5 px-5">
+      <div className="overflow-x-auto -mx-4 px-4 sm:-mx-5 sm:px-5">
         <table className="w-full text-sm min-w-[34rem]">
           <thead className="text-left text-xs uppercase text-slate-500"><tr><th>Email</th><th>Role</th><th></th></tr></thead>
           <tbody>

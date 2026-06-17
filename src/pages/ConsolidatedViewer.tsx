@@ -288,7 +288,7 @@ export default function ConsolidatedViewer() {
       )}
 
       {/* Sticky toolbar */}
-      <div className="sticky top-0 z-30 -mx-5 px-5 py-2.5 bg-white/90 backdrop-blur-md border-b border-slate-200 space-y-2">
+      <div className="sticky top-0 z-30 -mx-4 px-4 sm:-mx-5 sm:px-5 py-2.5 bg-white/90 backdrop-blur-md border-b border-slate-200 space-y-2">
         <div className="flex items-center gap-2 sm:gap-3">
           {/* View mode toggle */}
           <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden shrink-0 shadow-sm">

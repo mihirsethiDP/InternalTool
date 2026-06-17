@@ -135,7 +135,7 @@ export default function Viewer() {
 
   return (
     <div className="min-h-[80vh]">
-      <div className="sticky top-0 z-20 bg-white/95 backdrop-blur border-b border-slate-200 -mx-5 px-5 py-3 flex items-center gap-3 flex-wrap">
+      <div className="sticky top-0 z-20 bg-white/95 backdrop-blur border-b border-slate-200 -mx-4 px-4 sm:-mx-5 sm:px-5 py-3 flex items-center gap-3 flex-wrap">
         <button onClick={() => nav(-1)} className="btn-ghost btn-sm">← Back</button>
         <div className="font-semibold text-slate-900 truncate max-w-md">{docTitle}</div>
         <div className="ml-auto flex items-center gap-2">

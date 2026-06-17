@@ -5,6 +5,12 @@
 html, body, #root { height: 100%; }
 body { @apply text-slate-800 antialiased; font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; }
 
+/* Defensive guard against horizontal scroll on mobile: clip any stray overflow
+   at the page level (clip, not hidden, so position:sticky keeps working).
+   Long unbreakable tokens (model numbers, URLs) wrap instead of widening. */
+html, body { overflow-x: clip; max-width: 100%; }
+.doc-prose, .chat-prose { overflow-wrap: anywhere; }
+
 /* ----- Surfaces ----- */
 .card {
   @apply bg-white rounded-xl border border-slate-200 p-5;
