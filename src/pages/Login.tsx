@@ -68,13 +68,13 @@ export default function Login() {
       <div aria-hidden className="pointer-events-none absolute inset-0 opacity-[0.06]" style={{ backgroundImage: 'radial-gradient(circle at 1px 1px, #fff 1px, transparent 0)', backgroundSize: '22px 22px' }} />
 
       <div className="relative w-full max-w-md">
-        {/* Brand */}
+        {/* Brand — logo is light, so keep it on a dark/translucent panel */}
         <div className="flex flex-col items-center text-center mb-6">
-          <div className="bg-white rounded-2xl shadow-lg p-3 mb-3">
+          <div className="bg-white/10 ring-1 ring-white/15 rounded-2xl shadow-lg px-5 py-3.5 mb-3">
             <img
               src={`${import.meta.env.BASE_URL}logo.png`}
               alt="DigitalPaani"
-              className="h-12 w-auto object-contain"
+              className="h-11 w-auto object-contain"
               onError={(e) => { (e.currentTarget.style.display = 'none'); }}
             />
           </div>
