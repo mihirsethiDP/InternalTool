@@ -86,11 +86,11 @@ function Inner() {
       <button
         onClick={() => setChatOpen(true)}
         aria-label="Open assistant"
-        className="group fixed bottom-6 right-6 z-40 inline-flex items-center gap-2.5 bg-brand-700 hover:bg-brand-800 text-white rounded-full pl-4 pr-5 py-3.5 shadow-lg hover:shadow-xl transition"
+        className="group fixed bottom-5 right-5 sm:bottom-6 sm:right-6 z-40 inline-flex items-center gap-2.5 bg-gradient-to-br from-brand-600 to-brand-800 hover:from-brand-700 hover:to-brand-900 text-white rounded-full pl-4 pr-5 py-3.5 shadow-lg hover:shadow-xl transition"
       >
         <span className="relative flex">
           <MessageSquare size={20} strokeWidth={2} />
-          <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-emerald-400 ring-2 ring-brand-700 animate-pulse" />
+          <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-emerald-400 ring-2 ring-brand-800 animate-pulse" />
         </span>
         <span className="text-sm font-semibold tracking-tight">{t('chat.launcher')}</span>
       </button>

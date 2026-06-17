@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { X, Send, ArrowRight, ExternalLink, ChevronDown, Sparkles, FileText } from 'lucide-react';
+import { X, Send, ArrowRight, ExternalLink, ChevronDown, Sparkles, Bot, Trash2, Wrench, Cpu } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { runSearch } from '../lib/search';
 import { logUnanswered } from '../lib/telemetry';
@@ -130,6 +130,14 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
     // eslint-disable-next-line
   }, [open, seed]);
 
+  // Close on Escape for keyboard users.
+  useEffect(() => {
+    if (!open) return;
+    function onKey(e: KeyboardEvent) { if (e.key === 'Escape') onClose(); }
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [open, onClose]);
+
   async function send(query: string) {
     const q = query.trim();
     if (!q) return;
@@ -202,52 +210,83 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
-      <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative bg-white w-full max-w-md h-full flex flex-col shadow-2xl border-l border-slate-200 animate-[slideIn_180ms_ease-out]">
+      <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm" onClick={onClose} />
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={t('chat.title')}
+        className="relative bg-slate-50 w-full max-w-md h-full flex flex-col shadow-2xl animate-[slideIn_180ms_ease-out]"
+      >
         {/* Header */}
-        <div className="bg-brand-700 text-white px-5 py-4 flex items-center justify-between">
-          <div>
-            <div className="text-[11px] uppercase tracking-wider text-white/60 font-medium">{t('chat.assistant')}</div>
-            <div className="text-base font-semibold tracking-tight mt-0.5">{t('chat.title')}</div>
+        <div className="relative overflow-hidden bg-gradient-to-br from-brand-600 via-brand-700 to-brand-900 text-white px-4 sm:px-5 py-4">
+          <div aria-hidden className="pointer-events-none absolute -top-12 -right-6 w-40 h-40 rounded-full bg-white/10 blur-3xl" />
+          <div className="relative flex items-center gap-3">
+            <span className="relative shrink-0">
+              <span className="w-10 h-10 rounded-2xl bg-white/15 ring-1 ring-white/20 flex items-center justify-center">
+                <Bot size={20} strokeWidth={2} />
+              </span>
+              <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-emerald-400 ring-2 ring-brand-800" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="text-base font-semibold tracking-tight leading-tight truncate">{t('chat.title')}</div>
+              <div className="text-[11px] text-white/70 inline-flex items-center gap-1">
+                <Sparkles size={11} /> {t('chat.assistant')}
+              </div>
+            </div>
+            <button onClick={onClose} aria-label="Close assistant" className="tap rounded-lg hover:bg-white/15 w-9 h-9 flex items-center justify-center transition shrink-0">
+              <X size={19} />
+            </button>
           </div>
-          <button onClick={onClose} aria-label="Close" className="rounded-md hover:bg-white/10 w-8 h-8 flex items-center justify-center transition">
-            <X size={18} />
-          </button>
         </div>
 
         {/* Messages */}
-        <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-50">
+        <div ref={scrollRef} role="log" aria-live="polite" aria-label="Conversation" className="flex-1 overflow-y-auto p-4 space-y-4">
           {turns.length === 0 && (
-            <div className="space-y-3">
-              <div className="card-tight bg-white">
-                <div className="text-sm text-slate-700 leading-relaxed">
-                  {t('chat.intro')}
-                </div>
-                <div className="text-xs text-slate-500 mt-2">
-                  {t('chat.note')}
+            <div className="space-y-4">
+              {/* Welcome bubble */}
+              <div className="flex items-start gap-2.5">
+                <span className="w-8 h-8 rounded-xl bg-gradient-to-br from-brand-600 to-brand-800 text-white flex items-center justify-center shrink-0 shadow-sm">
+                  <Bot size={16} />
+                </span>
+                <div className="min-w-0 rounded-2xl rounded-tl-md bg-white border border-slate-200 shadow-sm px-3.5 py-3">
+                  <div className="text-sm text-slate-700 leading-relaxed">{t('chat.intro')}</div>
+                  <div className="text-xs text-slate-500 mt-1.5">{t('chat.note')}</div>
                 </div>
               </div>
-              <div className="text-xs text-slate-500 mt-3 mb-1">{t('chat.tryOne')}</div>
-              <div className="flex flex-col gap-1.5">
-                {SUGGESTIONS.map((s) => (
-                  <button key={s} onClick={() => send(s)}
-                    className="text-left text-sm bg-white border border-slate-200 hover:border-brand-700 hover:text-brand-700 rounded-lg px-3 py-2 transition">
-                    {s}
-                  </button>
-                ))}
+              {/* Suggestion chips */}
+              <div className="pl-10">
+                <div className="text-[11px] uppercase tracking-wide font-semibold text-slate-400 mb-2">{t('chat.tryOne')}</div>
+                <div className="flex flex-col gap-2">
+                  {SUGGESTIONS.map((s) => (
+                    <button key={s} onClick={() => send(s)}
+                      className="tap group text-left text-sm bg-white border border-slate-200 hover:border-brand-700 rounded-xl px-3 py-2.5 transition shadow-sm flex items-center gap-2.5">
+                      <span className="w-7 h-7 rounded-lg bg-brand-50 text-brand-700 flex items-center justify-center shrink-0 group-hover:bg-brand-700 group-hover:text-white transition">
+                        <Wrench size={14} />
+                      </span>
+                      <span className="text-slate-700 group-hover:text-brand-800">{s}</span>
+                      <ArrowRight size={14} className="ml-auto text-slate-300 group-hover:text-brand-700 transition shrink-0" />
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
           )}
 
           {turns.map((turn, i) => turn.role === 'user' ? (
             <div key={i} className="flex justify-end">
-              <div className="max-w-[80%] bg-brand-700 text-white rounded-2xl rounded-tr-md px-4 py-2 text-sm">{turn.text}</div>
+              <div className="max-w-[82%] bg-gradient-to-br from-brand-600 to-brand-800 text-white rounded-2xl rounded-tr-md px-4 py-2.5 text-sm shadow-sm">{turn.text}</div>
             </div>
           ) : (
-            <div key={i} className="space-y-2">
-              <div className="text-xs text-slate-500 px-1">{t('chat.assistant')}</div>
+            <div key={i} className="flex items-start gap-2.5">
+              <span className="w-8 h-8 rounded-xl bg-gradient-to-br from-brand-600 to-brand-800 text-white flex items-center justify-center shrink-0 shadow-sm mt-0.5">
+                <Bot size={16} />
+              </span>
+              <div className="min-w-0 flex-1 space-y-2">
               {turn.loading ? (
-                <div className="card-tight bg-white text-sm text-slate-500"><span className="animate-pulse">Thinking…</span></div>
+                <div className="inline-flex items-center gap-2 rounded-2xl rounded-tl-md bg-white border border-slate-200 shadow-sm px-3.5 py-3">
+                  <span className="dp-typing"><span></span><span></span><span></span></span>
+                  <span className="text-xs text-slate-400">{t('chat.title')} is thinking…</span>
+                </div>
               ) : turn.answer ? (
                 <AnswerCard
                   answer={turn.answer}
@@ -283,35 +322,46 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
               {!turn.loading && i === turns.length - 1 && !turn.narrowedLabel && (
                 <NarrowRow onPick={(modelId, generalModelId, label) => narrowTurn(i, turn.query, modelId, generalModelId, label)} />
               )}
+              </div>
             </div>
           ))}
         </div>
 
         {/* Input */}
         <div className="border-t border-slate-200 p-3 bg-white">
+          {turns.length > 0 && (
+            <div className="flex justify-end mb-2">
+              <button onClick={() => setTurns([])} className="inline-flex items-center gap-1 text-xs text-slate-500 hover:text-brand-700 transition">
+                <Trash2 size={12} /> {t('chat.clearConversation')}
+              </button>
+            </div>
+          )}
           <form onSubmit={(e) => { e.preventDefault(); send(input); }} className="flex items-center gap-2">
-            <input
-              autoFocus
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder={t('chat.placeholder')}
-              className="flex-1 rounded-xl border border-slate-300 px-3 py-2.5 text-sm focus:border-brand-700 focus:ring-2 focus:ring-brand-700/20 outline-none"
-            />
-            <button type="submit" disabled={!input.trim()} aria-label="Send"
-                    className="rounded-xl bg-brand-700 hover:bg-brand-800 text-white w-10 h-10 flex items-center justify-center disabled:opacity-50 transition">
-              <Send size={16} />
+            <div className="relative flex-1">
+              <input
+                autoFocus
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                placeholder={t('chat.placeholder')}
+                aria-label={t('chat.placeholder')}
+                className="w-full rounded-2xl border border-slate-300 bg-slate-50 focus:bg-white pl-4 pr-3 py-3 text-sm focus:border-brand-700 focus:ring-2 focus:ring-brand-700/20 outline-none transition"
+              />
+            </div>
+            <button type="submit" disabled={!input.trim()} aria-label="Send message"
+                    className="tap rounded-2xl bg-gradient-to-br from-brand-600 to-brand-800 hover:from-brand-700 hover:to-brand-900 text-white w-12 h-12 flex items-center justify-center disabled:opacity-40 disabled:grayscale transition shadow-sm shrink-0">
+              <Send size={17} />
             </button>
           </form>
-          {turns.length > 0 && (
-            <button onClick={() => setTurns([])} className="text-xs text-slate-500 hover:text-brand-700 mt-2">
-              {t('chat.clearConversation')}
-            </button>
-          )}
         </div>
       </div>
 
       <style>{`
         @keyframes slideIn { from { transform: translateX(20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        .dp-typing { display: inline-flex; gap: 3px; align-items: center; }
+        .dp-typing span { width: 6px; height: 6px; border-radius: 50%; background: #94a3b8; animation: dpBounce 1.2s infinite ease-in-out; }
+        .dp-typing span:nth-child(2) { animation-delay: 0.15s; }
+        .dp-typing span:nth-child(3) { animation-delay: 0.3s; }
+        @keyframes dpBounce { 0%, 60%, 100% { transform: translateY(0); opacity: 0.4; } 30% { transform: translateY(-4px); opacity: 1; } }
         .chat-prose { color: #334155; font-size: 0.8rem; line-height: 1.6; }
         .chat-prose > * + * { margin-top: 0.4rem; }
         .chat-prose h2 { font-size: 0.82rem; font-weight: 600; color: #193458; margin-top: 0.6rem; }
@@ -355,15 +405,17 @@ function NarrowRow({ onPick }: { onPick: (modelId: string, generalModelId: strin
   }
 
   return (
-    <div className="bg-brand-50/70 border border-brand-100 rounded-lg px-3 py-2.5 space-y-2">
-      <div className="text-xs text-slate-600 font-medium">Know the sensor? Narrow to your make &amp; model:</div>
+    <div className="bg-gradient-to-br from-brand-50 to-white border border-brand-100 rounded-xl px-3 py-3 space-y-2 shadow-sm">
+      <div className="text-xs text-brand-800 font-semibold inline-flex items-center gap-1.5">
+        <Cpu size={13} /> Know the sensor? Narrow to your make &amp; model
+      </div>
       <div className="flex gap-2 flex-wrap">
-        <select className="rounded-md border border-slate-300 bg-white px-2 py-1.5 text-xs outline-none focus:border-brand-700"
+        <select aria-label="Make" className="tap flex-1 min-w-[8rem] rounded-lg border border-slate-300 bg-white px-2.5 py-2 text-xs outline-none focus:border-brand-700 focus:ring-2 focus:ring-brand-700/15"
           value={makeId} onChange={(e) => setMakeId(e.target.value)}>
           <option value="">Make…</option>
           {makes.data?.map((m: any) => <option key={m.id} value={m.id}>{m.name}</option>)}
         </select>
-        <select className="rounded-md border border-slate-300 bg-white px-2 py-1.5 text-xs outline-none focus:border-brand-700 disabled:opacity-50"
+        <select aria-label="Model" className="tap flex-1 min-w-[8rem] rounded-lg border border-slate-300 bg-white px-2.5 py-2 text-xs outline-none focus:border-brand-700 focus:ring-2 focus:ring-brand-700/15 disabled:opacity-50"
           value="" onChange={(e) => pick(e.target.value)} disabled={!makeId}>
           <option value="">{makeId ? 'Model…' : 'Pick a make first'}</option>
           {models.data?.map((m: any) => <option key={m.id} value={m.id}>{m.model_no || m.name}</option>)}
@@ -383,37 +435,44 @@ function AnswerCard({ answer, citations, narrowedLabel, onOpenCitation }: {
 }) {
   const html = useMemo(() => renderMarkdown(answer), [answer]);
   return (
-    <div className="card-tight bg-white space-y-2.5">
-      {narrowedLabel && (
-        <div className="text-[11px] text-slate-500">Scoped to <strong className="text-slate-700">{narrowedLabel}</strong></div>
-      )}
-      <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-wide font-semibold text-brand-700">
-        <Sparkles size={12} /> Answer
+    <div className="rounded-2xl rounded-tl-md overflow-hidden border border-brand-200 shadow-sm bg-white">
+      {/* Gradient header makes the synthesized answer stand out */}
+      <div className="relative overflow-hidden bg-gradient-to-r from-brand-600 to-brand-800 px-3.5 py-2 flex items-center justify-between gap-2">
+        <span aria-hidden className="pointer-events-none absolute -top-8 -right-4 w-24 h-24 rounded-full bg-white/10 blur-2xl" />
+        <span className="relative inline-flex items-center gap-1.5 text-white text-[11px] font-semibold uppercase tracking-wide">
+          <Sparkles size={12} /> Answer
+        </span>
+        {narrowedLabel && (
+          <span className="relative text-[10px] text-white/85 truncate max-w-[55%]" title={narrowedLabel}>{narrowedLabel}</span>
+        )}
       </div>
-      <div className="chat-prose" dangerouslySetInnerHTML={{ __html: html }} />
 
-      {citations.length > 0 && (
-        <div className="pt-2 border-t border-slate-100">
-          <div className="text-[11px] uppercase tracking-wide font-semibold text-slate-400 mb-1.5">Sources</div>
-          <div className="flex flex-col gap-1">
-            {citations.map((c, i) => (
-              <button
-                key={`${c.document_id}-${c.section}-${i}`}
-                onClick={() => onOpenCitation(c)}
-                className="group flex items-center gap-2 text-left rounded-md border border-slate-200 hover:border-brand-700 px-2.5 py-1.5 transition"
-              >
-                <span className="text-[10px] font-semibold text-slate-400 group-hover:text-brand-700 w-4 shrink-0">[{i + 1}]</span>
-                <FileText size={12} className="text-slate-400 group-hover:text-brand-700 shrink-0" />
-                <span className="min-w-0 flex-1 text-xs text-slate-700 truncate group-hover:text-brand-700">{c.document_title}</span>
-                <span className="badge-blue shrink-0">{SECTION_LABEL[c.section]}</span>
-              </button>
-            ))}
+      <div className="p-3.5 space-y-2.5">
+        <div className="chat-prose" dangerouslySetInnerHTML={{ __html: html }} />
+
+        {citations.length > 0 && (
+          <div className="pt-2 border-t border-slate-100">
+            <div className="text-[11px] uppercase tracking-wide font-semibold text-slate-400 mb-1.5">Sources</div>
+            <div className="flex flex-col gap-1">
+              {citations.map((c, i) => (
+                <button
+                  key={`${c.document_id}-${c.section}-${i}`}
+                  onClick={() => onOpenCitation(c)}
+                  className="tap group flex items-center gap-2 text-left rounded-lg border border-slate-200 hover:border-brand-700 hover:bg-brand-50/40 px-2.5 py-1.5 transition"
+                >
+                  <span className="text-[10px] font-bold text-brand-700 bg-brand-50 rounded w-5 h-5 flex items-center justify-center shrink-0">{i + 1}</span>
+                  <span className="min-w-0 flex-1 text-xs text-slate-700 truncate group-hover:text-brand-700">{c.document_title}</span>
+                  <span className="badge-blue shrink-0">{SECTION_LABEL[c.section]}</span>
+                  <ArrowRight size={12} className="text-slate-300 group-hover:text-brand-700 transition shrink-0" />
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
-      )}
+        )}
 
-      <div className="text-[10px] text-slate-400 pt-0.5">
-        Generated from the documents above. Verify against the source before acting.
+        <div className="text-[10px] text-slate-400 inline-flex items-center gap-1">
+          <Sparkles size={10} /> Generated from the sources below — verify before acting.
+        </div>
       </div>
     </div>
   );
