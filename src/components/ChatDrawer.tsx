@@ -2,12 +2,15 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { X, Send, ArrowRight, ExternalLink, ChevronDown, Sparkles, Bot, Trash2, Wrench, Cpu } from 'lucide-react';
+import { X, Send, ArrowRight, ExternalLink, ChevronDown, Sparkles, Bot, Trash2, Wrench, Cpu, LifeBuoy } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { runSearch } from '../lib/search';
 import { logUnanswered } from '../lib/telemetry';
 import { SECTION_LABEL, parseSections } from '../lib/consolidated';
 import { renderMarkdown, normalizeAnswerSteps } from '../lib/markdown';
+import { useAuth } from '../lib/auth';
+import AnswerFeedback from './AnswerFeedback';
+import TicketModal from './TicketModal';
 import type { SubmissionSection } from '../lib/types';
 
 interface Hit {
@@ -113,9 +116,21 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
 }) {
   const nav = useNavigate();
   const { t } = useTranslation();
+  const { email } = useAuth();
   const [input, setInput] = useState('');
   const [turns, setTurns] = useState<Turn[]>([]);
+  const [ticket, setTicket] = useState<{ query?: string; description?: string } | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const focusInput = () => inputRef.current?.focus();
+
+  function openTicket(turn: Extract<Turn, { role: 'bot' }>) {
+    const desc =
+      `Question: ${turn.query}\n\n` +
+      (turn.answer ? `Assistant answer:\n${turn.answer}\n\n` : '') +
+      `This didn't resolve my issue.`;
+    setTicket({ query: turn.query, description: desc });
+  }
 
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
@@ -318,6 +333,30 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
                 </div>
               )}
 
+              {/* Did this help? — feedback + continue + log-a-ticket (tracked) */}
+              {!turn.loading && (turn.answer || (turn.hits && turn.hits.length > 0)) && (
+                <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5">
+                  <AnswerFeedback
+                    source="chat"
+                    compact
+                    query={turn.query}
+                    consolidatedDocId={turn.answer ? (turn.citations?.[0]?.document_id ?? null) : (turn.hits?.[0]?.document_id ?? null)}
+                    onContinue={focusInput}
+                    onLogTicket={() => openTicket(turn)}
+                  />
+                </div>
+              )}
+
+              {/* Nothing found → still let them log a ticket */}
+              {!turn.loading && !turn.answer && (!turn.hits || turn.hits.length === 0) && (
+                <button
+                  onClick={() => openTicket(turn)}
+                  className="tap inline-flex items-center gap-1.5 rounded-md border border-slate-300 hover:border-brand-700 hover:text-brand-700 px-3 py-1.5 text-xs font-medium text-slate-700 transition"
+                >
+                  <LifeBuoy size={12} /> Log a support ticket
+                </button>
+              )}
+
               {/* Narrow-to-sensor probe, only under the most recent answered turn */}
               {!turn.loading && i === turns.length - 1 && !turn.narrowedLabel && (
                 <NarrowRow onPick={(modelId, generalModelId, label) => narrowTurn(i, turn.query, modelId, generalModelId, label)} />
@@ -339,6 +378,7 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
           <form onSubmit={(e) => { e.preventDefault(); send(input); }} className="flex items-center gap-2">
             <div className="relative flex-1">
               <input
+                ref={inputRef}
                 autoFocus
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
@@ -354,6 +394,15 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
           </form>
         </div>
       </div>
+
+      {ticket && (
+        <TicketModal
+          onClose={() => setTicket(null)}
+          query={ticket.query}
+          defaultDescription={ticket.description}
+          userEmail={email}
+        />
+      )}
 
       <style>{`
         @keyframes slideIn { from { transform: translateX(20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
