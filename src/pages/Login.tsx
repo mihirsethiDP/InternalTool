@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { supabase, isConfigured } from '../lib/supabase';
 import { useNavigate } from 'react-router-dom';
-import { Mail, Lock, KeyRound, ArrowLeft, ArrowRight, Loader2, ShieldCheck } from 'lucide-react';
+import { Lock, KeyRound, ArrowLeft, ArrowRight, Loader2, ShieldCheck } from 'lucide-react';
 
 type Mode = 'password' | 'otp' | 'forgot';
 
@@ -68,16 +68,14 @@ export default function Login() {
       <div aria-hidden className="pointer-events-none absolute inset-0 opacity-[0.06]" style={{ backgroundImage: 'radial-gradient(circle at 1px 1px, #fff 1px, transparent 0)', backgroundSize: '22px 22px' }} />
 
       <div className="relative w-full max-w-md">
-        {/* Brand — logo is light, so keep it on a dark/translucent panel */}
+        {/* Brand — light logo sits directly on the gradient, no frame */}
         <div className="flex flex-col items-center text-center mb-6">
-          <div className="bg-white/10 ring-1 ring-white/15 rounded-2xl shadow-lg px-5 py-3.5 mb-3">
-            <img
-              src={`${import.meta.env.BASE_URL}logo.png`}
-              alt="DigitalPaani"
-              className="h-11 w-auto object-contain"
-              onError={(e) => { (e.currentTarget.style.display = 'none'); }}
-            />
-          </div>
+          <img
+            src={`${import.meta.env.BASE_URL}logo.png`}
+            alt="DigitalPaani"
+            className="h-12 w-auto object-contain mb-4"
+            onError={(e) => { (e.currentTarget.style.display = 'none'); }}
+          />
           <h1 className="text-white text-xl font-bold tracking-tight">Sensor Troubleshooting Hub</h1>
           <p className="text-white/70 text-sm mt-1">DigitalPaani · internal access</p>
         </div>
@@ -106,13 +104,13 @@ export default function Login() {
           {/* PASSWORD MODE */}
           {mode === 'password' && (
             <form onSubmit={signInPassword} className="space-y-3">
-              <Field icon={<Mail size={16} />} label="Work email">
+              <Field label="Work email">
                 <input type="email" required autoComplete="email" placeholder="you@digitalpaani.com"
-                  className="input pl-10" value={email} onChange={(e) => setEmail(e.target.value)} />
+                  className="input" value={email} onChange={(e) => setEmail(e.target.value)} />
               </Field>
-              <Field icon={<Lock size={16} />} label="Password">
+              <Field label="Password">
                 <input type="password" required autoComplete="current-password" placeholder="Your password"
-                  className="input pl-10" value={password} onChange={(e) => setPassword(e.target.value)} />
+                  className="input" value={password} onChange={(e) => setPassword(e.target.value)} />
               </Field>
               <div className="flex justify-end -mt-1">
                 <button type="button" onClick={() => reset('forgot')} className="text-xs text-brand-700 hover:underline">Forgot password?</button>
@@ -126,9 +124,9 @@ export default function Login() {
           {/* OTP MODE */}
           {mode === 'otp' && !otpSent && (
             <form onSubmit={sendCode} className="space-y-3">
-              <Field icon={<Mail size={16} />} label="Work email">
+              <Field label="Work email">
                 <input type="email" required autoComplete="email" placeholder="you@digitalpaani.com"
-                  className="input pl-10" value={email} onChange={(e) => setEmail(e.target.value)} />
+                  className="input" value={email} onChange={(e) => setEmail(e.target.value)} />
               </Field>
               <button className="btn-primary w-full" disabled={busy}>
                 {busy ? <Loader2 size={16} className="animate-spin" /> : <>Email me a code <KeyRound size={15} /></>}
@@ -137,9 +135,9 @@ export default function Login() {
           )}
           {mode === 'otp' && otpSent && (
             <form onSubmit={verifyCode} className="space-y-3">
-              <Field icon={<KeyRound size={16} />} label="6-digit code">
+              <Field label="6-digit code">
                 <input inputMode="numeric" autoComplete="one-time-code" required placeholder="123456" maxLength={6}
-                  className="input pl-10 tracking-[0.4em] font-semibold" value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))} />
+                  className="input tracking-[0.4em] font-semibold" value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))} />
               </Field>
               <button className="btn-primary w-full" disabled={busy || code.length < 6}>
                 {busy ? <Loader2 size={16} className="animate-spin" /> : <>Verify &amp; sign in <ArrowRight size={15} /></>}
@@ -153,9 +151,9 @@ export default function Login() {
           {/* FORGOT MODE */}
           {mode === 'forgot' && (
             <form onSubmit={sendReset} className="space-y-3">
-              <Field icon={<Mail size={16} />} label="Work email">
+              <Field label="Work email">
                 <input type="email" required autoComplete="email" placeholder="you@digitalpaani.com"
-                  className="input pl-10" value={email} onChange={(e) => setEmail(e.target.value)} />
+                  className="input" value={email} onChange={(e) => setEmail(e.target.value)} />
               </Field>
               <button className="btn-primary w-full" disabled={busy}>
                 {busy ? <Loader2 size={16} className="animate-spin" /> : 'Send reset link'}
@@ -206,14 +204,11 @@ export default function Login() {
   );
 }
 
-function Field({ icon, label, children }: { icon: React.ReactNode; label: string; children: React.ReactNode }) {
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label className="block">
       <span className="label">{label}</span>
-      <span className="relative block">
-        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none z-10">{icon}</span>
-        {children}
-      </span>
+      {children}
     </label>
   );
 }

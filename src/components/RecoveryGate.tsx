@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
-import { Lock, Loader2, CheckCircle2 } from 'lucide-react';
+import { Loader2, CheckCircle2 } from 'lucide-react';
 
 // When a user follows a password-reset email, Supabase fires a
 // PASSWORD_RECOVERY auth event and establishes a temporary session. This gate
@@ -54,19 +54,13 @@ export default function RecoveryGate() {
             <form onSubmit={submit} className="space-y-3">
               <label className="block">
                 <span className="label">New password</span>
-                <span className="relative block">
-                  <Lock size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 z-10" />
-                  <input type="password" required autoComplete="new-password" placeholder="At least 8 characters"
-                    className="input pl-10" value={password} onChange={(e) => setPassword(e.target.value)} />
-                </span>
+                <input type="password" required autoComplete="new-password" placeholder="At least 8 characters"
+                  className="input" value={password} onChange={(e) => setPassword(e.target.value)} />
               </label>
               <label className="block">
                 <span className="label">Confirm password</span>
-                <span className="relative block">
-                  <Lock size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 z-10" />
-                  <input type="password" required autoComplete="new-password" placeholder="Re-enter password"
-                    className="input pl-10" value={confirm} onChange={(e) => setConfirm(e.target.value)} />
-                </span>
+                <input type="password" required autoComplete="new-password" placeholder="Re-enter password"
+                  className="input" value={confirm} onChange={(e) => setConfirm(e.target.value)} />
               </label>
               <button className="btn-primary w-full" disabled={busy}>
                 {busy ? <Loader2 size={16} className="animate-spin" /> : 'Update password'}
