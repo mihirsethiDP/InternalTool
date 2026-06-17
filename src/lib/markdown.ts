@@ -4,6 +4,16 @@
 // unordered lists, blockquotes, horizontal rules, bold/italic, and the
 // italic-line "doc note" convention. Optionally highlights query terms.
 
+// LLM answers sometimes run numbered steps inline in one sentence
+// ("… 1. Clean the probe. 2. Calibrate. 3. Verify."). Break each step onto its
+// own line so the markdown renderer turns them into a proper numbered list.
+// Conservative: only splits before "N. " / "N) " that follows sentence-ending
+// punctuation or a citation bracket, so decimals like "pH 4.0" are untouched.
+export function normalizeAnswerSteps(text: string): string {
+  if (!text) return text;
+  return text.replace(/([.!?:)\]])[ \t]+(\d{1,2}[.)]\s)/g, '$1\n$2');
+}
+
 export function renderMarkdown(body: string, q?: string): string {
   const lines = (body ?? '').split(/\r?\n/);
   const out: string[] = [];

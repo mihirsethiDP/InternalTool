@@ -12,7 +12,7 @@ import {
 import { supabase } from '../lib/supabase';
 import { useAuth, isAdmin } from '../lib/auth';
 import { SECTION_LABEL, SECTION_ORDER, parseSections, CHECKLIST_SECTIONS } from '../lib/consolidated';
-import { renderMarkdown } from '../lib/markdown';
+import { renderMarkdown, normalizeAnswerSteps } from '../lib/markdown';
 import RevisionHistory from '../components/RevisionHistory';
 import AnswerFeedback from '../components/AnswerFeedback';
 import type { SubmissionSection } from '../lib/types';
@@ -604,7 +604,7 @@ function AnswerFocusCard({ answer, focusMode, canFocus, onToggleFocus }: {
   canFocus: boolean;
   onToggleFocus: () => void;
 }) {
-  const html = useMemo(() => renderMarkdown(answer), [answer]);
+  const html = useMemo(() => renderMarkdown(normalizeAnswerSteps(answer)), [answer]);
   return (
     <div className="relative overflow-hidden rounded-2xl shadow-lg bg-gradient-to-br from-brand-600 via-brand-700 to-brand-900 text-white">
       {/* decorative glow */}

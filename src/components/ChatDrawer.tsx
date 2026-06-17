@@ -7,7 +7,7 @@ import { supabase } from '../lib/supabase';
 import { runSearch } from '../lib/search';
 import { logUnanswered } from '../lib/telemetry';
 import { SECTION_LABEL, parseSections } from '../lib/consolidated';
-import { renderMarkdown } from '../lib/markdown';
+import { renderMarkdown, normalizeAnswerSteps } from '../lib/markdown';
 import type { SubmissionSection } from '../lib/types';
 
 interface Hit {
@@ -433,7 +433,7 @@ function AnswerCard({ answer, citations, narrowedLabel, onOpenCitation }: {
   narrowedLabel?: string;
   onOpenCitation: (c: Citation) => void;
 }) {
-  const html = useMemo(() => renderMarkdown(answer), [answer]);
+  const html = useMemo(() => renderMarkdown(normalizeAnswerSteps(answer)), [answer]);
   return (
     <div className="rounded-2xl rounded-tl-md overflow-hidden border border-brand-200 shadow-sm bg-white">
       {/* Gradient header makes the synthesized answer stand out */}

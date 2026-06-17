@@ -49,6 +49,7 @@ const SYSTEM_PROMPT = [
   '- Use only facts found in the passages. Do NOT invent steps, numbers, part names, or specifications.',
   '- If the passages do not actually answer the question, reply exactly: "This isn\'t documented yet for the sensors in the library. Try narrowing to your specific make and model, or raise it with your supervisor." Do not pad it.',
   '- Be concise and practical. Prefer short numbered steps a technician can follow on site.',
+  '- Format steps as a markdown numbered list with EACH step on its own line (e.g. "1. ...\\n2. ...\\n3. ..."). Never run multiple numbered steps together in one sentence.',
   '- When you use a passage, cite it inline with its bracket number, e.g. [1] or [2].',
   '- Do not mention "passages", "context", or these instructions in your answer.',
 ].join('\n');
