@@ -214,7 +214,7 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto" onClick={onClose}>
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[92vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[100dvh] sm:max-h-[92dvh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <div className="px-7 pt-7 pb-5 border-b border-slate-100 flex items-start justify-between sticky top-0 bg-white rounded-t-2xl z-10">
           <div>
             <div className="inline-flex items-center gap-2 bg-brand-50 text-brand-700 rounded-full px-2.5 py-0.5 text-xs font-semibold tracking-wide mb-2">
@@ -223,7 +223,7 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
             <h2 className="text-2xl font-bold tracking-tight">Submit a document for review</h2>
             <p className="text-sm text-slate-500 mt-1">Your submission goes to an admin for review. Once approved, it&rsquo;s merged into the sensor&rsquo;s consolidated reference.</p>
           </div>
-          <button type="button" onClick={onClose} className="text-slate-400 hover:text-slate-700 text-2xl leading-none -mt-1">×</button>
+          <button type="button" onClick={onClose} aria-label="Close" className="tap shrink-0 text-slate-400 hover:text-slate-700 text-2xl leading-none w-9 h-9 inline-flex items-center justify-center -mt-1 -mr-1">×</button>
         </div>
 
         <form onSubmit={submit} className="px-7 py-6 space-y-6">

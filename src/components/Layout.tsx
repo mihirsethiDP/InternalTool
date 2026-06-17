@@ -57,7 +57,7 @@ function Inner() {
           </NavLink>
           <div className="hidden md:block w-px h-6 bg-white/15" />
           {/* Desktop nav */}
-          <nav className="hidden md:flex items-center gap-1">
+          <nav aria-label="Primary" className="hidden md:flex items-center gap-1">
             <NavLink to="/" end className={navCls}>{t('nav.search')}</NavLink>
             <NavLink to="/browse" className={navCls}>{t('nav.browse')}</NavLink>
             <NavLink to="/sensors" className={navCls}>{t('nav.sensors')}</NavLink>
@@ -67,7 +67,7 @@ function Inner() {
           <div className="ml-auto flex items-center gap-1.5 sm:gap-2">
             {canUpload(profile) && (
               <button
-                onClick={() => upload.open()}
+                onClick={() => { upload.open(); setMenuOpen(false); }}
                 aria-label={t('nav.upload')}
                 className="tap inline-flex items-center gap-1.5 bg-white text-brand-700 hover:bg-slate-100 transition rounded-md px-2.5 sm:px-3 py-1.5 text-sm font-medium"
               >

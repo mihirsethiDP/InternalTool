@@ -61,6 +61,9 @@ export default function ConsolidatedViewer() {
   // the matched section, and collapse the rest of the document (still one tap
   // away). Toggled off to read the whole reference.
   const [focusMode, setFocusMode] = useState<boolean>(Boolean(chatAnswer));
+  // Set once the operator types in the find-in-page box: drop focus collapse so
+  // a search can reach content in otherwise-collapsed sections.
+  const [userSearched, setUserSearched] = useState(false);
   const [expanded, setExpanded] = useState<Set<SubmissionSection>>(new Set());
   const toggleExpand = (s: SubmissionSection) =>
     setExpanded((prev) => { const n = new Set(prev); n.has(s) ? n.delete(s) : n.add(s); return n; });
@@ -69,6 +72,7 @@ export default function ConsolidatedViewer() {
   const sectionRefs = useRef<Partial<Record<SubmissionSection, HTMLElement | null>>>({});
   const marksRef = useRef<HTMLElement[]>([]);
   const didInitialScroll = useRef(false);
+  const prevHighlight = useRef(initialQuery);
   const [matchIdx, setMatchIdx] = useState(0);
   const [matchCount, setMatchCount] = useState(0);
 
@@ -130,7 +134,7 @@ export default function ConsolidatedViewer() {
   // Focus mode only "engages" when the chat actually pointed us at a section
   // that exists here — otherwise collapsing every section would hide everything.
   const matchPresent = Boolean(initialSection && presentSections.includes(initialSection));
-  const focusActive = focusMode && matchPresent;
+  const focusActive = focusMode && matchPresent && !userSearched;
   const sectionOpen = (s: SubmissionSection) => !focusActive || s === initialSection || expanded.has(s);
 
   // Source files (inputs) grouped by their document TYPE — manuals, datasheets, etc.
@@ -149,7 +153,9 @@ export default function ConsolidatedViewer() {
   const covered = (s: SubmissionSection) => Boolean(sections[s]);
   const coveredCount = CHECKLIST_SECTIONS.filter(covered).length;
 
-  // Re-scan highlights (consolidated mode only)
+  // Re-scan highlights (consolidated mode only). Only auto-scroll to the first
+  // match when the query itself changed — not when general guidance is toggled
+  // or content refetches, which would otherwise yank the reader to match #1.
   useEffect(() => {
     if (mode !== 'consolidated') return;
     const t = setTimeout(() => {
@@ -157,13 +163,24 @@ export default function ConsolidatedViewer() {
       const marks = Array.from(containerRef.current.querySelectorAll('mark')) as HTMLElement[];
       marksRef.current = marks;
       setMatchCount(marks.length);
+      const queryChanged = prevHighlight.current !== highlight;
+      prevHighlight.current = highlight;
       if (marks.length === 0) { setMatchIdx(0); return; }
-      setMatchIdx(0);
-      applyActive(0);
-      marks[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
+      if (queryChanged) {
+        setMatchIdx(0);
+        applyActive(0);
+        marks[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
+      } else {
+        applyActive(Math.min(matchIdx, marks.length - 1));
+      }
     }, 80);
     return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [highlight, cdoc.data?.content_markdown, generalDoc.data?.content_markdown, showGeneral, mode]);
+
+  // Reset the one-time deep-link scroll if the target doc/section changes while
+  // the viewer stays mounted (client-side nav between citations).
+  useEffect(() => { didInitialScroll.current = false; }, [id, initialSection]);
 
   // Deep-link from the chat assistant: scroll to the requested work-type
   // section once, on first load. Fires just before the highlight effect, so a
@@ -289,7 +306,7 @@ export default function ConsolidatedViewer() {
 
       {/* Sticky toolbar */}
       <div className="sticky top-0 z-30 -mx-4 px-4 sm:-mx-5 sm:px-5 py-2.5 bg-white/90 backdrop-blur-md border-b border-slate-200 space-y-2">
-        <div className="flex items-center gap-2 sm:gap-3">
+        <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
           {/* View mode toggle */}
           <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden shrink-0 shadow-sm">
             <button
@@ -337,7 +354,7 @@ export default function ConsolidatedViewer() {
                   aria-label={t('viewer.highlight')}
                   className="rounded-lg border border-slate-300 pl-8 pr-3 py-1.5 text-sm w-32 sm:w-48 focus:border-brand-700 focus:ring-2 focus:ring-brand-700/15 outline-none"
                   value={highlight}
-                  onChange={(e) => setHighlight(e.target.value)}
+                  onChange={(e) => { setHighlight(e.target.value); setUserSearched(true); }}
                   placeholder={t('viewer.highlight')}
                 />
               </div>
@@ -345,11 +362,11 @@ export default function ConsolidatedViewer() {
                 <>
                   <span className="muted text-xs whitespace-nowrap hidden sm:inline">{matchCount > 0 ? `${matchIdx + 1} / ${matchCount}` : '0'}</span>
                   <button onClick={() => goTo(matchIdx - 1)} disabled={matchCount === 0} aria-label="Previous match"
-                    className="rounded-lg border border-slate-300 bg-white hover:bg-slate-50 disabled:opacity-40 w-8 h-8 flex items-center justify-center">
+                    className="tap rounded-lg border border-slate-300 bg-white hover:bg-slate-50 disabled:opacity-40 w-8 h-8 flex items-center justify-center">
                     <ChevronUp size={14} />
                   </button>
                   <button onClick={() => goTo(matchIdx + 1)} disabled={matchCount === 0} aria-label="Next match"
-                    className="rounded-lg border border-slate-300 bg-white hover:bg-slate-50 disabled:opacity-40 w-8 h-8 flex items-center justify-center">
+                    className="tap rounded-lg border border-slate-300 bg-white hover:bg-slate-50 disabled:opacity-40 w-8 h-8 flex items-center justify-center">
                     <ChevronDown size={14} />
                   </button>
                 </>

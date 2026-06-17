@@ -132,7 +132,7 @@ export default function SensorModelList() {
             </FilterSelect>
             <button
               onClick={() => { setIncompleteOnly((v) => !v); setPage(0); }}
-              className={`rounded-lg border px-3 py-2 text-sm transition ${incompleteOnly ? 'border-amber-400 bg-amber-50 text-amber-800 font-medium' : 'border-slate-200 bg-slate-50 text-slate-700 hover:border-slate-300'}`}
+              className={`tap rounded-lg border px-3 py-2 text-sm transition ${incompleteOnly ? 'border-amber-400 bg-amber-50 text-amber-800 font-medium' : 'border-slate-200 bg-slate-50 text-slate-700 hover:border-slate-300'}`}
             >
               Incomplete only
             </button>

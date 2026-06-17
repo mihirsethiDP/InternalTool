@@ -57,13 +57,13 @@ export default function AddSensorModal({ onClose, onCreated, defaultMakeName }: 
 
   return (
     <div className="fixed inset-0 z-[60] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto" onClick={onClose}>
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl max-h-[100dvh] sm:max-h-[90dvh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between sticky top-0 bg-white rounded-t-2xl">
           <div>
             <div className="text-lg font-bold tracking-tight">Add sensor to catalog</div>
             <div className="text-xs text-slate-500 mt-0.5">Make + category + model number are required.</div>
           </div>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-700 text-2xl leading-none">×</button>
+          <button onClick={onClose} aria-label="Close" className="tap shrink-0 text-slate-400 hover:text-slate-700 text-2xl leading-none w-9 h-9 inline-flex items-center justify-center">×</button>
         </div>
         <form onSubmit={submit} className="px-6 py-5 space-y-4">
           <div>

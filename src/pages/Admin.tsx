@@ -35,7 +35,6 @@ export default function Admin() {
     <div className="space-y-6">
       <PageHeader
         eyebrow="Settings"
-        icon="⚙️"
         title="Admin"
         subtitle="Review submissions, manage consolidated references, users, and document taxonomy."
       />

@@ -27,7 +27,8 @@ export default function AnswerFeedback({ query, consolidatedDocId, sensorModelId
   async function record(helpful: boolean, reasonText?: string, continued = false) {
     setBusy(true);
     try {
-      await supabase.from('answer_feedback').insert({
+      // supabase-js returns { error } rather than throwing — check it explicitly.
+      const { error } = await supabase.from('answer_feedback').insert({
         query: query || null,
         consolidated_doc_id: consolidatedDocId || null,
         sensor_model_id: sensorModelId || null,
@@ -36,6 +37,7 @@ export default function AnswerFeedback({ query, consolidatedDocId, sensorModelId
         source,
         continued,
       });
+      if (error) console.warn('feedback insert failed', error.message);
     } catch (e) { console.warn('feedback insert failed', e); }
     setBusy(false);
     setStage('done');

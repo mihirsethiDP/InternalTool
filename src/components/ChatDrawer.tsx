@@ -122,7 +122,10 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
   const [ticket, setTicket] = useState<{ query?: string; description?: string } | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const closeRef = useRef<HTMLButtonElement>(null);
+  const sendingRef = useRef(false);
   const focusInput = () => inputRef.current?.focus();
+  const isBusy = turns.some((tn) => tn.role === 'bot' && tn.loading);
 
   function openTicket(turn: Extract<Turn, { role: 'bot' }>) {
     const desc =
@@ -159,12 +162,17 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
     if (!open) return;
     const prev = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
+    // Move focus into the dialog (the close button, not the input — focusing the
+    // input would pop the mobile keyboard and shove the header out of view).
+    closeRef.current?.focus();
     return () => { document.body.style.overflow = prev; };
   }, [open]);
 
   async function send(query: string) {
     const q = query.trim();
     if (!q) return;
+    if (sendingRef.current) return; // ignore concurrent sends (would swap answers under questions)
+    sendingRef.current = true;
     setInput('');
     setTurns((t) => [
       ...t,
@@ -189,6 +197,7 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
       }
       return copy;
     });
+    sendingRef.current = false;
   }
 
   // Re-scope a bot turn to a specific sensor (+ its category general guidance)
@@ -257,7 +266,7 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
                 <Sparkles size={11} /> {t('chat.assistant')}
               </div>
             </div>
-            <button onClick={onClose} aria-label="Close assistant" className="tap rounded-lg hover:bg-white/15 w-9 h-9 flex items-center justify-center transition shrink-0">
+            <button ref={closeRef} onClick={onClose} aria-label="Close assistant" className="tap rounded-lg hover:bg-white/15 w-9 h-9 flex items-center justify-center transition shrink-0">
               <X size={19} />
             </button>
           </div>
@@ -346,6 +355,7 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
               {!turn.loading && (turn.answer || (turn.hits && turn.hits.length > 0)) && (
                 <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5">
                   <AnswerFeedback
+                    key={`${turn.narrowedLabel ?? ''}|${turn.answer ? turn.answer.slice(0, 24) : (turn.hits?.[0]?.document_id ?? '')}`}
                     source="chat"
                     compact
                     query={turn.query}
@@ -395,7 +405,7 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
                 className="w-full rounded-2xl border border-slate-300 bg-slate-50 focus:bg-white pl-4 pr-3 py-3 text-sm focus:border-brand-700 focus:ring-2 focus:ring-brand-700/20 outline-none transition"
               />
             </div>
-            <button type="submit" disabled={!input.trim()} aria-label="Send message"
+            <button type="submit" disabled={!input.trim() || isBusy} aria-label="Send message"
                     className="tap rounded-2xl bg-gradient-to-br from-brand-600 to-brand-800 hover:from-brand-700 hover:to-brand-900 text-white w-12 h-12 flex items-center justify-center disabled:opacity-40 disabled:grayscale transition shadow-sm shrink-0">
               <Send size={17} />
             </button>
