@@ -69,6 +69,27 @@ async function enrichHits(hits: Hit[]): Promise<Hit[]> {
   return hits.map((h) => ({ ...h, sectionBody: sectionsById.get(h.document_id)?.[h.section] || '' }));
 }
 
+// Retrieval scoped to a specific model (+ its category's general guidance),
+// deduped — used for the make/model scope, both for the retrieval fallback and
+// the narrow-this-turn action.
+async function scopedRetrieve(query: string, modelId: string, generalModelId: string | null): Promise<Hit[]> {
+  const [spec, gen] = await Promise.all([
+    runSearch(query, { sensor_model_id: modelId }),
+    generalModelId ? runSearch(query, { sensor_model_id: generalModelId }) : Promise.resolve({ hits: [] }),
+  ]);
+  const seen = new Set<string>();
+  const merged: Hit[] = [...spec.hits, ...gen.hits]
+    .filter((h) => { const k = h.document_id; if (seen.has(k)) return false; seen.add(k); return true; })
+    .map((h) => ({
+      document_id: h.document_id,
+      document_title: (h.document_title ?? '').trim(),
+      section: (h.type_label as SubmissionSection) ?? 'other',
+      snippet: h.snippet,
+      rank: h.rank,
+    }));
+  return enrichHits(merged);
+}
+
 // Ask the assistant. Prefers the Gemini RAG Edge Function (a synthesized,
 // cited answer); if that isn't deployed or errors, degrades gracefully to
 // retrieval-only hits so the chatbot keeps working. `fallback` supplies the
@@ -133,6 +154,9 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
   const [input, setInput] = useState('');
   const [turns, setTurns] = useState<Turn[]>([]);
   const [ticket, setTicket] = useState<{ query?: string; description?: string } | null>(null);
+  // Active sensor scope: once the operator picks a make & model, all following
+  // questions are scoped to it (and shown as a persistent chip) until cleared.
+  const [scope, setScope] = useState<{ modelId: string; generalModelId: string | null; label: string } | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
@@ -196,24 +220,28 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
 
     sendingRef.current = true;
     setInput('');
+    const activeScope = scope; // snapshot for this send
     setTurns((t) => [
       ...t,
       { role: 'user', text: q },
-      { role: 'bot', query: q, loading: true },
+      { role: 'bot', query: q, loading: true, narrowedLabel: activeScope?.label },
     ]);
-    const result = await askAssistant(q, null, async () => {
-      const { data } = await supabase.rpc('chat_search', { q, p_limit: 5 });
-      return enrichHits((data as Hit[]) ?? []);
-    });
+    const fallback = activeScope
+      ? () => scopedRetrieve(q, activeScope.modelId, activeScope.generalModelId)
+      : async () => {
+          const { data } = await supabase.rpc('chat_search', { q, p_limit: 5 });
+          return enrichHits((data as Hit[]) ?? []);
+        };
+    const result = await askAssistant(q, activeScope?.modelId ?? null, fallback);
     if (!result.answer && result.hits.length === 0) {
-      logUnanswered({ query: q, source: 'chat' });
+      logUnanswered({ query: q, source: 'chat', sensorModelId: activeScope?.modelId ?? null });
     }
     setTurns((t) => {
       const copy = [...t];
       for (let i = copy.length - 1; i >= 0; i--) {
         const turn = copy[i];
         if (turn.role === 'bot' && turn.loading) {
-          copy[i] = { role: 'bot', query: q, loading: false, answer: result.answer, citations: result.citations, hits: result.hits };
+          copy[i] = { role: 'bot', query: q, loading: false, narrowedLabel: activeScope?.label, answer: result.answer, citations: result.citations, hits: result.hits };
           break;
         }
       }
@@ -222,26 +250,12 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
     sendingRef.current = false;
   }
 
-  // Re-scope a bot turn to a specific sensor (+ its category general guidance)
+  // Re-scope a bot turn to a specific sensor (+ its category general guidance),
+  // and remember the scope so following questions stay scoped too.
   async function narrowTurn(turnIndex: number, query: string, modelId: string, generalModelId: string | null, label: string) {
+    setScope({ modelId, generalModelId, label });
     setTurns((t) => t.map((turn, i) => (i === turnIndex && turn.role === 'bot') ? { ...turn, loading: true } : turn));
-    const result = await askAssistant(query, modelId, async () => {
-      const [spec, gen] = await Promise.all([
-        runSearch(query, { sensor_model_id: modelId }),
-        generalModelId ? runSearch(query, { sensor_model_id: generalModelId }) : Promise.resolve({ hits: [] }),
-      ]);
-      const seen = new Set<string>();
-      const merged: Hit[] = [...spec.hits, ...gen.hits]
-        .filter((h) => { const k = h.document_id; if (seen.has(k)) return false; seen.add(k); return true; })
-        .map((h) => ({
-          document_id: h.document_id,
-          document_title: (h.document_title ?? '').trim(),
-          section: (h.type_label as SubmissionSection) ?? 'other',
-          snippet: h.snippet,
-          rank: h.rank,
-        }));
-      return enrichHits(merged);
-    });
+    const result = await askAssistant(query, modelId, () => scopedRetrieve(query, modelId, generalModelId));
     setTurns((t) => t.map((turn, i) => (i === turnIndex && turn.role === 'bot')
       ? { ...turn, loading: false, narrowedLabel: label, answer: result.answer, citations: result.citations, hits: result.hits }
       : turn));
@@ -293,6 +307,22 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
             </button>
           </div>
         </div>
+
+        {/* Active sensor scope — persistent indicator + clear */}
+        {scope && (
+          <div className="bg-brand-50 border-b border-brand-100 px-4 py-2 flex items-center gap-2">
+            <Cpu size={14} className="text-brand-700 shrink-0" />
+            <span className="text-xs text-brand-800 min-w-0 truncate">
+              Answering for <strong className="font-semibold">{scope.label}</strong>
+            </span>
+            <button
+              onClick={() => setScope(null)}
+              className="ml-auto tap inline-flex items-center gap-1 text-xs text-slate-500 hover:text-red-600 transition shrink-0"
+            >
+              Clear <X size={12} />
+            </button>
+          </div>
+        )}
 
         {/* Messages */}
         <div ref={scrollRef} role="log" aria-live="polite" aria-label="Conversation" className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden p-4 space-y-4">
@@ -415,7 +445,7 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
         <div className="border-t border-slate-200 p-3 bg-white">
           {turns.length > 0 && (
             <div className="flex justify-end mb-2">
-              <button onClick={() => setTurns([])} className="inline-flex items-center gap-1 text-xs text-slate-500 hover:text-brand-700 transition">
+              <button onClick={() => { setTurns([]); setScope(null); }} className="inline-flex items-center gap-1 text-xs text-slate-500 hover:text-brand-700 transition">
                 <Trash2 size={12} /> {t('chat.clearConversation')}
               </button>
             </div>
