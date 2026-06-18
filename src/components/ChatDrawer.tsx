@@ -160,9 +160,16 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
+  const lastUserRef = useRef<HTMLDivElement>(null);
+  const prevLen = useRef(0);
   const sendingRef = useRef(false);
   const focusInput = () => inputRef.current?.focus();
   const isBusy = turns.some((tn) => tn.role === 'bot' && tn.loading);
+  // Index of the most recent user message — anchored to the top on a new
+  // exchange so the answer's beginning is visible (rather than scrolling past
+  // it to the feedback row / sensor selector).
+  let lastUserIndex = -1;
+  for (let i = turns.length - 1; i >= 0; i--) { if (turns[i].role === 'user') { lastUserIndex = i; break; } }
 
   function openTicket(turn: Extract<Turn, { role: 'bot' }>) {
     const desc =
@@ -173,7 +180,13 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
   }
 
   useEffect(() => {
-    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    // On a NEW exchange (turns grew), pin the latest question to the top so the
+    // answer reads from its start. On in-place updates (loading → answer) leave
+    // the scroll position alone so the beginning of the answer stays in view.
+    if (turns.length > prevLen.current) {
+      lastUserRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+    prevLen.current = turns.length;
   }, [turns]);
 
   // A seed question (from the homepage CTA etc.) fires once on open
@@ -358,7 +371,7 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
           )}
 
           {turns.map((turn, i) => turn.role === 'user' ? (
-            <div key={i} className="flex justify-end">
+            <div key={i} ref={i === lastUserIndex ? lastUserRef : undefined} className="flex justify-end scroll-mt-3">
               <div className="max-w-[82%] bg-gradient-to-br from-brand-600 to-brand-800 text-white rounded-2xl rounded-tr-md px-4 py-2.5 text-sm shadow-sm">{turn.text}</div>
             </div>
           ) : (
