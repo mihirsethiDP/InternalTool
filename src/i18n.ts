@@ -39,7 +39,7 @@ const en = {
     assistant: 'Assistant',
     title: 'Ask the document hub',
     intro: 'Ask anything about your sensor docs. I’ll search the references and surface the most relevant sections.',
-    note: 'Currently using keyword search. A synthesised AI answer is coming once your team enables it.',
+    note: 'I summarise an answer from your verified documentation and cite the sources. Always confirm against the source before acting.',
     tryOne: 'Try one:',
     found: 'I found {{count}} reference(s) that might help:',
     nothing: 'Nothing in our documentation matches that. Try rephrasing with the sensor’s make or model — or check the web:',

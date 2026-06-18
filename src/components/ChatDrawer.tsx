@@ -78,8 +78,14 @@ async function askAssistant(
       body: { query, sensor_model_id: sensorModelId },
     });
     if (!error && data && !(data as any).error) {
+      // The Edge Function responded — trust it; do NOT fall back to raw
+      // retrieval (that's only for when the function is unreachable).
       const d = data as { answer: string | null; citations?: any[] };
-      if (d.answer && d.answer.trim()) {
+      // If the model produced the "not documented" refusal, treat it as a
+      // genuine not-found: no answer text, no (misleading) sources — the UI
+      // then shows the web-search + log-a-ticket options instead.
+      const refused = !!d.answer && /isn.?t\s+documented\s+yet/i.test(d.answer);
+      if (d.answer && d.answer.trim() && !refused) {
         return {
           answer: d.answer.trim(),
           citations: (d.citations ?? []).map((c) => ({
@@ -90,13 +96,15 @@ async function askAssistant(
           hits: [],
         };
       }
-      // answer === null → the library genuinely has nothing; fall through to
-      // the retrieval fallback (which will also come up empty and trigger the
-      // "nothing found" card + unanswered logging).
+      // null answer or refusal → not-found (no fallback, no sources).
+      return { answer: null, citations: [], hits: [] };
     }
   } catch {
-    // Edge Function not deployed / network error → retrieval-only.
+    // Edge Function not deployed / network error → retrieval-only fallback.
+    const hits = await fallback();
+    return { answer: null, citations: [], hits };
   }
+  // Non-throw error shape from invoke → retrieval fallback.
   const hits = await fallback();
   return { answer: null, citations: [], hits };
 }
