@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { ThumbsUp, ThumbsDown, SearchX, ShieldCheck, FileWarning, ArrowRight } from 'lucide-react';
+import { ThumbsUp, ThumbsDown, SearchX, ShieldCheck, FileWarning, ArrowRight, Globe2 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { coverageOf } from '../lib/consolidated';
 
@@ -49,8 +49,21 @@ export default function InsightsPanel() {
       .eq('is_general', false)).data ?? [],
   });
 
+  const events = useQuery({
+    queryKey: ['insights-events'],
+    queryFn: async () => (await supabase
+      .from('usage_events')
+      .select('id, event, created_at')
+      .order('created_at', { ascending: false })
+      .limit(5000)).data ?? [],
+  });
+
   const fb = useMemo(() => (feedback.data ?? []).filter((r: any) => within(r.created_at, range)), [feedback.data, range]);
   const ua = useMemo(() => (unanswered.data ?? []).filter((r: any) => within(r.created_at, range)), [unanswered.data, range]);
+  const webSearches = useMemo(
+    () => (events.data ?? []).filter((r: any) => r.event === 'web_search' && within(r.created_at, range)).length,
+    [events.data, range],
+  );
 
   const solved = fb.filter((r: any) => r.helpful).length;
   const notHelpful = fb.filter((r: any) => !r.helpful).length;
@@ -105,7 +118,7 @@ export default function InsightsPanel() {
       </div>
 
       {/* Stat cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
         <Stat icon={<ShieldCheck size={16} />} tone="emerald"
           label="Solve rate" value={solveRate === null ? '—' : `${solveRate}%`}
           sub={total > 0 ? `${total} responses` : 'no feedback yet'} />
@@ -115,6 +128,8 @@ export default function InsightsPanel() {
           label="Didn't help" value={notHelpful} sub="content existed, didn't solve" />
         <Stat icon={<SearchX size={16} />} tone="amber"
           label="Came up empty" value={ua.length} sub="searches with no result" />
+        <Stat icon={<Globe2 size={16} />} tone="slate"
+          label="Web searches" value={webSearches} sub="escalated to the web" />
       </div>
 
       {/* Most requested but missing */}

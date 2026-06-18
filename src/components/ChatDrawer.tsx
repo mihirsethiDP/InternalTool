@@ -2,10 +2,10 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { X, Send, ArrowRight, ExternalLink, ChevronDown, Sparkles, Bot, Trash2, Wrench, Cpu, LifeBuoy } from 'lucide-react';
+import { X, Send, ArrowRight, ExternalLink, ChevronDown, Sparkles, Bot, Trash2, Wrench, Cpu } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { runSearch } from '../lib/search';
-import { logUnanswered } from '../lib/telemetry';
+import { logUnanswered, logEvent } from '../lib/telemetry';
 import { SECTION_LABEL, parseSections } from '../lib/consolidated';
 import { renderMarkdown, normalizeAnswerSteps } from '../lib/markdown';
 import { conversationalReply } from '../lib/chatIntent';
@@ -413,6 +413,7 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
                   <a
                     href={`https://www.google.com/search?q=${encodeURIComponent(turn.query + ' sensor troubleshooting')}`}
                     target="_blank" rel="noreferrer"
+                    onClick={() => logEvent({ event: 'web_search', query: turn.query, source: 'chat' })}
                     className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 hover:border-brand-700 hover:text-brand-700 px-3 py-1.5 text-xs font-medium text-slate-700 transition"
                   >
                     {t('chat.searchWeb')} <ExternalLink size={12} />
@@ -420,8 +421,10 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
                 </div>
               )}
 
-              {/* Did this help? — feedback + continue + log-a-ticket (tracked) */}
-              {!turn.loading && (turn.answer || (turn.hits && turn.hits.length > 0)) && (
+              {/* Did this help? — feedback + continue + log-a-ticket (tracked).
+                  Shown on every real attempt, including no-result (they may have
+                  resolved it via the web / a ticket). */}
+              {!turn.loading && !turn.note && (
                 <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5">
                   <AnswerFeedback
                     key={`${turn.narrowedLabel ?? ''}|${turn.answer ? turn.answer.slice(0, 24) : (turn.hits?.[0]?.document_id ?? '')}`}
@@ -433,16 +436,6 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
                     onLogTicket={() => openTicket(turn)}
                   />
                 </div>
-              )}
-
-              {/* Nothing found → still let them log a ticket */}
-              {!turn.loading && !turn.note && !turn.answer && (!turn.hits || turn.hits.length === 0) && (
-                <button
-                  onClick={() => openTicket(turn)}
-                  className="tap inline-flex items-center gap-1.5 rounded-md border border-slate-300 hover:border-brand-700 hover:text-brand-700 px-3 py-1.5 text-xs font-medium text-slate-700 transition"
-                >
-                  <LifeBuoy size={12} /> Log a support ticket
-                </button>
               )}
 
               {/* Narrow-to-sensor probe, only under the most recent answered turn (not chit-chat) */}

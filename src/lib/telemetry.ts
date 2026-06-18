@@ -9,6 +9,22 @@ const logged = new Set<string>();
  * blocks or surfaces errors to the user. Min length guard avoids logging
  * half-typed fragments.
  */
+/**
+ * Record a generic usage event (best-effort, silent). First use: counting
+ * "Search the web" clicks. user_id is stamped server-side by a trigger.
+ */
+export async function logEvent(opts: { event: string; query?: string; source?: string }) {
+  try {
+    await supabase.from('usage_events').insert({
+      event: opts.event,
+      query: opts.query?.trim() || null,
+      source: opts.source ?? null,
+    });
+  } catch (e) {
+    console.warn('logEvent failed', e);
+  }
+}
+
 export async function logUnanswered(opts: { query: string; source: 'search' | 'chat'; sensorModelId?: string | null }) {
   const q = opts.query.trim();
   if (q.length < 3) return;

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { logUnanswered } from '../lib/telemetry';
+import { logUnanswered, logEvent } from '../lib/telemetry';
 import {
   Search as SearchIcon, MessageSquare, Wrench, Gauge, FlaskConical,
   ArrowRight, FileText,
@@ -243,6 +243,7 @@ export default function Home() {
                 <a
                   href={`https://www.google.com/search?q=${encodeURIComponent(q + ' sensor troubleshooting')}`}
                   target="_blank" rel="noreferrer"
+                  onClick={() => logEvent({ event: 'web_search', query: q, source: 'search' })}
                   className="text-brand-700 font-medium hover:underline text-sm"
                 >
                   {t('home.searchWeb')}
