@@ -54,6 +54,16 @@ const SYSTEM_PROMPT = [
   '- Do not mention "passages", "context", or these instructions in your answer.',
 ].join('\n');
 
+const WEB_SYSTEM_PROMPT = [
+  'You are helping a water and wastewater sensor technician, using general web search results provided below.',
+  'Answer the technician\'s question concisely and practically from those results.',
+  'Rules:',
+  '- Prefer short numbered steps, each on its own line.',
+  '- Cite the web results you use inline by their bracket number, e.g. [1].',
+  '- If the results do not actually answer the question, say so briefly.',
+  '- Do NOT add a disclaimer about reliability — the app adds one.',
+].join('\n');
+
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
@@ -61,11 +71,32 @@ function json(body: unknown, status = 200) {
   });
 }
 
+// OpenAI-compatible Groq completion. Returns the text, or null on failure.
+async function groqComplete(system: string, user: string, key: string, model: string): Promise<string | null> {
+  try {
+    const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
+      body: JSON.stringify({
+        model,
+        messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
+        temperature: 0.2, max_tokens: 900, top_p: 0.9,
+      }),
+    });
+    if (!res.ok) { console.error('groq error', res.status, await res.text()); return null; }
+    const body = await res.json();
+    return body?.choices?.[0]?.message?.content ?? null;
+  } catch (e) {
+    console.error('groq fetch threw', e);
+    return null;
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
   if (req.method !== 'POST') return json({ error: 'method not allowed' }, 405);
 
-  let payload: { query?: string; sensor_model_id?: string | null };
+  let payload: { query?: string; sensor_model_id?: string | null; mode?: string };
   try {
     payload = await req.json();
   } catch {
@@ -74,6 +105,7 @@ Deno.serve(async (req) => {
 
   const query = (payload.query ?? '').trim();
   const sensorModelId = payload.sensor_model_id ?? null;
+  const mode = payload.mode === 'web' ? 'web' : 'docs';
   if (!query) return json({ error: 'empty query' }, 400);
 
   const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
@@ -83,6 +115,46 @@ Deno.serve(async (req) => {
 
   if (!SUPABASE_URL || !SERVICE_KEY) return json({ error: 'server not configured (supabase env)' }, 500);
   if (!GROQ_API_KEY) return json({ error: 'server not configured (GROQ_API_KEY missing)' }, 500);
+
+  // ---------- WEB MODE: search the web (Tavily) → synthesize with Groq ----------
+  // Used as an explicit fallback when the verified docs don't answer the
+  // question. The result is clearly labelled as unverified web content client-side.
+  if (mode === 'web') {
+    const TAVILY_API_KEY = Deno.env.get('TAVILY_API_KEY');
+    if (!TAVILY_API_KEY) return json({ error: 'server not configured (TAVILY_API_KEY missing)' }, 500);
+
+    let results: { title: string; url: string; content: string }[] = [];
+    try {
+      const tRes = await fetch('https://api.tavily.com/search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          api_key: TAVILY_API_KEY,
+          query: `${query} water wastewater sensor troubleshooting`,
+          search_depth: 'basic',
+          max_results: 5,
+          include_answer: false,
+        }),
+      });
+      if (!tRes.ok) {
+        console.error('tavily error', tRes.status, await tRes.text());
+        return json({ error: 'web search failed', status: tRes.status }, 502);
+      }
+      const tBody = await tRes.json();
+      results = (tBody.results ?? []).map((r: any) => ({ title: r.title, url: r.url, content: r.content ?? '' }));
+    } catch (e) {
+      console.error('tavily fetch threw', e);
+      return json({ error: 'web search failed' }, 502);
+    }
+
+    const sources = results.map((r) => ({ title: (r.title ?? '').trim() || r.url, url: r.url }));
+    if (results.length === 0) return json({ answer: null, source: 'web', sources: [] });
+
+    const webContext = results.map((r, i) => `[${i + 1}] ${r.title} (${r.url})\n${r.content}`).join('\n\n');
+    const webUser = ['Web results:', webContext, '', `Technician's question: ${query}`, '', 'Answer:'].join('\n');
+    const webAnswer = await groqComplete(WEB_SYSTEM_PROMPT, webUser, GROQ_API_KEY, MODEL);
+    return json({ answer: webAnswer?.trim() || null, source: 'web', sources });
+  }
 
   // ---------- 1. Retrieve verified content ----------
   const supabase = createClient(SUPABASE_URL, SERVICE_KEY);

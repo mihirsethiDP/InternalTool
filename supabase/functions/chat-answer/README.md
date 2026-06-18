@@ -24,6 +24,11 @@ the client falls back to retrieval-only results.
 3. **Set the secret.** Edge Functions → **Secrets**:
    - `GROQ_API_KEY` = your `gsk_…` key from https://console.groq.com/keys
    - *(optional)* `GROQ_MODEL` = `llama-3.3-70b-versatile` (the default if unset)
+   - *(optional, for the web fallback)* `TAVILY_API_KEY` = your `tvly-…` key from
+     https://app.tavily.com — enables the "Get an answer from the web" button on
+     no-result turns (`mode: 'web'`: Tavily search → Groq synthesis → cited,
+     clearly-labelled **unverified** answer). Without it, that button returns a
+     "not configured" error; the rest of the assistant is unaffected.
 
    `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are injected automatically —
    do **not** add them. A leftover `GEMINI_API_KEY` secret is harmless; ignore it.

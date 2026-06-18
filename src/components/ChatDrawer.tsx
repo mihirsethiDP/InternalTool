@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { X, Send, ArrowRight, ExternalLink, ChevronDown, Sparkles, Bot, Trash2, Wrench, Cpu } from 'lucide-react';
+import { X, Send, ArrowRight, ExternalLink, ChevronDown, Sparkles, Bot, Trash2, Wrench, Cpu, Globe } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { runSearch } from '../lib/search';
 import { logUnanswered, logEvent } from '../lib/telemetry';
@@ -43,6 +43,9 @@ type Turn =
       citations?: Citation[];
       // Retrieval-fallback mode (used when the Edge Function isn't available):
       hits?: Hit[];
+      // Web fallback (Tavily + Groq), fetched on demand from the not-found card:
+      webLoading?: boolean;
+      webAnswer?: { answer: string; sources: { title: string; url: string }[] } | null;
     };
 
 
@@ -177,6 +180,24 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
       (turn.answer ? `Assistant answer:\n${turn.answer}\n\n` : '') +
       `This didn't resolve my issue.`;
     setTicket({ query: turn.query, description: desc });
+  }
+
+  // Explicit web fallback: search the web (Tavily) + synthesize (Groq) for a
+  // turn whose docs came up empty. Clearly labelled as unverified, and tracked.
+  async function fetchWebAnswer(turnIndex: number, query: string) {
+    logEvent({ event: 'web_answer', query, source: 'chat' });
+    setTurns((t) => t.map((turn, i) => (i === turnIndex && turn.role === 'bot') ? { ...turn, webLoading: true } : turn));
+    let result: { answer: string; sources: { title: string; url: string }[] } | null = null;
+    try {
+      const { data, error } = await supabase.functions.invoke('chat-answer', { body: { query, mode: 'web' } });
+      const d = data as { answer?: string | null; sources?: { title: string; url: string }[] } | null;
+      if (!error && d && d.answer && d.answer.trim()) {
+        result = { answer: d.answer.trim(), sources: (d.sources ?? []).filter((s) => s?.url) };
+      }
+    } catch { /* leave result null → show a gentle failure note */ }
+    setTurns((t) => t.map((turn, i) => (i === turnIndex && turn.role === 'bot')
+      ? { ...turn, webLoading: false, webAnswer: result ?? { answer: 'I couldn’t find a clear answer on the web either. Consider logging a ticket.', sources: [] } }
+      : turn));
   }
 
   useEffect(() => {
@@ -407,17 +428,32 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
                     <ChatHit key={h.document_id} hit={h} query={turn.query} onOpen={() => openHit(turn.query, h)} openLabel={t('chat.open')} />
                   ))}
                 </>
+              ) : turn.webAnswer ? (
+                <WebAnswerCard data={turn.webAnswer} />
+              ) : turn.webLoading ? (
+                <div className="inline-flex items-center gap-2 rounded-2xl rounded-tl-md bg-white border border-slate-200 shadow-sm px-3.5 py-3">
+                  <span className="dp-typing"><span></span><span></span><span></span></span>
+                  <span className="text-xs text-slate-400">Searching the web…</span>
+                </div>
               ) : (
                 <div className="card-tight bg-white text-sm text-slate-600 space-y-2.5">
                   <div>{t('chat.nothing')}</div>
-                  <a
-                    href={`https://www.google.com/search?q=${encodeURIComponent(turn.query + ' sensor troubleshooting')}`}
-                    target="_blank" rel="noreferrer"
-                    onClick={() => logEvent({ event: 'web_search', query: turn.query, source: 'chat' })}
-                    className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 hover:border-brand-700 hover:text-brand-700 px-3 py-1.5 text-xs font-medium text-slate-700 transition"
-                  >
-                    {t('chat.searchWeb')} <ExternalLink size={12} />
-                  </a>
+                  <div className="flex flex-col gap-2">
+                    <button
+                      onClick={() => fetchWebAnswer(i, turn.query)}
+                      className="tap inline-flex items-center justify-center gap-1.5 rounded-lg bg-gradient-to-br from-brand-600 to-brand-800 text-white px-3 py-2 text-xs font-semibold hover:from-brand-700 hover:to-brand-900 transition"
+                    >
+                      <Globe size={13} /> Get an answer from the web
+                    </button>
+                    <a
+                      href={`https://www.google.com/search?q=${encodeURIComponent(turn.query + ' sensor troubleshooting')}`}
+                      target="_blank" rel="noreferrer"
+                      onClick={() => logEvent({ event: 'web_search', query: turn.query, source: 'chat' })}
+                      className="inline-flex items-center justify-center gap-1.5 text-xs font-medium text-slate-500 hover:text-brand-700 transition"
+                    >
+                      {t('chat.searchWeb')} <ExternalLink size={11} />
+                    </a>
+                  </div>
                 </div>
               )}
 
@@ -601,6 +637,42 @@ function AnswerCard({ answer, citations, narrowedLabel, onOpenCitation }: {
 
         <div className="text-[10px] text-slate-400 inline-flex items-center gap-1">
           <Sparkles size={10} /> Generated from the sources below — verify before acting.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Web fallback answer — deliberately distinct from the verified-doc answer:
+// amber framing, an "unverified" tag, web source links, and a disclaimer.
+function WebAnswerCard({ data }: { data: { answer: string; sources: { title: string; url: string }[] } }) {
+  const html = useMemo(() => renderMarkdown(normalizeAnswerSteps(data.answer)), [data.answer]);
+  return (
+    <div className="rounded-2xl rounded-tl-md overflow-hidden border border-amber-200 shadow-sm bg-white">
+      <div className="bg-gradient-to-r from-amber-500 to-amber-600 px-3.5 py-2 inline-flex items-center gap-1.5 w-full">
+        <Globe size={12} className="text-white" />
+        <span className="text-white text-[11px] font-semibold uppercase tracking-wide">From the web · unverified</span>
+      </div>
+      <div className="p-3.5 space-y-2.5">
+        <div className="chat-prose" dangerouslySetInnerHTML={{ __html: html }} />
+        {data.sources.length > 0 && (
+          <div className="pt-2 border-t border-slate-100">
+            <div className="text-[11px] uppercase tracking-wide font-semibold text-slate-400 mb-1.5">Web sources</div>
+            <div className="flex flex-col gap-1">
+              {data.sources.map((s, i) => (
+                <a key={i} href={s.url} target="_blank" rel="noreferrer"
+                   className="tap group flex items-center gap-2 rounded-lg border border-slate-200 hover:border-amber-400 px-2.5 py-1.5 transition">
+                  <span className="text-[10px] font-bold text-amber-700 bg-amber-50 rounded w-5 h-5 flex items-center justify-center shrink-0">{i + 1}</span>
+                  <span className="min-w-0 flex-1 text-xs text-slate-700 truncate group-hover:text-amber-700">{s.title}</span>
+                  <ExternalLink size={12} className="text-slate-300 group-hover:text-amber-600 shrink-0" />
+                </a>
+              ))}
+            </div>
+          </div>
+        )}
+        <div className="text-[10px] text-amber-800 bg-amber-50 rounded-md px-2 py-1.5 flex items-start gap-1.5">
+          <Globe size={11} className="mt-0.5 shrink-0" />
+          <span>General web information — <strong>not</strong> from your verified documentation. Confirm before acting.</span>
         </div>
       </div>
     </div>
