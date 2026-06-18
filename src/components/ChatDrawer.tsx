@@ -8,6 +8,7 @@ import { runSearch } from '../lib/search';
 import { logUnanswered } from '../lib/telemetry';
 import { SECTION_LABEL, parseSections } from '../lib/consolidated';
 import { renderMarkdown, normalizeAnswerSteps } from '../lib/markdown';
+import { conversationalReply } from '../lib/chatIntent';
 import { useAuth } from '../lib/auth';
 import AnswerFeedback from './AnswerFeedback';
 import TicketModal from './TicketModal';
@@ -34,12 +35,16 @@ type Turn =
       query: string;
       loading?: boolean;
       narrowedLabel?: string;
+      // Plain conversational reply (greeting / thanks / "move on" etc.) — no
+      // doc search, no answer card, no feedback/sources.
+      note?: string;
       // AI mode (Gemini RAG via the chat-answer Edge Function):
       answer?: string | null;
       citations?: Citation[];
       // Retrieval-fallback mode (used when the Edge Function isn't available):
       hits?: Hit[];
     };
+
 
 // Result of one assistant turn: either a synthesized answer (+ citations) from
 // the Edge Function, or — if that isn't deployed/available — retrieval hits.
@@ -180,6 +185,15 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
     const q = query.trim();
     if (!q) return;
     if (sendingRef.current) return; // ignore concurrent sends (would swap answers under questions)
+
+    // Small-talk / meta → reply conversationally, skip the doc search entirely.
+    const chat = conversationalReply(q);
+    if (chat) {
+      setInput('');
+      setTurns((t) => [...t, { role: 'user', text: q }, { role: 'bot', query: q, loading: false, note: chat }]);
+      return;
+    }
+
     sendingRef.current = true;
     setInput('');
     setTurns((t) => [
@@ -328,6 +342,10 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
                   <span className="dp-typing"><span></span><span></span><span></span></span>
                   <span className="text-xs text-slate-400">{t('chat.title')} is thinking…</span>
                 </div>
+              ) : turn.note ? (
+                <div className="rounded-2xl rounded-tl-md bg-white border border-slate-200 shadow-sm px-3.5 py-3 text-sm text-slate-700 leading-relaxed">
+                  {turn.note}
+                </div>
               ) : turn.answer ? (
                 <AnswerCard
                   answer={turn.answer}
@@ -375,7 +393,7 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
               )}
 
               {/* Nothing found → still let them log a ticket */}
-              {!turn.loading && !turn.answer && (!turn.hits || turn.hits.length === 0) && (
+              {!turn.loading && !turn.note && !turn.answer && (!turn.hits || turn.hits.length === 0) && (
                 <button
                   onClick={() => openTicket(turn)}
                   className="tap inline-flex items-center gap-1.5 rounded-md border border-slate-300 hover:border-brand-700 hover:text-brand-700 px-3 py-1.5 text-xs font-medium text-slate-700 transition"
@@ -384,8 +402,8 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
                 </button>
               )}
 
-              {/* Narrow-to-sensor probe, only under the most recent answered turn */}
-              {!turn.loading && i === turns.length - 1 && !turn.narrowedLabel && (
+              {/* Narrow-to-sensor probe, only under the most recent answered turn (not chit-chat) */}
+              {!turn.loading && !turn.note && i === turns.length - 1 && !turn.narrowedLabel && (
                 <NarrowRow onPick={(modelId, generalModelId, label) => narrowTurn(i, turn.query, modelId, generalModelId, label)} />
               )}
               </div>
