@@ -1,11 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
-import { Accessibility, Minus, Plus, Contrast, Check } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
+import { Accessibility, Minus, Plus, Contrast, Check, Languages } from 'lucide-react';
 import { useA11y } from '../lib/accessibility';
+import { LANGUAGES, setLanguage } from '../i18n';
 
 // Compact header control for the app-wide accessibility preferences:
 // text size (A− / A+) and a high-contrast toggle. Keyboard accessible.
 export default function AccessibilityMenu() {
   const { textScale, highContrast, incScale, decScale, toggleContrast } = useA11y();
+  const { t, i18n } = useTranslation();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -28,8 +31,8 @@ export default function AccessibilityMenu() {
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="dialog"
         aria-expanded={open}
-        aria-label="Accessibility options"
-        title="Accessibility options"
+        aria-label="Accessibility and language options"
+        title="Accessibility & language"
         className="rounded-md w-9 h-9 flex items-center justify-center text-white/80 hover:text-white hover:bg-white/10 transition"
       >
         <Accessibility size={19} strokeWidth={2} />
@@ -38,10 +41,24 @@ export default function AccessibilityMenu() {
       {open && (
         <div
           role="dialog"
-          aria-label="Accessibility options"
+          aria-label="Accessibility and language options"
           className="absolute right-0 mt-2 w-64 bg-white rounded-xl border border-slate-200 shadow-xl p-3 z-50 text-slate-800"
         >
-          <div className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">Accessibility</div>
+          <div className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">Accessibility &amp; language</div>
+
+          {/* Language */}
+          <div className="mb-3">
+            <label className="flex items-center gap-1.5 text-sm font-medium text-slate-700 mb-1.5">
+              <Languages size={15} /> {t('nav.language')}
+            </label>
+            <select
+              value={i18n.language}
+              onChange={(e) => setLanguage(e.target.value)}
+              className="tap w-full rounded-lg border border-slate-300 bg-white text-slate-900 px-2.5 py-2 text-sm focus:border-brand-700 focus:ring-2 focus:ring-brand-700/15 outline-none"
+            >
+              {LANGUAGES.map((l) => <option key={l.code} value={l.code}>{l.native}</option>)}
+            </select>
+          </div>
 
           {/* Text size */}
           <div className="mb-3">
