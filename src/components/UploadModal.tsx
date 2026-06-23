@@ -1,7 +1,8 @@
-import { createContext, useContext, useEffect, useMemo, useState, ReactNode } from 'react';
+import { createContext, useContext, useEffect, useMemo, useRef, useState, ReactNode } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import { extractPdfText, chunkPage } from '../lib/pdf';
+import { classifyDoc, MISMATCH_CONFIDENCE } from '../lib/classify';
 import { SECTION_ORDER, SECTION_LABEL } from '../lib/consolidated';
 import AddSensorModal from './AddSensorModal';
 
@@ -56,6 +57,10 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
   const [progress, setProgress] = useState(0);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // AI association advisory: set when the doc content looks like a different
+  // sensor than the one selected. ackRef lets "Submit anyway" bypass the recheck.
+  const [mismatch, setMismatch] = useState<{ label: string; category: string | null; reason: string; confidence: number } | null>(null);
+  const ackRef = useRef(false);
 
   // Only show "general" scope types in the dropdown (the sensor-tied ones):
   // Sensor Manual, Installation Guide, Troubleshooting Steps, Technical Data Sheet.
@@ -135,23 +140,15 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
     return null;
   }
 
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
+  async function submit(e?: React.FormEvent) {
+    e?.preventDefault();
     const err = valid();
     if (err) { setError(err); return; }
     if (!file) return;
-    setError(null); setBusy(true); setProgress(10); setStatus('Uploading file…');
+    setError(null); setMismatch(null); setBusy(true);
 
-    const safeName = file.name.replace(/[^a-zA-Z0-9._-]+/g, '_');
-    const storagePath = `${Date.now()}_${safeName}`;
-    const up = await supabase.storage.from('documents').upload(storagePath, file, {
-      contentType: file.type || 'application/octet-stream',
-      upsert: false,
-    });
-    if (up.error) { setBusy(false); setError('Upload failed: ' + up.error.message); return; }
-    setProgress(40); setStatus('Creating document record…');
-
-    // Extract PDF text first (so we can store it on the submission for the checker to edit)
+    // Extract PDF text up front — needed both for the AI association check and
+    // to store on the submission for the checker.
     let extractedText = '';
     let pageCount: number | null = null;
     if (/\.pdf$/i.test(file.name) || /pdf/i.test(file.type)) {
@@ -164,7 +161,27 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
         console.warn('pdf extract failed', e);
       }
     }
-    setProgress(55);
+
+    // AI association check (advisory): does the content match the chosen sensor?
+    if (scope === 'model' && sensorModelId && extractedText && !ackRef.current) {
+      setStatus('Checking the sensor match…');
+      const c = await classifyDoc(extractedText, title);
+      if (c && c.model_id !== sensorModelId && c.confidence >= MISMATCH_CONFIDENCE) {
+        setMismatch({ label: c.model_label, category: c.category_label, reason: c.reason, confidence: c.confidence });
+        setBusy(false); setStatus(null);
+        return;
+      }
+    }
+
+    setProgress(10); setStatus('Uploading file…');
+    const safeName = file.name.replace(/[^a-zA-Z0-9._-]+/g, '_');
+    const storagePath = `${Date.now()}_${safeName}`;
+    const up = await supabase.storage.from('documents').upload(storagePath, file, {
+      contentType: file.type || 'application/octet-stream',
+      upsert: false,
+    });
+    if (up.error) { setBusy(false); setError('Upload failed: ' + up.error.message); return; }
+    setProgress(55); setStatus('Creating document record…');
 
     // Output work-type section is decoupled from the input document form.
     // The maker may suggest one; the checker confirms/changes it at approval.
@@ -373,6 +390,22 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
           </div>
 
           {error && <div className="text-sm text-red-700 bg-red-50 border border-red-100 rounded-lg px-3 py-2.5">{error}</div>}
+
+          {mismatch && (
+            <div className="rounded-lg bg-amber-50 border border-amber-200 text-amber-900 text-sm p-3 space-y-2">
+              <div className="font-medium">⚠ This document looks like a different sensor</div>
+              <div>
+                The content reads like <strong>{mismatch.label}</strong>
+                {mismatch.category && <> ({mismatch.category})</>}, not the sensor you selected.
+              </div>
+              {mismatch.reason && <div className="text-xs italic">“{mismatch.reason}”</div>}
+              <div className="text-xs">Pick the correct make &amp; model above — or submit anyway if you’re sure.</div>
+              <div className="flex gap-2 pt-0.5">
+                <button type="button" onClick={() => setMismatch(null)} className="btn-secondary btn-sm">Let me fix it</button>
+                <button type="button" onClick={() => { ackRef.current = true; setMismatch(null); submit(); }} className="btn btn-sm bg-amber-600 text-white hover:bg-amber-700">Submit anyway</button>
+              </div>
+            </div>
+          )}
 
           <div className="flex items-center justify-end gap-3 pt-2 sticky bottom-0 bg-white -mx-7 px-7 -mb-6 py-4 border-t border-slate-100">
             <button type="button" onClick={onClose} className="btn-ghost">Cancel</button>

@@ -72,16 +72,18 @@ function json(body: unknown, status = 200) {
 }
 
 // OpenAI-compatible Groq completion. Returns the text, or null on failure.
-async function groqComplete(system: string, user: string, key: string, model: string): Promise<string | null> {
+async function groqComplete(system: string, user: string, key: string, model: string, jsonMode = false): Promise<string | null> {
   try {
+    const payload: Record<string, unknown> = {
+      model,
+      messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
+      temperature: jsonMode ? 0 : 0.2, max_tokens: 900, top_p: 0.9,
+    };
+    if (jsonMode) payload.response_format = { type: 'json_object' };
     const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
-      body: JSON.stringify({
-        model,
-        messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
-        temperature: 0.2, max_tokens: 900, top_p: 0.9,
-      }),
+      body: JSON.stringify(payload),
     });
     if (!res.ok) { console.error('groq error', res.status, await res.text()); return null; }
     const body = await res.json();
@@ -105,8 +107,7 @@ Deno.serve(async (req) => {
 
   const query = (payload.query ?? '').trim();
   const sensorModelId = payload.sensor_model_id ?? null;
-  const mode = payload.mode === 'web' ? 'web' : 'docs';
-  if (!query) return json({ error: 'empty query' }, 400);
+  const mode = payload.mode === 'web' ? 'web' : payload.mode === 'classify' ? 'classify' : 'docs';
 
   const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
   const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
@@ -115,6 +116,58 @@ Deno.serve(async (req) => {
 
   if (!SUPABASE_URL || !SERVICE_KEY) return json({ error: 'server not configured (supabase env)' }, 500);
   if (!GROQ_API_KEY) return json({ error: 'server not configured (GROQ_API_KEY missing)' }, 500);
+
+  // ---------- CLASSIFY MODE: which catalog sensor does this document describe? ----------
+  // Used at upload/review to catch a doc filed under the wrong sensor/category.
+  if (mode === 'classify') {
+    const supabase = createClient(SUPABASE_URL, SERVICE_KEY);
+    const text = ((payload as any).text ?? '').toString().slice(0, 6000).trim();
+    const title = ((payload as any).title ?? '').toString().slice(0, 300).trim();
+    if (!text && !title) return json({ error: 'no text to classify' }, 400);
+
+    const { data: models } = await supabase
+      .from('sensor_models')
+      .select('id, model_no, name, sensor_makes(name), sensor_categories(id, name)')
+      .eq('is_general', false)
+      .limit(300);
+
+    const list = (models ?? []).map((m: any, i: number) => {
+      const mk = Array.isArray(m.sensor_makes) ? m.sensor_makes[0] : m.sensor_makes;
+      const cat = Array.isArray(m.sensor_categories) ? m.sensor_categories[0] : m.sensor_categories;
+      return {
+        idx: i + 1,
+        id: m.id,
+        label: `${mk?.name ?? ''} ${m.model_no || m.name || ''}`.trim(),
+        category: cat?.name ?? '',
+        category_id: cat?.id ?? null,
+      };
+    });
+    if (list.length === 0) return json({ suggestion: null, confidence: 0, reason: 'empty catalog' });
+
+    const catalogStr = list.map((x) => `${x.idx}. ${x.label} — category: ${x.category}`).join('\n');
+    const sys = 'You classify a sensor maintenance/troubleshooting/datasheet document to the single catalog sensor it describes. Choose ONLY from the numbered catalog. If none is a clear match, choose 0. Respond with strict JSON only.';
+    const user = [
+      `Catalog (numbered):\n${catalogStr}`,
+      '',
+      `Document title: ${title || '(none)'}`,
+      `Document excerpt:\n${text || '(none)'}`,
+      '',
+      'Return strict JSON: {"index": <catalog number that best matches the document, or 0 if none is a good match>, "confidence": <number 0 to 1>, "reason": "<one short sentence on the deciding evidence>"}',
+    ].join('\n');
+
+    const raw = await groqComplete(sys, user, GROQ_API_KEY, MODEL, true);
+    let parsed: any = {};
+    try { parsed = JSON.parse(raw ?? '{}'); } catch { parsed = {}; }
+    const idx = Number(parsed.index) || 0;
+    const chosen = list.find((x) => x.idx === idx) ?? null;
+    return json({
+      suggestion: chosen ? { model_id: chosen.id, model_label: chosen.label, category_id: chosen.category_id, category_label: chosen.category } : null,
+      confidence: Math.max(0, Math.min(1, Number(parsed.confidence) || 0)),
+      reason: String(parsed.reason ?? '').slice(0, 300),
+    });
+  }
+
+  if (!query) return json({ error: 'empty query' }, 400);
 
   // ---------- WEB MODE: search the web (Tavily) → synthesize with Groq ----------
   // Used as an explicit fallback when the verified docs don't answer the

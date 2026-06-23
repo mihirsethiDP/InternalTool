@@ -9,6 +9,15 @@ free API tier — no billing/card required — which is why we use it here. (Gem
 free tier is unavailable in some regions, e.g. India, where it returns
 `limit: 0`.)
 
+This one function serves three modes (via `mode` in the request body):
+- `docs` (default) — grounded RAG answer from the verified library.
+- `web` — Tavily web search → Groq synthesis (needs `TAVILY_API_KEY`).
+- `classify` — given a document's text, returns the catalog sensor it most
+  likely describes (used at upload/review to flag a doc filed under the wrong
+  sensor/category). Groq only; no extra key.
+
+Re-deploy this function whenever any mode changes.
+
 The chatbot **degrades gracefully**: if this function isn't deployed or errors,
 the client falls back to retrieval-only results.
 

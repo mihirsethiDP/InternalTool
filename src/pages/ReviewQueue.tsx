@@ -11,6 +11,7 @@ import {
   SECTION_LABEL, SECTION_ORDER, SECTION_HINT, replaceSection, appendSection,
 } from '../lib/consolidated';
 import { writeConsolidated } from '../lib/consolidatedWrite';
+import { classifyDoc, MISMATCH_CONFIDENCE } from '../lib/classify';
 
 /* =========================================================
    List page — /review
@@ -135,6 +136,15 @@ export function ReviewQueueDetail() {
     enabled: Boolean(sub.data?.extracted_text),
   });
 
+  // AI association check: does the document content match the sensor it's filed
+  // under? Advisory — surfaced as a banner; the checker still decides.
+  const aiClass = useQuery({
+    queryKey: ['classify', id],
+    enabled: Boolean(sub.data?.extracted_text),
+    staleTime: 60 * 60 * 1000,
+    queryFn: () => classifyDoc(sub.data?.extracted_text ?? '', sub.data?.title ?? ''),
+  });
+
   useEffect(() => {
     if (sub.data?.extracted_text != null) setEditedText(sub.data.extracted_text);
   }, [sub.data?.extracted_text]);
@@ -198,6 +208,34 @@ export function ReviewQueueDetail() {
           </div>
         )}
       </div>
+
+      {/* AI association check */}
+      {aiClass.data && aiClass.data.confidence >= MISMATCH_CONFIDENCE && (
+        aiClass.data.model_id === s.sensor_model_id ? (
+          <div className="card border-emerald-200 bg-emerald-50/60 flex items-start gap-2.5">
+            <span className="text-emerald-700 text-sm shrink-0">✓</span>
+            <div className="text-sm text-emerald-900">
+              <strong>AI agrees</strong> this document matches{' '}
+              <strong>{s.sensor_models?.sensor_makes?.name} {s.sensor_models?.model_no}</strong>{' '}
+              <span className="text-emerald-700">({Math.round(aiClass.data.confidence * 100)}% confident)</span>.
+            </div>
+          </div>
+        ) : (
+          <div className="card border-red-200 bg-red-50/70 flex items-start gap-2.5">
+            <span className="text-red-600 text-base shrink-0">⚠</span>
+            <div className="text-sm text-red-900 space-y-1">
+              <div>
+                <strong>Possible misfiling.</strong> This document reads like{' '}
+                <strong>{aiClass.data.model_label}</strong>
+                {aiClass.data.category_label && <> ({aiClass.data.category_label})</>}, but it's filed under{' '}
+                <strong>{s.sensor_models?.sensor_makes?.name} {s.sensor_models?.model_no}</strong>.
+              </div>
+              {aiClass.data.reason && <div className="text-xs text-red-800 italic">“{aiClass.data.reason}”</div>}
+              <div className="text-xs text-red-700">{Math.round(aiClass.data.confidence * 100)}% confident · re-check the sensor association before approving.</div>
+            </div>
+          </div>
+        )
+      )}
 
       {/* Duplicates */}
       {(dupes.data ?? []).length > 0 && (
