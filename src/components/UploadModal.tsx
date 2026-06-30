@@ -3,7 +3,6 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import { extractPdfText, chunkPage } from '../lib/pdf';
 import { classifyDoc, MISMATCH_CONFIDENCE } from '../lib/classify';
-import { SECTION_ORDER, SECTION_LABEL } from '../lib/consolidated';
 import AddSensorModal from './AddSensorModal';
 
 interface UploadDefaults {
@@ -49,7 +48,6 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
   const [makeId, setMakeId] = useState('');
   const [scope, setScope] = useState<'model' | 'general'>('model');
   const [categoryId, setCategoryId] = useState('');
-  const [suggestedSection, setSuggestedSection] = useState('');
   const [vendorUrl, setVendorUrl] = useState('');
   const [dragOver, setDragOver] = useState(false);
   const [showAddSensor, setShowAddSensor] = useState(false);
@@ -183,10 +181,9 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
     if (up.error) { setBusy(false); setError('Upload failed: ' + up.error.message); return; }
     setProgress(55); setStatus('Creating document record…');
 
-    // Output work-type section is decoupled from the input document form.
-    // The maker may suggest one; the checker confirms/changes it at approval.
-    const targetSection = suggestedSection || null;
-
+    // Output work-type section is decided by the checker at approval — the
+    // upload form no longer asks the maker to pre-suggest it (removed as a
+    // redundant "document type"-like field).
     setStatus('Submitting for review…');
     const insert = await supabase.from('document_submissions').insert({
       title,
@@ -197,7 +194,7 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
       size_bytes: file.size,
       page_count: pageCount,
       extracted_text: extractedText || null,
-      target_section: targetSection,
+      target_section: null,
     }).select('id').single();
     if (insert.error || !insert.data) {
       setBusy(false);
@@ -373,15 +370,6 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
                 </div>
               </>
             )}
-
-            <div>
-              <label className="label">Suggested category (optional)</label>
-              <select className="input" value={suggestedSection} onChange={(e) => setSuggestedSection(e.target.value)}>
-                <option value="">— Let the reviewer decide —</option>
-                {SECTION_ORDER.map((s) => <option key={s} value={s}>{SECTION_LABEL[s]}</option>)}
-              </select>
-              <div className="text-xs text-slate-500 mt-1.5">Which work type does this content help with? The reviewer confirms or changes this when approving.</div>
-            </div>
 
             <div>
               <label className="label">Vendor URL (optional)</label>

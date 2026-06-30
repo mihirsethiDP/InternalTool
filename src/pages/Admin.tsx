@@ -173,25 +173,49 @@ function UsersPanel({ onChanged }: { onChanged: () => void }) {
     queryKey: ['admin-users'],
     queryFn: async () => (await supabase.from('profiles').select('*').order('created_at', { ascending: false })).data ?? [],
   });
-  async function setRole(id: string, role: string) {
-    await supabase.from('profiles').update({ role }).eq('id', id);
+  // Apply a role to EVERY profile sharing this email — a person can have more
+  // than one identity (e.g. magic-link + Google sign-in create separate auth
+  // users with the same email), and their access should be consistent.
+  async function setRole(email: string, role: string) {
+    await supabase.from('profiles').update({ role }).eq('email', email);
     onChanged();
   }
+
+  // Group by email so one person = one row, even with multiple sign-ins.
+  const rank: Record<string, number> = { viewer: 0, uploader: 1, admin: 2 };
+  const byEmail = new Map<string, { email: string; roles: Set<string>; count: number }>();
+  for (const u of (users.data ?? []) as any[]) {
+    const key = (u.email ?? '').toLowerCase();
+    const e = byEmail.get(key) ?? { email: u.email, roles: new Set<string>(), count: 0 };
+    e.roles.add(u.role); e.count += 1;
+    byEmail.set(key, e);
+  }
+  const rows = [...byEmail.values()].map((e) => {
+    const effective = [...e.roles].sort((a, b) => rank[b] - rank[a])[0]; // highest role
+    return { ...e, effective, mixed: e.roles.size > 1 };
+  });
+
   return (
     <div className="card">
-      <p className="text-xs text-slate-500 mb-3">Anyone who has signed in appears here. Change a user&rsquo;s role to grant upload or admin rights.</p>
+      <p className="text-xs text-slate-500 mb-3">Anyone who has signed in appears here. Change a user&rsquo;s role to grant upload or admin rights. Role changes apply to all of a person&rsquo;s sign-ins.</p>
       <div className="overflow-x-auto -mx-4 px-4 sm:-mx-5 sm:px-5">
         <table className="w-full text-sm min-w-[34rem]">
           <thead className="text-left text-xs uppercase text-slate-500"><tr><th>Email</th><th>Role</th><th></th></tr></thead>
           <tbody>
-            {(users.data ?? []).map((u: any) => (
-              <tr key={u.id} className="border-t border-slate-100">
-                <td className="py-2 pr-2">{u.email}</td>
-                <td className="pr-2"><span className="badge">{u.role}</span></td>
+            {rows.map((u) => (
+              <tr key={u.email} className="border-t border-slate-100">
+                <td className="py-2 pr-2">
+                  {u.email}
+                  {u.count > 1 && <span className="ml-2 text-[10px] text-slate-400">{u.count} sign-ins</span>}
+                </td>
+                <td className="pr-2">
+                  <span className="badge">{u.effective}</span>
+                  {u.mixed && <span className="ml-1.5 text-[10px] text-amber-600">was inconsistent — fixed on next change</span>}
+                </td>
                 <td className="text-right space-x-1 whitespace-nowrap">
-                  <button className="btn-ghost text-xs" onClick={() => setRole(u.id, 'viewer')}>viewer</button>
-                  <button className="btn-ghost text-xs" onClick={() => setRole(u.id, 'uploader')}>uploader</button>
-                  <button className="btn-ghost text-xs" onClick={() => setRole(u.id, 'admin')}>admin</button>
+                  <button className="btn-ghost text-xs" onClick={() => setRole(u.email, 'viewer')}>viewer</button>
+                  <button className="btn-ghost text-xs" onClick={() => setRole(u.email, 'uploader')}>uploader</button>
+                  <button className="btn-ghost text-xs" onClick={() => setRole(u.email, 'admin')}>admin</button>
                 </td>
               </tr>
             ))}
