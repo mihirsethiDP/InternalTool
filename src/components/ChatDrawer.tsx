@@ -2,13 +2,14 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { X, Send, ArrowRight, ExternalLink, ChevronDown, Sparkles, Bot, Trash2, Wrench, Cpu, Globe } from 'lucide-react';
+import { X, Send, ArrowRight, ExternalLink, ChevronDown, Sparkles, Bot, Trash2, Wrench, Cpu, Globe, Compass } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { runSearch } from '../lib/search';
 import { logUnanswered, logEvent } from '../lib/telemetry';
 import { SECTION_LABEL, parseSections } from '../lib/consolidated';
 import { renderMarkdown, normalizeAnswerSteps } from '../lib/markdown';
 import { conversationalReply } from '../lib/chatIntent';
+import { matchRule, type RouteMatch } from '../lib/routing';
 import { useAuth } from '../lib/auth';
 import AnswerFeedback from './AnswerFeedback';
 import TicketModal from './TicketModal';
@@ -46,6 +47,8 @@ type Turn =
       // Web fallback (Tavily + Groq), fetched on demand from the not-found card:
       webLoading?: boolean;
       webAnswer?: { answer: string; sources: { title: string; url: string }[] } | null;
+      // Router layer: an approved problem→procedure rule matched this question.
+      routed?: RouteMatch | null;
     };
 
 
@@ -290,7 +293,9 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
       const r = await routeQuery(q);
       if (r?.categories?.length) setRouteOrder(r.categories.map((c) => c.id));
       if (r?.top && r.top.confidence >= 0.6) {
-        activeScope = { categoryId: r.top.id, label: `${r.top.name} sensors` };
+        // Resolve the category's general model so type-level routing rules apply.
+        const { data: gm } = await supabase.from('sensor_models').select('id').eq('is_general', true).eq('category_id', r.top.id).maybeSingle();
+        activeScope = { categoryId: r.top.id, generalModelId: (gm as any)?.id ?? null, label: `${r.top.name} sensors` };
         setScope(activeScope);
       }
     }
@@ -308,7 +313,12 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
             const { data } = await supabase.rpc('chat_search', { q, p_limit: 5 });
             return enrichHits((data as Hit[]) ?? []);
           };
-    const result = await askAssistant(q, { sensorModelId: activeScope?.modelId ?? null, categoryId: activeScope?.categoryId ?? null }, fallback);
+    // Router: match the problem to an approved rule for the sensor(s) in scope.
+    const candidateIds = [activeScope?.modelId, activeScope?.generalModelId].filter(Boolean) as string[];
+    const [result, routed] = await Promise.all([
+      askAssistant(q, { sensorModelId: activeScope?.modelId ?? null, categoryId: activeScope?.categoryId ?? null }, fallback),
+      candidateIds.length ? matchRule(q, candidateIds) : Promise.resolve(null),
+    ]);
     if (!result.answer && result.hits.length === 0) {
       logUnanswered({ query: q, source: 'chat', sensorModelId: activeScope?.modelId ?? null });
     }
@@ -317,7 +327,7 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
       for (let i = copy.length - 1; i >= 0; i--) {
         const turn = copy[i];
         if (turn.role === 'bot' && turn.loading) {
-          copy[i] = { role: 'bot', query: q, loading: false, narrowedLabel: activeScope?.label, answer: result.answer, citations: result.citations, hits: result.hits };
+          copy[i] = { role: 'bot', query: q, loading: false, narrowedLabel: activeScope?.label, answer: result.answer, citations: result.citations, hits: result.hits, routed };
           break;
         }
       }
@@ -331,10 +341,18 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
   async function narrowTurn(turnIndex: number, query: string, modelId: string, generalModelId: string | null, label: string) {
     setScope({ modelId, generalModelId, label });
     setTurns((t) => t.map((turn, i) => (i === turnIndex && turn.role === 'bot') ? { ...turn, loading: true } : turn));
-    const result = await askAssistant(query, { sensorModelId: modelId }, () => scopedRetrieve(query, modelId, generalModelId));
+    const [result, routed] = await Promise.all([
+      askAssistant(query, { sensorModelId: modelId }, () => scopedRetrieve(query, modelId, generalModelId)),
+      matchRule(query, [modelId, generalModelId].filter(Boolean) as string[]),
+    ]);
     setTurns((t) => t.map((turn, i) => (i === turnIndex && turn.role === 'bot')
-      ? { ...turn, loading: false, narrowedLabel: label, answer: result.answer, citations: result.citations, hits: result.hits }
+      ? { ...turn, loading: false, narrowedLabel: label, answer: result.answer, citations: result.citations, hits: result.hits, routed }
       : turn));
+  }
+
+  function openSection(query: string, docId: string, section: string) {
+    onClose();
+    nav(`/consolidated/${docId}?q=${encodeURIComponent(query)}&section=${encodeURIComponent(section)}`);
   }
 
   function openHit(query: string, hit: Hit) {
@@ -443,6 +461,11 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
                 <Bot size={16} />
               </span>
               <div className="min-w-0 flex-1 space-y-2">
+              {/* Router: an approved rule matched — point at the exact procedure */}
+              {!turn.loading && turn.routed && (
+                <RoutedCard routed={turn.routed} onOpen={(docId, section) => openSection(turn.query, docId, section)} />
+              )}
+
               {turn.loading ? (
                 <div className="inline-flex items-center gap-2 rounded-2xl rounded-tl-md bg-white border border-slate-200 shadow-sm px-3.5 py-3">
                   <span className="dp-typing"><span></span><span></span><span></span></span>
@@ -722,6 +745,39 @@ function AnswerCard({ answer, citations, narrowedLabel, onOpenCitation }: {
 
         <div className="text-[10px] text-slate-400 inline-flex items-center gap-1">
           <Sparkles size={10} /> Generated from the sources below — verify before acting.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Router result — an approved problem→procedure rule matched the question.
+// Points the technician straight to the exact section(s), with the rule's
+// clarifying question shown first when present.
+function RoutedCard({ routed, onOpen }: { routed: RouteMatch; onOpen: (docId: string, section: string) => void }) {
+  const { rule, docId } = routed;
+  return (
+    <div className="rounded-2xl rounded-tl-md overflow-hidden border border-emerald-200 shadow-sm bg-white">
+      <div className="bg-gradient-to-r from-emerald-600 to-emerald-700 px-3.5 py-2 inline-flex items-center gap-1.5 w-full">
+        <Compass size={13} className="text-white" />
+        <span className="text-white text-[11px] font-semibold uppercase tracking-wide">Recommended procedure</span>
+      </div>
+      <div className="p-3.5 space-y-2.5">
+        <div className="text-sm text-slate-700">For <strong>“{rule.problem}”</strong>, go to:</div>
+        {rule.clarifying_question && (
+          <div className="text-xs text-slate-600 bg-emerald-50 border border-emerald-100 rounded-md px-2.5 py-1.5">
+            First check: <span className="italic">{rule.clarifying_question}</span>
+          </div>
+        )}
+        <div className="flex flex-col gap-1.5">
+          {rule.sections.map((s) => (
+            <button key={s} disabled={!docId} onClick={() => docId && onOpen(docId, s)}
+              className="tap group flex items-center gap-2 text-left rounded-lg border border-slate-200 hover:border-emerald-500 hover:bg-emerald-50/40 px-2.5 py-2 transition disabled:opacity-50">
+              <Compass size={14} className="text-emerald-700 shrink-0" />
+              <span className="min-w-0 flex-1 text-sm font-medium text-slate-800 group-hover:text-emerald-700">{SECTION_LABEL[s] ?? s}</span>
+              <ArrowRight size={13} className="text-slate-300 group-hover:text-emerald-600 shrink-0" />
+            </button>
+          ))}
         </div>
       </div>
     </div>
