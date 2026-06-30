@@ -69,7 +69,7 @@ describe('coverageOf', () => {
   });
 
   it('reports partial coverage', () => {
-    const c = coverageOf(sampleMd); // troubleshooting + cleaning = 2 of the checklist
+    const c = coverageOf(sampleMd); // troubleshoot_repair + clean = 2 of the checklist
     expect(c.covered).toBe(2);
     expect(c.complete).toBe(false);
   });

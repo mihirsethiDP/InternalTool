@@ -18,17 +18,21 @@ export interface RouteMatch {
   docId: string | null; // consolidated_docs.id to deep-link into
 }
 
-const STOP = new Set(['the', 'a', 'an', 'is', 'are', 'on', 'in', 'of', 'to', 'for', 'and', 'or', 'my', 'it', 'this', 'that', 'with', 'how', 'do', 'i', 'why', 'what', 'when', 'shows', 'showing', 'sensor', 'reading', 'readings']);
-function toks(s: string): string[] {
-  return (s || '').toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').split(/\s+/).filter((w) => w.length > 2 && !STOP.has(w));
+// Keep short domain terms (pH, EC, DO) and discriminating words like "reading"
+// / "sensor" — only drop generic filler.
+const STOP = new Set(['the', 'a', 'an', 'is', 'are', 'on', 'in', 'of', 'to', 'for', 'and', 'or', 'my', 'it', 'this', 'that', 'with', 'how', 'do', 'why', 'what', 'when', 'shows', 'showing', 'from', 'keeps', 'around']);
+export function queryTokens(s: string): string[] {
+  return (s || '').toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').split(/\s+/).filter((w) => w.length >= 2 && !STOP.has(w));
 }
-// recall of the query's significant words within a rule phrase
-function score(qt: string[], phrase: string): number {
+// Overlap coefficient: shared tokens / size of the smaller token set. Symmetric,
+// so a verbose query and a short rule phrase aren't unfairly penalised.
+export function matchScore(qt: string[], phrase: string): number {
   if (qt.length === 0) return 0;
-  const pt = new Set(toks(phrase));
+  const pt = new Set(queryTokens(phrase));
+  if (pt.size === 0) return 0;
   let hit = 0;
-  for (const w of qt) if (pt.has(w)) hit++;
-  return hit / qt.length;
+  for (const w of new Set(qt)) if (pt.has(w)) hit++;
+  return hit / Math.min(new Set(qt).size, pt.size);
 }
 
 const THRESHOLD = 0.34;
@@ -44,11 +48,11 @@ export async function matchRule(query: string, modelIds: string[]): Promise<Rout
   const rules = (data ?? []) as RoutingRule[];
   if (rules.length === 0) return null;
 
-  const qt = toks(query);
+  const qt = queryTokens(query);
   let best: RoutingRule | null = null;
   let bestScore = 0;
   for (const r of rules) {
-    const s = Math.max(score(qt, r.problem), ...(r.aliases ?? []).map((a) => score(qt, a)), 0);
+    const s = Math.max(matchScore(qt, r.problem), ...(r.aliases ?? []).map((a) => matchScore(qt, a)), 0);
     if (s > bestScore) { bestScore = s; best = r; }
   }
   if (!best || bestScore < THRESHOLD) return null;

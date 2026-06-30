@@ -88,10 +88,9 @@ export interface DocumentRow {
 }
 
 export type SubmissionStatus = 'pending' | 'approved' | 'rejected' | 'changes_requested';
-// Output WORK-TYPE sections of a consolidated reference (the 14-category
-// maintenance/diagnostic taxonomy + 'other'). Distinct from a document's
+// Output activity-category sections of a consolidated reference (the 8 MECE
+// activity categories + an 'other' catch-all). Distinct from a document's
 // input form (document_types).
-// Activity-based taxonomy (8 MECE categories + an 'other' catch-all).
 export type SubmissionSection =
   | 'install_commission' | 'configure' | 'inspect' | 'clean' | 'calibrate'
   | 'replace' | 'troubleshoot_repair' | 'maintenance_planning' | 'other';

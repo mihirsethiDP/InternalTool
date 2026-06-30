@@ -339,7 +339,7 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
   // Re-scope a bot turn to a specific sensor (+ its category general guidance),
   // and remember the scope so following questions stay scoped too.
   async function narrowTurn(turnIndex: number, query: string, modelId: string, generalModelId: string | null, label: string) {
-    setScope({ modelId, generalModelId, label });
+    setScope((prev) => ({ modelId, generalModelId, label, categoryId: prev?.categoryId ?? null }));
     setTurns((t) => t.map((turn, i) => (i === turnIndex && turn.role === 'bot') ? { ...turn, loading: true } : turn));
     const [result, routed] = await Promise.all([
       askAssistant(query, { sensorModelId: modelId }, () => scopedRetrieve(query, modelId, generalModelId)),
@@ -771,12 +771,20 @@ function RoutedCard({ routed, onOpen }: { routed: RouteMatch; onOpen: (docId: st
         )}
         <div className="flex flex-col gap-1.5">
           {rule.sections.map((s) => (
-            <button key={s} disabled={!docId} onClick={() => docId && onOpen(docId, s)}
-              className="tap group flex items-center gap-2 text-left rounded-lg border border-slate-200 hover:border-emerald-500 hover:bg-emerald-50/40 px-2.5 py-2 transition disabled:opacity-50">
-              <Compass size={14} className="text-emerald-700 shrink-0" />
-              <span className="min-w-0 flex-1 text-sm font-medium text-slate-800 group-hover:text-emerald-700">{SECTION_LABEL[s] ?? s}</span>
-              <ArrowRight size={13} className="text-slate-300 group-hover:text-emerald-600 shrink-0" />
-            </button>
+            docId ? (
+              <button key={s} onClick={() => onOpen(docId, s)}
+                className="tap group flex items-center gap-2 text-left rounded-lg border border-slate-200 hover:border-emerald-500 hover:bg-emerald-50/40 px-2.5 py-2 transition">
+                <Compass size={14} className="text-emerald-700 shrink-0" />
+                <span className="min-w-0 flex-1 text-sm font-medium text-slate-800 group-hover:text-emerald-700">{SECTION_LABEL[s] ?? s}</span>
+                <ArrowRight size={13} className="text-slate-300 group-hover:text-emerald-600 shrink-0" />
+              </button>
+            ) : (
+              <div key={s} className="flex items-center gap-2 rounded-lg border border-slate-200 px-2.5 py-2">
+                <Compass size={14} className="text-slate-400 shrink-0" />
+                <span className="min-w-0 flex-1 text-sm font-medium text-slate-600">{SECTION_LABEL[s] ?? s}</span>
+                <span className="text-[10px] text-slate-400 shrink-0">not consolidated yet</span>
+              </div>
+            )
           ))}
         </div>
       </div>
