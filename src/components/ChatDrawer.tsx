@@ -140,6 +140,11 @@ async function askAssistant(
   scopeArg: { sensorModelId?: string | null; categoryId?: string | null },
   fallback: () => Promise<Hit[]>,
 ): Promise<AssistantResult> {
+  // Never let the retrieval fallback throw — a thrown fallback during narrowTurn
+  // (which has no outer guard) would hang that turn's spinner forever.
+  const runFallback = async (): Promise<Hit[]> => {
+    try { return await fallback(); } catch (e) { console.warn('chat retrieval fallback failed', e); return []; }
+  };
   try {
     const { data, error } = await supabase.functions.invoke('chat-answer', {
       body: { query, sensor_model_id: scopeArg.sensorModelId ?? null, category_id: scopeArg.categoryId ?? null },
@@ -168,12 +173,10 @@ async function askAssistant(
     }
   } catch {
     // Edge Function not deployed / network error → retrieval-only fallback.
-    const hits = await fallback();
-    return { answer: null, citations: [], hits };
+    return { answer: null, citations: [], hits: await runFallback() };
   }
   // Non-throw error shape from invoke → retrieval fallback.
-  const hits = await fallback();
-  return { answer: null, citations: [], hits };
+  return { answer: null, citations: [], hits: await runFallback() };
 }
 
 const SUGGESTIONS = [
@@ -347,13 +350,20 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
   async function narrowTurn(turnIndex: number, query: string, modelId: string, generalModelId: string | null, label: string) {
     setScope((prev) => ({ modelId, generalModelId, label, categoryId: prev?.categoryId ?? null }));
     setTurns((t) => t.map((turn, i) => (i === turnIndex && turn.role === 'bot') ? { ...turn, loading: true } : turn));
-    const [result, routed] = await Promise.all([
-      askAssistant(query, { sensorModelId: modelId }, () => scopedRetrieve(query, modelId, generalModelId)),
-      matchRule(query, [modelId, generalModelId].filter(Boolean) as string[]),
-    ]);
-    setTurns((t) => t.map((turn, i) => (i === turnIndex && turn.role === 'bot')
-      ? { ...turn, loading: false, narrowedLabel: label, answer: result.answer, citations: result.citations, hits: result.hits, routed }
-      : turn));
+    try {
+      const [result, routed] = await Promise.all([
+        askAssistant(query, { sensorModelId: modelId }, () => scopedRetrieve(query, modelId, generalModelId)),
+        matchRule(query, [modelId, generalModelId].filter(Boolean) as string[]),
+      ]);
+      setTurns((t) => t.map((turn, i) => (i === turnIndex && turn.role === 'bot')
+        ? { ...turn, loading: false, narrowedLabel: label, answer: result.answer, citations: result.citations, hits: result.hits, routed }
+        : turn));
+    } catch (e) {
+      console.warn('narrowTurn failed', e);
+      setTurns((t) => t.map((turn, i) => (i === turnIndex && turn.role === 'bot')
+        ? { ...turn, loading: false, narrowedLabel: label, answer: null, citations: [], hits: [] }
+        : turn));
+    }
   }
 
   function openSection(query: string, docId: string, section: string) {
@@ -506,7 +516,7 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
                   <span className="dp-typing"><span></span><span></span><span></span></span>
                   <span className="text-xs text-slate-400">Searching the web…</span>
                 </div>
-              ) : (
+              ) : turn.routed ? null : (
                 <div className="card-tight bg-white text-sm text-slate-600 space-y-2.5">
                   <div>{t('chat.nothing')}</div>
                   <div className="flex flex-col gap-2">
