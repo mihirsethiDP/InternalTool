@@ -33,13 +33,10 @@ interface Chunk {
 }
 
 const SECTION_LABEL: Record<string, string> = {
-  troubleshooting: 'Troubleshooting', cleaning: 'Cleaning', calibration: 'Calibration',
-  verification: 'Verification & Validation', inspection: 'Inspection',
-  electrical: 'Electrical & Signal Checks', configuration: 'Configuration',
-  consumable: 'Consumable Replacement', component: 'Component Replacement',
-  preventive: 'Preventive Maintenance', corrective: 'Corrective Maintenance',
-  data_quality: 'Data Quality Management', install_improve: 'Installation Improvement',
-  software: 'Software & Firmware', other: 'Other',
+  install_commission: 'Install & Commission', configure: 'Configure', inspect: 'Inspect',
+  clean: 'Clean', calibrate: 'Calibrate', replace: 'Replace',
+  troubleshoot_repair: 'Troubleshoot & Repair', maintenance_planning: 'Maintenance Planning',
+  other: 'Other',
 };
 
 const SYSTEM_PROMPT = [

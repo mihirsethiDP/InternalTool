@@ -10,55 +10,43 @@
 
 import type { SubmissionSection } from './types';
 
-// Troubleshooting first (the tool's purpose), then operator work-types.
+// Activity-based order: how a technician thinks about the sensor lifecycle.
 export const SECTION_ORDER: SubmissionSection[] = [
-  'troubleshooting', 'cleaning', 'calibration', 'verification', 'inspection',
-  'electrical', 'configuration', 'consumable', 'component', 'preventive',
-  'corrective', 'data_quality', 'install_improve', 'software', 'other',
+  'install_commission', 'configure', 'inspect', 'clean', 'calibrate',
+  'replace', 'troubleshoot_repair', 'maintenance_planning', 'other',
 ];
 
 export const SECTION_LABEL: Record<SubmissionSection, string> = {
-  troubleshooting: 'Troubleshooting',
-  cleaning: 'Cleaning',
-  calibration: 'Calibration',
-  verification: 'Verification & Validation',
-  inspection: 'Inspection',
-  electrical: 'Electrical & Signal Checks',
-  configuration: 'Configuration',
-  consumable: 'Consumable Replacement',
-  component: 'Component Replacement',
-  preventive: 'Preventive Maintenance',
-  corrective: 'Corrective Maintenance',
-  data_quality: 'Data Quality Management',
-  install_improve: 'Installation Improvement',
-  software: 'Software & Firmware',
+  install_commission: 'Install & Commission',
+  configure: 'Configure',
+  inspect: 'Inspect',
+  clean: 'Clean',
+  calibrate: 'Calibrate',
+  replace: 'Replace',
+  troubleshoot_repair: 'Troubleshoot & Repair',
+  maintenance_planning: 'Maintenance Planning',
   other: 'Other',
 };
 
-// One-line description of each work type (used as helper text in pickers).
+// One-line description of each category (used as helper text in pickers).
 export const SECTION_HINT: Record<SubmissionSection, string> = {
-  troubleshooting: 'Abnormal readings, no-data, fault codes, root-cause analysis',
-  cleaning: 'Probe / housing / flow-cell cleaning, wiper & auto-clean checks',
-  calibration: 'Zero, span, multi-point, field & lab calibration, records',
-  verification: 'Cross-checks, drift / response / accuracy / repeatability checks',
-  inspection: 'Physical, cable, mounting, sampling-point, environmental inspection',
-  electrical: 'Power, signal output, noise, communication, data-mapping checks',
-  configuration: 'Range, units, alarms, sampling rate, damping, compensation',
-  consumable: 'Electrolyte, membrane, reagent, reference solution, filters',
-  component: 'Probe, cable, transmitter, battery, wiper, pump/tubing replacement',
-  preventive: 'PM schedule, calibration-due tracking, spare planning',
-  corrective: 'Fault repair, reinstallation, bypass, post-repair validation',
-  data_quality: 'Outlier detection, data gaps, validation rules, health scoring',
-  install_improve: 'Relocation, protection, sample conditioning, flow correction',
-  software: 'Firmware update, parameter backup, reset, diagnostic-log review',
+  install_commission: 'Location, mounting, wiring, first power-up, commissioning, sample conditioning',
+  configure: 'Range, units, alarms, sampling, damping, compensation, firmware, parameter backup',
+  inspect: 'Physical / cable / mounting / environmental checks, power, signal & comms verification',
+  clean: 'Probe / housing / flow-cell cleaning, fouling & scaling removal, wiper & auto-clean checks',
+  calibrate: 'Zero / span / multi-point calibration, drift, response & repeatability checks, records',
+  replace: 'Membranes, electrolytes, reagents, filters, probes, cables, transmitters, batteries, pumps',
+  troubleshoot_repair: 'Abnormal readings, no-data, fault codes, data gaps, root-cause analysis, repair, post-repair validation',
+  maintenance_planning: 'PM schedules, calibration-due tracking, cleaning frequency, spare planning, maintenance history',
   other: 'Anything that does not fit the categories above',
 };
 
-// Operator-critical work types that count toward "documentation completeness".
-// A newly-added sensor has none of these, so it reads as incomplete until filled.
+// Categories that count toward "documentation completeness". A newly-added
+// sensor has none, so it reads as incomplete until filled. All 8 activity
+// categories count (Other is a catch-all and does not).
 export const CHECKLIST_SECTIONS: SubmissionSection[] = [
-  'troubleshooting', 'cleaning', 'calibration', 'verification',
-  'inspection', 'electrical', 'configuration', 'preventive',
+  'install_commission', 'configure', 'inspect', 'clean', 'calibrate',
+  'replace', 'troubleshoot_repair', 'maintenance_planning',
 ];
 
 export interface Coverage {

@@ -91,10 +91,10 @@ export type SubmissionStatus = 'pending' | 'approved' | 'rejected' | 'changes_re
 // Output WORK-TYPE sections of a consolidated reference (the 14-category
 // maintenance/diagnostic taxonomy + 'other'). Distinct from a document's
 // input form (document_types).
+// Activity-based taxonomy (8 MECE categories + an 'other' catch-all).
 export type SubmissionSection =
-  | 'troubleshooting' | 'cleaning' | 'calibration' | 'verification' | 'inspection'
-  | 'electrical' | 'configuration' | 'consumable' | 'component' | 'preventive'
-  | 'corrective' | 'data_quality' | 'install_improve' | 'software' | 'other';
+  | 'install_commission' | 'configure' | 'inspect' | 'clean' | 'calibrate'
+  | 'replace' | 'troubleshoot_repair' | 'maintenance_planning' | 'other';
 
 export interface DocumentSubmission {
   id: string;

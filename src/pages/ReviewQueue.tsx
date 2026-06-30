@@ -304,7 +304,7 @@ export function ReviewQueueDetail() {
 ========================================================= */
 function ApproveModal({ submission, editedText, onClose, onDone }: any) {
   const qc = useQueryClient();
-  const [section, setSection] = useState<SubmissionSection>(submission.target_section || 'troubleshooting');
+  const [section, setSection] = useState<SubmissionSection>(submission.target_section || 'troubleshoot_repair');
   const [mode, setMode] = useState<'replace' | 'append'>('replace');
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);

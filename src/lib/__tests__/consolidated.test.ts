@@ -4,11 +4,11 @@ import {
   coverageOf, CHECKLIST_SECTIONS, SECTION_ORDER,
 } from '../consolidated';
 
-const sampleMd = `## troubleshooting
+const sampleMd = `## troubleshoot_repair
 
 Check power and signal.
 
-## cleaning
+## clean
 
 Wipe the probe with DI water.`;
 
@@ -21,9 +21,9 @@ describe('parseSections', () => {
 
   it('extracts content under each work-type header', () => {
     const s = parseSections(sampleMd);
-    expect(s.troubleshooting).toBe('Check power and signal.');
-    expect(s.cleaning).toBe('Wipe the probe with DI water.');
-    expect(s.calibration).toBe('');
+    expect(s.troubleshoot_repair).toBe('Check power and signal.');
+    expect(s.clean).toBe('Wipe the probe with DI water.');
+    expect(s.calibrate).toBe('');
   });
 });
 
@@ -31,31 +31,31 @@ describe('renderSections / round-trip', () => {
   it('round-trips section content', () => {
     const parsed = parseSections(sampleMd);
     const reparsed = parseSections(renderSections(parsed));
-    expect(reparsed.troubleshooting).toBe('Check power and signal.');
-    expect(reparsed.cleaning).toBe('Wipe the probe with DI water.');
+    expect(reparsed.troubleshoot_repair).toBe('Check power and signal.');
+    expect(reparsed.clean).toBe('Wipe the probe with DI water.');
   });
 });
 
 describe('replaceSection', () => {
   it('replaces a single section, leaving others intact', () => {
-    const updated = replaceSection(sampleMd, 'troubleshooting', 'New steps.');
+    const updated = replaceSection(sampleMd, 'troubleshoot_repair', 'New steps.');
     const s = parseSections(updated);
-    expect(s.troubleshooting).toBe('New steps.');
-    expect(s.cleaning).toBe('Wipe the probe with DI water.');
+    expect(s.troubleshoot_repair).toBe('New steps.');
+    expect(s.clean).toBe('Wipe the probe with DI water.');
   });
 });
 
 describe('appendSection', () => {
   it('appends to an existing section with a separator', () => {
-    const updated = appendSection(sampleMd, 'troubleshooting', 'Extra note.');
+    const updated = appendSection(sampleMd, 'troubleshoot_repair', 'Extra note.');
     const s = parseSections(updated);
-    expect(s.troubleshooting).toContain('Check power and signal.');
-    expect(s.troubleshooting).toContain('Extra note.');
-    expect(s.troubleshooting).toContain('---');
+    expect(s.troubleshoot_repair).toContain('Check power and signal.');
+    expect(s.troubleshoot_repair).toContain('Extra note.');
+    expect(s.troubleshoot_repair).toContain('---');
   });
   it('fills an empty section without a leading separator', () => {
-    const updated = appendSection(sampleMd, 'calibration', 'Two-point cal.');
-    expect(parseSections(updated).calibration).toBe('Two-point cal.');
+    const updated = appendSection(sampleMd, 'calibrate', 'Two-point cal.');
+    expect(parseSections(updated).calibrate).toBe('Two-point cal.');
   });
 });
 
@@ -86,15 +86,15 @@ describe('coverageOf', () => {
 describe('chunkSections', () => {
   it('keeps a short section as a single chunk', () => {
     const chunks = chunkSections(parseSections(sampleMd));
-    const tChunks = chunks.filter((c) => c.section === 'troubleshooting');
+    const tChunks = chunks.filter((c) => c.section === 'troubleshoot_repair');
     expect(tChunks.length).toBe(1);
   });
 
   it('splits a long section into multiple chunks', () => {
     const long = Array.from({ length: 40 }, (_, i) => `Sentence number ${i} about the sensor.`).join(' ');
-    const sections = parseSections(`## troubleshooting\n\n${long}`);
+    const sections = parseSections(`## troubleshoot_repair\n\n${long}`);
     const chunks = chunkSections(sections, 200);
-    const tChunks = chunks.filter((c) => c.section === 'troubleshooting');
+    const tChunks = chunks.filter((c) => c.section === 'troubleshoot_repair');
     expect(tChunks.length).toBeGreaterThan(1);
   });
 

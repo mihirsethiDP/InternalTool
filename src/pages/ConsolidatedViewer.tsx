@@ -5,8 +5,8 @@ import { useTranslation } from 'react-i18next';
 import {
   ArrowLeft, PencilLine, FileText, Wrench, Layers, ChevronUp, ChevronDown,
   ExternalLink, FlaskConical, Droplets, CalendarClock, CheckCircle2, Circle,
-  FileStack, BookOpenText, History, CheckCheck, ScanSearch, Zap, Settings,
-  Beaker, Cog, Hammer, Activity, MapPin, Terminal, Globe2, Sparkles, ChevronRight,
+  FileStack, BookOpenText, History, ScanSearch, Settings,
+  Plug, Replace, Globe2, Sparkles, ChevronRight,
   BookOpen, Cpu, Search as SearchIcon,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
@@ -19,20 +19,14 @@ import RoutingRulesPanel from '../components/RoutingRulesPanel';
 import type { SubmissionSection } from '../lib/types';
 
 export const SECTION_ICON: Record<SubmissionSection, React.ReactNode> = {
-  troubleshooting: <Wrench size={15} strokeWidth={2} />,
-  cleaning: <Droplets size={15} strokeWidth={2} />,
-  calibration: <FlaskConical size={15} strokeWidth={2} />,
-  verification: <CheckCheck size={15} strokeWidth={2} />,
-  inspection: <ScanSearch size={15} strokeWidth={2} />,
-  electrical: <Zap size={15} strokeWidth={2} />,
-  configuration: <Settings size={15} strokeWidth={2} />,
-  consumable: <Beaker size={15} strokeWidth={2} />,
-  component: <Cog size={15} strokeWidth={2} />,
-  preventive: <CalendarClock size={15} strokeWidth={2} />,
-  corrective: <Hammer size={15} strokeWidth={2} />,
-  data_quality: <Activity size={15} strokeWidth={2} />,
-  install_improve: <MapPin size={15} strokeWidth={2} />,
-  software: <Terminal size={15} strokeWidth={2} />,
+  install_commission: <Plug size={15} strokeWidth={2} />,
+  configure: <Settings size={15} strokeWidth={2} />,
+  inspect: <ScanSearch size={15} strokeWidth={2} />,
+  clean: <Droplets size={15} strokeWidth={2} />,
+  calibrate: <FlaskConical size={15} strokeWidth={2} />,
+  replace: <Replace size={15} strokeWidth={2} />,
+  troubleshoot_repair: <Wrench size={15} strokeWidth={2} />,
+  maintenance_planning: <CalendarClock size={15} strokeWidth={2} />,
   other: <Layers size={15} strokeWidth={2} />,
 };
 
