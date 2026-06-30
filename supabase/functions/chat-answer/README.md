@@ -15,6 +15,10 @@ This one function serves three modes (via `mode` in the request body):
 - `classify` — given a document's text, returns the catalog sensor it most
   likely describes (used at upload/review to flag a doc filed under the wrong
   sensor/category). Groq only; no extra key.
+- `route` — given a free-text symptom, ranks the likely sensor TYPE(s)
+  (category) so the chatbot can lead with the right type instead of demanding a
+  make/model. Groq only. (`docs` mode also accepts `category_id` for type-level
+  answers — needs migration 029.)
 
 Re-deploy this function whenever any mode changes.
 

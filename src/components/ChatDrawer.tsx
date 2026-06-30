@@ -93,18 +93,43 @@ async function scopedRetrieve(query: string, modelId: string, generalModelId: st
   return enrichHits(merged);
 }
 
-// Ask the assistant. Prefers the Gemini RAG Edge Function (a synthesized,
-// cited answer); if that isn't deployed or errors, degrades gracefully to
-// retrieval-only hits so the chatbot keeps working. `fallback` supplies the
-// retrieval results for the second path.
+// Retrieval scoped to a whole sensor TYPE (category) — for type-level answers
+// before a specific model is known.
+async function categoryRetrieve(query: string, categoryId: string): Promise<Hit[]> {
+  const res = await runSearch(query, { category_id: categoryId });
+  const merged: Hit[] = res.hits.map((h) => ({
+    document_id: h.document_id,
+    document_title: (h.document_title ?? '').trim(),
+    section: (h.type_label as SubmissionSection) ?? 'other',
+    snippet: h.snippet,
+    rank: h.rank,
+  }));
+  return enrichHits(merged);
+}
+
+// Infer the likely sensor TYPE(s) from a free-text symptom (elicitation/router
+// level 1). Returns categories ranked most-likely-first + a confidence on the top.
+async function routeQuery(query: string): Promise<{ categories: { id: string; name: string }[]; top: { id: string; name: string; confidence: number } | null } | null> {
+  try {
+    const { data, error } = await supabase.functions.invoke('chat-answer', { body: { mode: 'route', query } });
+    if (error || !data || (data as any).error) return null;
+    return data as any;
+  } catch {
+    return null;
+  }
+}
+
+// Ask the assistant. Prefers the Groq RAG Edge Function (a synthesized, cited
+// answer); if that isn't deployed or errors, degrades to retrieval-only hits.
+// `scopeArg` carries the active sensor-model or category scope.
 async function askAssistant(
   query: string,
-  sensorModelId: string | null,
+  scopeArg: { sensorModelId?: string | null; categoryId?: string | null },
   fallback: () => Promise<Hit[]>,
 ): Promise<AssistantResult> {
   try {
     const { data, error } = await supabase.functions.invoke('chat-answer', {
-      body: { query, sensor_model_id: sensorModelId },
+      body: { query, sensor_model_id: scopeArg.sensorModelId ?? null, category_id: scopeArg.categoryId ?? null },
     });
     if (!error && data && !(data as any).error) {
       // The Edge Function responded — trust it; do NOT fall back to raw
@@ -159,7 +184,10 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
   const [ticket, setTicket] = useState<{ query?: string; description?: string } | null>(null);
   // Active sensor scope: once the operator picks a make & model, all following
   // questions are scoped to it (and shown as a persistent chip) until cleared.
-  const [scope, setScope] = useState<{ modelId: string; generalModelId: string | null; label: string } | null>(null);
+  const [scope, setScope] = useState<{ modelId?: string | null; generalModelId?: string | null; categoryId?: string | null; label: string } | null>(null);
+  // Ordered sensor-type ids from the last AI route call, used to order the
+  // guided picker's type chips (most-likely first).
+  const [routeOrder, setRouteOrder] = useState<string[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
@@ -254,19 +282,33 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
 
     sendingRef.current = true;
     setInput('');
-    const activeScope = scope; // snapshot for this send
+
+    // If we have no scope yet, infer the likely sensor TYPE from the symptom so
+    // the answer is type-relevant and the picker leads with the right type.
+    let activeScope = scope;
+    if (!activeScope) {
+      const r = await routeQuery(q);
+      if (r?.categories?.length) setRouteOrder(r.categories.map((c) => c.id));
+      if (r?.top && r.top.confidence >= 0.6) {
+        activeScope = { categoryId: r.top.id, label: `${r.top.name} sensors` };
+        setScope(activeScope);
+      }
+    }
+
     setTurns((t) => [
       ...t,
       { role: 'user', text: q },
       { role: 'bot', query: q, loading: true, narrowedLabel: activeScope?.label },
     ]);
-    const fallback = activeScope
-      ? () => scopedRetrieve(q, activeScope.modelId, activeScope.generalModelId)
-      : async () => {
-          const { data } = await supabase.rpc('chat_search', { q, p_limit: 5 });
-          return enrichHits((data as Hit[]) ?? []);
-        };
-    const result = await askAssistant(q, activeScope?.modelId ?? null, fallback);
+    const fallback = activeScope?.modelId
+      ? () => scopedRetrieve(q, activeScope!.modelId!, activeScope!.generalModelId ?? null)
+      : activeScope?.categoryId
+        ? () => categoryRetrieve(q, activeScope!.categoryId!)
+        : async () => {
+            const { data } = await supabase.rpc('chat_search', { q, p_limit: 5 });
+            return enrichHits((data as Hit[]) ?? []);
+          };
+    const result = await askAssistant(q, { sensorModelId: activeScope?.modelId ?? null, categoryId: activeScope?.categoryId ?? null }, fallback);
     if (!result.answer && result.hits.length === 0) {
       logUnanswered({ query: q, source: 'chat', sensorModelId: activeScope?.modelId ?? null });
     }
@@ -289,7 +331,7 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
   async function narrowTurn(turnIndex: number, query: string, modelId: string, generalModelId: string | null, label: string) {
     setScope({ modelId, generalModelId, label });
     setTurns((t) => t.map((turn, i) => (i === turnIndex && turn.role === 'bot') ? { ...turn, loading: true } : turn));
-    const result = await askAssistant(query, modelId, () => scopedRetrieve(query, modelId, generalModelId));
+    const result = await askAssistant(query, { sensorModelId: modelId }, () => scopedRetrieve(query, modelId, generalModelId));
     setTurns((t) => t.map((turn, i) => (i === turnIndex && turn.role === 'bot')
       ? { ...turn, loading: false, narrowedLabel: label, answer: result.answer, citations: result.citations, hits: result.hits }
       : turn));
@@ -474,9 +516,15 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
                 </div>
               )}
 
-              {/* Guided sensor picker, under the most recent answered turn (not chit-chat) */}
-              {!turn.loading && !turn.note && i === turns.length - 1 && !turn.narrowedLabel && !scope && (
-                <GuidedNarrow onPick={(modelId, generalModelId, label) => narrowTurn(i, turn.query, modelId, generalModelId, label)} />
+              {/* Guided sensor picker — shown until narrowed to a specific model.
+                  When a TYPE is already inferred/scoped it jumps to the make step. */}
+              {!turn.loading && !turn.note && i === turns.length - 1 && !scope?.modelId && (
+                <GuidedNarrow
+                  key={`gn-${i}-${scope?.categoryId ?? 'none'}`}
+                  initialCategoryId={scope?.categoryId ?? undefined}
+                  orderedCategoryIds={routeOrder}
+                  onPick={(modelId, generalModelId, label) => narrowTurn(i, turn.query, modelId, generalModelId, label)}
+                />
               )}
               </div>
             </div>
@@ -548,9 +596,13 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
 // Guided sensor picker — walks the user type → make → model with quick-reply
 // chips, so they don't need to know (or type) the make/model. Picking a model
 // re-runs their question scoped to that sensor (+ its category guidance).
-function GuidedNarrow({ onPick }: { onPick: (modelId: string, generalModelId: string | null, label: string) => void }) {
-  const [step, setStep] = useState<'category' | 'make' | 'model'>('category');
-  const [catId, setCatId] = useState('');
+function GuidedNarrow({ onPick, initialCategoryId, orderedCategoryIds }: {
+  onPick: (modelId: string, generalModelId: string | null, label: string) => void;
+  initialCategoryId?: string;
+  orderedCategoryIds?: string[];
+}) {
+  const [step, setStep] = useState<'category' | 'make' | 'model'>(initialCategoryId ? 'make' : 'category');
+  const [catId, setCatId] = useState(initialCategoryId ?? '');
   const [makeId, setMakeId] = useState('');
 
   const cats = useQuery({ queryKey: ['cats'], queryFn: async () => (await supabase.from('sensor_categories').select('id,name').order('name')).data ?? [] });
@@ -566,7 +618,15 @@ function GuidedNarrow({ onPick }: { onPick: (modelId: string, generalModelId: st
 
   const allModels = (models.data ?? []) as any[];
   // Only show categories/makes that actually have models.
-  const catsWithModels = (cats.data ?? []).filter((c: any) => allModels.some((m) => m.category_id === c.id));
+  const catsWithModels = (cats.data ?? [])
+    .filter((c: any) => allModels.some((m) => m.category_id === c.id))
+    .sort((a: any, b: any) => {
+      // Order by the AI's type ranking when available, else by name.
+      const ia = orderedCategoryIds?.indexOf(a.id) ?? -1;
+      const ib = orderedCategoryIds?.indexOf(b.id) ?? -1;
+      if (ia !== -1 || ib !== -1) return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+      return 0;
+    });
   const makesInCat = (makes.data ?? []).filter((mk: any) => allModels.some((m) => m.category_id === catId && m.make_id === mk.id));
   const modelsInCatMake = allModels.filter((m) => m.category_id === catId && m.make_id === makeId);
 

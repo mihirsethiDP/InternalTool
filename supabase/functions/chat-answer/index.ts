@@ -98,7 +98,7 @@ Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
   if (req.method !== 'POST') return json({ error: 'method not allowed' }, 405);
 
-  let payload: { query?: string; sensor_model_id?: string | null; mode?: string };
+  let payload: { query?: string; sensor_model_id?: string | null; category_id?: string | null; mode?: string };
   try {
     payload = await req.json();
   } catch {
@@ -107,7 +107,11 @@ Deno.serve(async (req) => {
 
   const query = (payload.query ?? '').trim();
   const sensorModelId = payload.sensor_model_id ?? null;
-  const mode = payload.mode === 'web' ? 'web' : payload.mode === 'classify' ? 'classify' : 'docs';
+  const categoryId = payload.category_id ?? null;
+  const mode = payload.mode === 'web' ? 'web'
+    : payload.mode === 'classify' ? 'classify'
+    : payload.mode === 'route' ? 'route'
+    : 'docs';
 
   const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
   const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
@@ -169,6 +173,47 @@ Deno.serve(async (req) => {
 
   if (!query) return json({ error: 'empty query' }, 400);
 
+  // ---------- ROUTE MODE: infer the sensor TYPE (category) from the symptom ----------
+  // Powers the elicitation layer: rank which sensor categories the user's
+  // free-text problem likely belongs to, so the chatbot can lead with the right
+  // type instead of demanding a make/model.
+  if (mode === 'route') {
+    const supabase = createClient(SUPABASE_URL, SERVICE_KEY);
+    // Only categories that actually have documented models are useful targets.
+    const { data: models } = await supabase
+      .from('sensor_models')
+      .select('sensor_categories(id, name)')
+      .eq('is_general', false);
+    const catMap = new Map<string, string>();
+    for (const m of (models ?? []) as any[]) {
+      const cat = Array.isArray(m.sensor_categories) ? m.sensor_categories[0] : m.sensor_categories;
+      if (cat?.id) catMap.set(cat.id, cat.name);
+    }
+    const cats = [...catMap.entries()].map(([id, name], i) => ({ idx: i + 1, id, name }));
+    if (cats.length === 0) return json({ categories: [], top: null });
+
+    const sys = 'You map a water/wastewater technician\'s free-text symptom to the most likely sensor TYPE, choosing only from the numbered list. Respond with strict JSON only.';
+    const user = [
+      `Sensor types (numbered):\n${cats.map((c) => `${c.idx}. ${c.name}`).join('\n')}`,
+      '',
+      `Technician's message: ${query}`,
+      '',
+      'Return strict JSON: {"ranking": [<type numbers, most likely first, up to 4>], "confidence": <0 to 1 that the top type is correct>}',
+    ].join('\n');
+    const raw = await groqComplete(sys, user, GROQ_API_KEY, MODEL, true);
+    let parsed: any = {};
+    try { parsed = JSON.parse(raw ?? '{}'); } catch { parsed = {}; }
+    const ranking: number[] = Array.isArray(parsed.ranking) ? parsed.ranking : [];
+    const ordered = ranking.map((n) => cats.find((c) => c.idx === Number(n))).filter(Boolean) as { id: string; name: string }[];
+    // Append any categories the model didn't rank, so the full set is still offered.
+    for (const c of cats) if (!ordered.find((o) => o.id === c.id)) ordered.push({ id: c.id, name: c.name });
+    const confidence = Math.max(0, Math.min(1, Number(parsed.confidence) || 0));
+    return json({
+      categories: ordered.map((c) => ({ id: c.id, name: c.name })),
+      top: ordered[0] ? { id: ordered[0].id, name: ordered[0].name, confidence } : null,
+    });
+  }
+
   // ---------- WEB MODE: search the web (Tavily) → synthesize with Groq ----------
   // Used as an explicit fallback when the verified docs don't answer the
   // question. The result is clearly labelled as unverified web content client-side.
@@ -214,6 +259,7 @@ Deno.serve(async (req) => {
   const { data, error } = await supabase.rpc('chat_retrieve', {
     q: query,
     p_sensor_model_id: sensorModelId,
+    p_category_id: categoryId,
     p_limit: 8,
   });
 
