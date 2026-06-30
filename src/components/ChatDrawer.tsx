@@ -474,9 +474,9 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
                 </div>
               )}
 
-              {/* Narrow-to-sensor probe, only under the most recent answered turn (not chit-chat) */}
-              {!turn.loading && !turn.note && i === turns.length - 1 && !turn.narrowedLabel && (
-                <NarrowRow onPick={(modelId, generalModelId, label) => narrowTurn(i, turn.query, modelId, generalModelId, label)} />
+              {/* Guided sensor picker, under the most recent answered turn (not chit-chat) */}
+              {!turn.loading && !turn.note && i === turns.length - 1 && !turn.narrowedLabel && !scope && (
+                <GuidedNarrow onPick={(modelId, generalModelId, label) => narrowTurn(i, turn.query, modelId, generalModelId, label)} />
               )}
               </div>
             </div>
@@ -545,47 +545,72 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
   );
 }
 
-// "Know the sensor?" probe shown under the latest answer.
-function NarrowRow({ onPick }: { onPick: (modelId: string, generalModelId: string | null, label: string) => void }) {
+// Guided sensor picker — walks the user type → make → model with quick-reply
+// chips, so they don't need to know (or type) the make/model. Picking a model
+// re-runs their question scoped to that sensor (+ its category guidance).
+function GuidedNarrow({ onPick }: { onPick: (modelId: string, generalModelId: string | null, label: string) => void }) {
+  const [step, setStep] = useState<'category' | 'make' | 'model'>('category');
+  const [catId, setCatId] = useState('');
   const [makeId, setMakeId] = useState('');
+
+  const cats = useQuery({ queryKey: ['cats'], queryFn: async () => (await supabase.from('sensor_categories').select('id,name').order('name')).data ?? [] });
   const makes = useQuery({ queryKey: ['makes'], queryFn: async () => (await supabase.from('sensor_makes').select('id,name').order('name')).data ?? [] });
   const models = useQuery({
-    queryKey: ['models-by-make', makeId],
-    queryFn: async () => makeId
-      ? (await supabase.from('sensor_models').select('id, model_no, name, category_id').eq('make_id', makeId).eq('is_general', false).order('model_no')).data ?? []
-      : [],
-    enabled: Boolean(makeId),
+    queryKey: ['models-all-guided'],
+    queryFn: async () => (await supabase.from('sensor_models').select('id, model_no, name, category_id, make_id').eq('is_general', false).order('model_no')).data ?? [],
   });
   const generalModels = useQuery({
     queryKey: ['general-models'],
     queryFn: async () => (await supabase.from('sensor_models').select('id, category_id').eq('is_general', true)).data ?? [],
   });
 
-  function pick(modelId: string) {
-    const m = (models.data ?? []).find((x: any) => x.id === modelId);
-    if (!m) return;
-    const makeName = (makes.data ?? []).find((x: any) => x.id === makeId)?.name ?? '';
+  const allModels = (models.data ?? []) as any[];
+  // Only show categories/makes that actually have models.
+  const catsWithModels = (cats.data ?? []).filter((c: any) => allModels.some((m) => m.category_id === c.id));
+  const makesInCat = (makes.data ?? []).filter((mk: any) => allModels.some((m) => m.category_id === catId && m.make_id === mk.id));
+  const modelsInCatMake = allModels.filter((m) => m.category_id === catId && m.make_id === makeId);
+
+  const catName = (id: string) => (cats.data ?? []).find((c: any) => c.id === id)?.name ?? '';
+  const makeName = (id: string) => (makes.data ?? []).find((mk: any) => mk.id === id)?.name ?? '';
+
+  function pickModel(m: any) {
     const generalModelId = (generalModels.data ?? []).find((g: any) => g.category_id === m.category_id)?.id ?? null;
-    onPick(modelId, generalModelId, `${makeName} ${m.model_no || m.name}`.trim());
+    onPick(m.id, generalModelId, `${makeName(makeId)} ${m.model_no || m.name}`.trim());
   }
 
+  const chip = 'tap text-left rounded-lg border border-slate-200 bg-white hover:border-brand-700 hover:text-brand-700 px-3 py-2 text-xs font-medium transition';
+
   return (
-    <div className="bg-gradient-to-br from-brand-50 to-white border border-brand-100 rounded-xl px-3 py-3 space-y-2 shadow-sm">
+    <div className="bg-gradient-to-br from-brand-50 to-white border border-brand-100 rounded-xl px-3 py-3 space-y-2.5 shadow-sm">
       <div className="text-xs text-brand-800 font-semibold inline-flex items-center gap-1.5">
-        <Cpu size={13} /> Know the sensor? Narrow to your make &amp; model
+        <Cpu size={13} />
+        {step === 'category' && 'Which kind of sensor is this?'}
+        {step === 'make' && `Which make? (${catName(catId)})`}
+        {step === 'model' && `Which model? (${makeName(makeId)})`}
       </div>
-      <div className="flex gap-2 flex-wrap">
-        <select aria-label="Make" className="tap flex-1 min-w-[8rem] rounded-lg border border-slate-300 bg-white px-2.5 py-2 text-xs outline-none focus:border-brand-700 focus:ring-2 focus:ring-brand-700/15"
-          value={makeId} onChange={(e) => setMakeId(e.target.value)}>
-          <option value="">Make…</option>
-          {makes.data?.map((m: any) => <option key={m.id} value={m.id}>{m.name}</option>)}
-        </select>
-        <select aria-label="Model" className="tap flex-1 min-w-[8rem] rounded-lg border border-slate-300 bg-white px-2.5 py-2 text-xs outline-none focus:border-brand-700 focus:ring-2 focus:ring-brand-700/15 disabled:opacity-50"
-          value="" onChange={(e) => pick(e.target.value)} disabled={!makeId}>
-          <option value="">{makeId ? 'Model…' : 'Pick a make first'}</option>
-          {models.data?.map((m: any) => <option key={m.id} value={m.id}>{m.model_no || m.name}</option>)}
-        </select>
+
+      {(step === 'make' || step === 'model') && (
+        <button
+          onClick={() => { if (step === 'model') { setStep('make'); setMakeId(''); } else { setStep('category'); setCatId(''); } }}
+          className="inline-flex items-center gap-1 text-[11px] text-slate-500 hover:text-brand-700"
+        >
+          <ArrowRight size={11} className="rotate-180" /> Back
+        </button>
+      )}
+
+      <div className="grid grid-cols-2 gap-1.5">
+        {step === 'category' && catsWithModels.map((c: any) => (
+          <button key={c.id} className={chip} onClick={() => { setCatId(c.id); setStep('make'); }}>{c.name}</button>
+        ))}
+        {step === 'make' && makesInCat.map((mk: any) => (
+          <button key={mk.id} className={chip} onClick={() => { setMakeId(mk.id); setStep('model'); }}>{mk.name}</button>
+        ))}
+        {step === 'model' && modelsInCatMake.map((m: any) => (
+          <button key={m.id} className={chip} onClick={() => pickModel(m)}>{m.model_no || m.name}</button>
+        ))}
       </div>
+      {step === 'make' && makesInCat.length === 0 && <div className="text-xs text-slate-500">No makes catalogued for that type yet.</div>}
+      {step === 'model' && modelsInCatMake.length === 0 && <div className="text-xs text-slate-500">No models catalogued for that make yet.</div>}
     </div>
   );
 }
