@@ -15,6 +15,7 @@ import { SECTION_LABEL, SECTION_ORDER, parseSections, CHECKLIST_SECTIONS } from 
 import { renderMarkdown, normalizeAnswerSteps } from '../lib/markdown';
 import RevisionHistory from '../components/RevisionHistory';
 import AnswerFeedback from '../components/AnswerFeedback';
+import RoutingRulesPanel from '../components/RoutingRulesPanel';
 import type { SubmissionSection } from '../lib/types';
 
 export const SECTION_ICON: Record<SubmissionSection, React.ReactNode> = {
@@ -302,6 +303,11 @@ export default function ConsolidatedViewer() {
           canFocus={matchPresent}
           onToggleFocus={() => setFocusMode((v) => !v)}
         />
+      )}
+
+      {/* Router layer (admins): manage problem→procedure rules for this sensor */}
+      {isAdmin(profile) && cdoc.data.sensor_model_id && (
+        <RoutingRulesPanel sensorModelId={cdoc.data.sensor_model_id} />
       )}
 
       {/* Sticky toolbar */}

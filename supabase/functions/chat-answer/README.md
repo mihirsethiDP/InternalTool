@@ -19,6 +19,9 @@ This one function serves three modes (via `mode` in the request body):
   (category) so the chatbot can lead with the right type instead of demanding a
   make/model. Groq only. (`docs` mode also accepts `category_id` for type-level
   answers — needs migration 029.)
+- `generate-rules` — given a `sensor_model_id`, drafts problem→procedure routing
+  rules from that sensor's approved procedures and stores them as `proposed` for
+  an admin to approve. Groq only. Needs migration 030 (`routing_rules`).
 
 Re-deploy this function whenever any mode changes.
 

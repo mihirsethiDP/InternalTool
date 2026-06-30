@@ -111,6 +111,7 @@ Deno.serve(async (req) => {
   const mode = payload.mode === 'web' ? 'web'
     : payload.mode === 'classify' ? 'classify'
     : payload.mode === 'route' ? 'route'
+    : payload.mode === 'generate-rules' ? 'generate-rules'
     : 'docs';
 
   const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
@@ -169,6 +170,61 @@ Deno.serve(async (req) => {
       confidence: Math.max(0, Math.min(1, Number(parsed.confidence) || 0)),
       reason: String(parsed.reason ?? '').slice(0, 300),
     });
+  }
+
+  // ---------- GENERATE-RULES MODE: propose routing rules from a sensor's procedures ----------
+  // AI drafts problem→procedure rules for the router layer; stored as 'proposed'
+  // for an admin to approve. No query needed.
+  if (mode === 'generate-rules') {
+    if (!sensorModelId) return json({ error: 'sensor_model_id required' }, 400);
+    const supabase = createClient(SUPABASE_URL, SERVICE_KEY);
+    const { data: cdoc } = await supabase
+      .from('consolidated_docs')
+      .select('content_markdown, sensor_models(model_no, name, sensor_makes(name), sensor_categories(name))')
+      .eq('sensor_model_id', sensorModelId)
+      .maybeSingle();
+    const md = (cdoc as any)?.content_markdown ?? '';
+    const KEYS = Object.keys(SECTION_LABEL);
+    const present = KEYS.filter((k) => new RegExp(`^##\\s+${k}\\b`, 'im').test(md));
+    if (present.length === 0) return json({ rules: [], note: 'no procedures documented yet' });
+
+    const sm = (cdoc as any)?.sensor_models;
+    const smObj = Array.isArray(sm) ? sm[0] : sm;
+    const mk = smObj ? (Array.isArray(smObj.sensor_makes) ? smObj.sensor_makes[0] : smObj.sensor_makes) : null;
+    const label = `${mk?.name ?? ''} ${smObj?.model_no || smObj?.name || ''}`.trim() || 'this sensor';
+
+    const sys = 'You build troubleshooting ROUTING RULES for a water/wastewater sensor. Given the sensor\'s documented procedure sections, list common problem statements a technician might report, each mapped to the section(s) that resolve it. Respond with strict JSON only.';
+    const user = [
+      `Sensor: ${label}`,
+      `Allowed section keys (use only these): ${present.join(', ')}`,
+      '',
+      `Procedures (markdown):\n${md.slice(0, 6000)}`,
+      '',
+      'Return strict JSON: {"rules":[{"problem":"<short symptom as a technician would phrase it>","aliases":["<alternate phrasing>"],"sections":["<section key from the allowed list>"],"clarifying_question":"<a question to disambiguate, or empty string>"}]}. Provide 5 to 10 rules. Every section must be from the allowed keys.',
+    ].join('\n');
+
+    const raw = await groqComplete(sys, user, GROQ_API_KEY, MODEL, true);
+    let parsed: any = {};
+    try { parsed = JSON.parse(raw ?? '{}'); } catch { parsed = {}; }
+    let rules = (Array.isArray(parsed.rules) ? parsed.rules : []).map((r: any) => ({
+      problem: String(r.problem ?? '').slice(0, 200).trim(),
+      aliases: Array.isArray(r.aliases) ? r.aliases.map((a: any) => String(a).slice(0, 200).trim()).filter(Boolean).slice(0, 5) : [],
+      sections: Array.isArray(r.sections) ? r.sections.filter((s: any) => present.includes(s)) : [],
+      clarifying_question: String(r.clarifying_question ?? '').slice(0, 300).trim() || null,
+    })).filter((r: any) => r.problem && r.sections.length > 0).slice(0, 12);
+
+    // Replace any un-reviewed proposals for this sensor with the fresh batch.
+    await supabase.from('routing_rules').delete().eq('sensor_model_id', sensorModelId).eq('status', 'proposed');
+    if (rules.length) {
+      await supabase.from('routing_rules').insert(rules.map((r: any) => ({
+        sensor_model_id: sensorModelId, problem: r.problem, aliases: r.aliases,
+        sections: r.sections, clarifying_question: r.clarifying_question, status: 'proposed', source: 'ai',
+      })));
+    }
+    const { data: fresh } = await supabase
+      .from('routing_rules').select('*')
+      .eq('sensor_model_id', sensorModelId).eq('status', 'proposed').order('created_at');
+    return json({ rules: fresh ?? [] });
   }
 
   if (!query) return json({ error: 'empty query' }, 400);
