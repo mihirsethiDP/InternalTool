@@ -75,6 +75,16 @@ async function enrichHits(hits: Hit[]): Promise<Hit[]> {
   return hits.map((h) => ({ ...h, sectionBody: sectionsById.get(h.document_id)?.[h.section] || '' }));
 }
 
+// Replace the most-recent loading bot turn with a finished one.
+function fillLoadingTurn(turns: Turn[], replacement: Turn): Turn[] {
+  const copy = [...turns];
+  for (let i = copy.length - 1; i >= 0; i--) {
+    const t = copy[i];
+    if (t.role === 'bot' && t.loading) { copy[i] = replacement; break; }
+  }
+  return copy;
+}
+
 // Retrieval scoped to a specific model (+ its category's general guidance),
 // deduped — used for the make/model scope, both for the retrieval fallback and
 // the narrow-this-turn action.
@@ -285,55 +295,51 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
 
     sendingRef.current = true;
     setInput('');
-
-    // If we have no scope yet, infer the likely sensor TYPE from the symptom so
-    // the answer is type-relevant and the picker leads with the right type.
     let activeScope = scope;
-    if (!activeScope) {
-      const r = await routeQuery(q);
-      if (r?.categories?.length) setRouteOrder(r.categories.map((c) => c.id));
-      if (r?.top && r.top.confidence >= 0.6) {
-        // Resolve the category's general model so type-level routing rules apply.
-        const { data: gm } = await supabase.from('sensor_models').select('id').eq('is_general', true).eq('category_id', r.top.id).maybeSingle();
-        activeScope = { categoryId: r.top.id, generalModelId: (gm as any)?.id ?? null, label: `${r.top.name} sensors` };
-        setScope(activeScope);
-      }
-    }
-
-    setTurns((t) => [
-      ...t,
-      { role: 'user', text: q },
-      { role: 'bot', query: q, loading: true, narrowedLabel: activeScope?.label },
-    ]);
-    const fallback = activeScope?.modelId
-      ? () => scopedRetrieve(q, activeScope!.modelId!, activeScope!.generalModelId ?? null)
-      : activeScope?.categoryId
-        ? () => categoryRetrieve(q, activeScope!.categoryId!)
-        : async () => {
-            const { data } = await supabase.rpc('chat_search', { q, p_limit: 5 });
-            return enrichHits((data as Hit[]) ?? []);
-          };
-    // Router: match the problem to an approved rule for the sensor(s) in scope.
-    const candidateIds = [activeScope?.modelId, activeScope?.generalModelId].filter(Boolean) as string[];
-    const [result, routed] = await Promise.all([
-      askAssistant(q, { sensorModelId: activeScope?.modelId ?? null, categoryId: activeScope?.categoryId ?? null }, fallback),
-      candidateIds.length ? matchRule(q, candidateIds) : Promise.resolve(null),
-    ]);
-    if (!result.answer && result.hits.length === 0) {
-      logUnanswered({ query: q, source: 'chat', sensorModelId: activeScope?.modelId ?? null });
-    }
-    setTurns((t) => {
-      const copy = [...t];
-      for (let i = copy.length - 1; i >= 0; i--) {
-        const turn = copy[i];
-        if (turn.role === 'bot' && turn.loading) {
-          copy[i] = { role: 'bot', query: q, loading: false, narrowedLabel: activeScope?.label, answer: result.answer, citations: result.citations, hits: result.hits, routed };
-          break;
+    try {
+      // If we have no scope yet, infer the likely sensor TYPE from the symptom so
+      // the answer is type-relevant and the picker leads with the right type.
+      if (!activeScope) {
+        const r = await routeQuery(q);
+        if (r?.categories?.length) setRouteOrder(r.categories.map((c) => c.id));
+        if (r?.top && r.top.confidence >= 0.6) {
+          // Resolve the category's general model so type-level routing rules apply.
+          const { data: gm } = await supabase.from('sensor_models').select('id').eq('is_general', true).eq('category_id', r.top.id).maybeSingle();
+          activeScope = { categoryId: r.top.id, generalModelId: (gm as any)?.id ?? null, label: `${r.top.name} sensors` };
+          setScope(activeScope);
         }
       }
-      return copy;
-    });
-    sendingRef.current = false;
+
+      setTurns((t) => [
+        ...t,
+        { role: 'user', text: q },
+        { role: 'bot', query: q, loading: true, narrowedLabel: activeScope?.label },
+      ]);
+      const fallback = activeScope?.modelId
+        ? () => scopedRetrieve(q, activeScope!.modelId!, activeScope!.generalModelId ?? null)
+        : activeScope?.categoryId
+          ? () => categoryRetrieve(q, activeScope!.categoryId!)
+          : async () => {
+              const { data } = await supabase.rpc('chat_search', { q, p_limit: 5 });
+              return enrichHits((data as Hit[]) ?? []);
+            };
+      // Router: match the problem to an approved rule for the sensor(s) in scope.
+      const candidateIds = [activeScope?.modelId, activeScope?.generalModelId].filter(Boolean) as string[];
+      const [result, routed] = await Promise.all([
+        askAssistant(q, { sensorModelId: activeScope?.modelId ?? null, categoryId: activeScope?.categoryId ?? null }, fallback),
+        candidateIds.length ? matchRule(q, candidateIds) : Promise.resolve(null),
+      ]);
+      if (!result.answer && result.hits.length === 0) {
+        logUnanswered({ query: q, source: 'chat', sensorModelId: activeScope?.modelId ?? null });
+      }
+      setTurns((t) => fillLoadingTurn(t, { role: 'bot', query: q, loading: false, narrowedLabel: activeScope?.label, answer: result.answer, citations: result.citations, hits: result.hits, routed }));
+    } catch (e) {
+      // Never leave the chat frozen — surface a recoverable not-found turn.
+      console.warn('chat send failed', e);
+      setTurns((t) => fillLoadingTurn(t, { role: 'bot', query: q, loading: false, narrowedLabel: activeScope?.label, answer: null, citations: [], hits: [] }));
+    } finally {
+      sendingRef.current = false;
+    }
   }
 
   // Re-scope a bot turn to a specific sensor (+ its category general guidance),

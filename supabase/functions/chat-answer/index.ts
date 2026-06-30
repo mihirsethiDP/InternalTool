@@ -102,7 +102,7 @@ Deno.serve(async (req) => {
     return json({ error: 'invalid JSON body' }, 400);
   }
 
-  const query = (payload.query ?? '').trim();
+  const query = (payload.query ?? '').trim().slice(0, 2000); // cap to protect the token budget
   const sensorModelId = payload.sensor_model_id ?? null;
   const categoryId = payload.category_id ?? null;
   const mode = payload.mode === 'web' ? 'web'
@@ -127,11 +127,12 @@ Deno.serve(async (req) => {
     const title = ((payload as any).title ?? '').toString().slice(0, 300).trim();
     if (!text && !title) return json({ error: 'no text to classify' }, 400);
 
-    const { data: models } = await supabase
+    const { data: models, error: mErr } = await supabase
       .from('sensor_models')
       .select('id, model_no, name, sensor_makes(name), sensor_categories(id, name)')
       .eq('is_general', false)
       .limit(300);
+    if (mErr) { console.error('classify catalog error', mErr); return json({ error: 'catalog lookup failed' }, 500); }
 
     const list = (models ?? []).map((m: any, i: number) => {
       const mk = Array.isArray(m.sensor_makes) ? m.sensor_makes[0] : m.sensor_makes;
@@ -175,11 +176,22 @@ Deno.serve(async (req) => {
   if (mode === 'generate-rules') {
     if (!sensorModelId) return json({ error: 'sensor_model_id required' }, 400);
     const supabase = createClient(SUPABASE_URL, SERVICE_KEY);
-    const { data: cdoc } = await supabase
+
+    // This mode WRITES (deletes + inserts proposed rules) via the service role,
+    // which bypasses RLS — so enforce admin here, since verify_jwt only proves
+    // authentication, not role.
+    const token = (req.headers.get('Authorization') ?? '').replace(/^Bearer\s+/i, '');
+    const { data: who } = await supabase.auth.getUser(token);
+    if (!who?.user) return json({ error: 'unauthorized' }, 401);
+    const { data: prof } = await supabase.from('profiles').select('role').eq('id', who.user.id).maybeSingle();
+    if ((prof as any)?.role !== 'admin') return json({ error: 'admin only' }, 403);
+
+    const { data: cdoc, error: cErr } = await supabase
       .from('consolidated_docs')
       .select('content_markdown, sensor_models(model_no, name, sensor_makes(name), sensor_categories(name))')
       .eq('sensor_model_id', sensorModelId)
       .maybeSingle();
+    if (cErr) { console.error('generate-rules doc lookup error', cErr); return json({ error: 'lookup failed' }, 500); }
     const md = (cdoc as any)?.content_markdown ?? '';
     const KEYS = Object.keys(SECTION_LABEL);
     const present = KEYS.filter((k) => new RegExp(`^##\\s+${k}\\b`, 'im').test(md));
@@ -210,14 +222,18 @@ Deno.serve(async (req) => {
       clarifying_question: String(r.clarifying_question ?? '').slice(0, 300).trim() || null,
     })).filter((r: any) => r.problem && r.sections.length > 0).slice(0, 12);
 
-    // Replace any un-reviewed proposals for this sensor with the fresh batch.
-    await supabase.from('routing_rules').delete().eq('sensor_model_id', sensorModelId).eq('status', 'proposed');
-    if (rules.length) {
-      await supabase.from('routing_rules').insert(rules.map((r: any) => ({
-        sensor_model_id: sensorModelId, problem: r.problem, aliases: r.aliases,
-        sections: r.sections, clarifying_question: r.clarifying_question, status: 'proposed', source: 'ai',
-      })));
-    }
+    // Insert the fresh batch FIRST, then delete the older proposals — so a
+    // failed insert never leaves the sensor with no proposals (avoids data loss).
+    if (rules.length === 0) return json({ rules: [], note: 'no rules generated' });
+    const stamp = new Date().toISOString();
+    const { error: insErr } = await supabase.from('routing_rules').insert(rules.map((r: any) => ({
+      sensor_model_id: sensorModelId, problem: r.problem, aliases: r.aliases,
+      sections: r.sections, clarifying_question: r.clarifying_question, status: 'proposed', source: 'ai', created_at: stamp,
+    })));
+    if (insErr) { console.error('generate-rules insert error', insErr); return json({ error: 'could not save rules' }, 502); }
+    // Remove the PREVIOUS proposals (created before this batch's timestamp).
+    await supabase.from('routing_rules').delete()
+      .eq('sensor_model_id', sensorModelId).eq('status', 'proposed').lt('created_at', stamp);
     const { data: fresh } = await supabase
       .from('routing_rules').select('*')
       .eq('sensor_model_id', sensorModelId).eq('status', 'proposed').order('created_at');
@@ -233,10 +249,12 @@ Deno.serve(async (req) => {
   if (mode === 'route') {
     const supabase = createClient(SUPABASE_URL, SERVICE_KEY);
     // Only categories that actually have documented models are useful targets.
-    const { data: models } = await supabase
+    const { data: models, error: rErr } = await supabase
       .from('sensor_models')
       .select('sensor_categories(id, name)')
-      .eq('is_general', false);
+      .eq('is_general', false)
+      .limit(2000);
+    if (rErr) { console.error('route catalog error', rErr); return json({ error: 'catalog lookup failed' }, 500); }
     const catMap = new Map<string, string>();
     for (const m of (models ?? []) as any[]) {
       const cat = Array.isArray(m.sensor_categories) ? m.sensor_categories[0] : m.sensor_categories;

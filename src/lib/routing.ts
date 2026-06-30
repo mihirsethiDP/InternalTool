@@ -38,6 +38,7 @@ export function matchScore(qt: string[], phrase: string): number {
 const THRESHOLD = 0.34;
 
 export async function matchRule(query: string, modelIds: string[]): Promise<RouteMatch | null> {
+  try {
   const ids = [...new Set(modelIds.filter(Boolean))];
   if (ids.length === 0) return null;
   const { data } = await supabase
@@ -59,4 +60,8 @@ export async function matchRule(query: string, modelIds: string[]): Promise<Rout
 
   const { data: cd } = await supabase.from('consolidated_docs').select('id').eq('sensor_model_id', best.sensor_model_id).maybeSingle();
   return { rule: best, docId: (cd as any)?.id ?? null };
+  } catch (e) {
+    console.warn('matchRule failed', e);
+    return null;
+  }
 }
