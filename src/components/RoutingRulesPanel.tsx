@@ -1,21 +1,19 @@
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Route, Sparkles, Check, X, Loader2, ChevronDown, Trash2 } from 'lucide-react';
+import { Route, Sparkles, Check, X, Loader2, Trash2, RefreshCw } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { SECTION_LABEL } from '../lib/consolidated';
 import type { SubmissionSection } from '../lib/types';
 
-// Admin-only: the "router layer" management for one sensor. Generate AI-proposed
-// problem→procedure rules, then approve/reject them. Approved rules are what the
-// chatbot routes on (slice 3b).
+// Admin-only "router layer" management for one sensor. Always visible (not
+// hidden behind a dropdown) and framed as an action item: generate AI-proposed
+// problem→procedure rules, then approve/reject. Approved rules drive the chatbot.
 export default function RoutingRulesPanel({ sensorModelId }: { sensorModelId: string }) {
   const qc = useQueryClient();
-  const [open, setOpen] = useState(false);
   const [gen, setGen] = useState(false);
 
   const rules = useQuery({
     queryKey: ['routing-rules', sensorModelId],
-    enabled: open,
     queryFn: async () => (await supabase
       .from('routing_rules').select('*')
       .eq('sensor_model_id', sensorModelId)
@@ -42,47 +40,59 @@ export default function RoutingRulesPanel({ sensorModelId }: { sensorModelId: st
   const list = (rules.data ?? []) as any[];
   const proposed = list.filter((r) => r.status === 'proposed');
   const approved = list.filter((r) => r.status === 'approved');
+  const needsAction = !rules.isLoading && (list.length === 0 || proposed.length > 0);
 
   return (
-    <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
-      <button onClick={() => setOpen((v) => !v)} className="w-full flex items-center gap-2.5 px-4 sm:px-5 py-3 text-left hover:bg-slate-50 transition">
-        <span className="bg-brand-700 text-white rounded-lg w-7 h-7 flex items-center justify-center shrink-0"><Route size={15} /></span>
-        <span className="text-sm font-semibold text-slate-900">Diagnostic routing rules</span>
-        <span className="badge-blue text-[10px]">{approved.length} live{proposed.length ? ` · ${proposed.length} to review` : ''}</span>
-        <ChevronDown size={16} className={`ml-auto text-slate-400 transition ${open ? 'rotate-180' : ''}`} />
-      </button>
+    <div className={`rounded-2xl border overflow-hidden shadow-sm ${needsAction ? 'border-brand-300 ring-1 ring-brand-200' : 'border-slate-200'}`}>
+      {/* Header — always shows the primary action */}
+      <div className="bg-gradient-to-r from-brand-700 to-brand-900 text-white px-4 sm:px-5 py-3.5 flex items-center gap-3 flex-wrap">
+        <span className="bg-white/15 ring-1 ring-white/20 rounded-lg w-8 h-8 flex items-center justify-center shrink-0"><Route size={16} /></span>
+        <div className="min-w-0 flex-1">
+          <div className="text-sm font-semibold tracking-tight">Diagnostic routing</div>
+          <div className="text-[11px] text-white/70">
+            {approved.length} live rule{approved.length === 1 ? '' : 's'}{proposed.length ? ` · ${proposed.length} awaiting review` : ''}
+          </div>
+        </div>
+        <button onClick={generate} disabled={gen}
+          className="tap inline-flex items-center gap-1.5 rounded-lg bg-white text-brand-800 px-3 py-2 text-sm font-semibold hover:bg-slate-100 transition disabled:opacity-60 shrink-0">
+          {gen ? <Loader2 size={14} className="animate-spin" /> : list.length === 0 ? <Sparkles size={14} /> : <RefreshCw size={14} />}
+          {gen ? 'Generating…' : list.length === 0 ? 'Generate with AI' : 'Regenerate'}
+        </button>
+      </div>
 
-      {open && (
-        <div className="px-4 sm:px-5 pb-4 space-y-3 border-t border-slate-100 pt-3">
-          <div className="flex items-center justify-between gap-3 flex-wrap">
-            <p className="text-xs text-slate-500 max-w-md">Maps a stated problem → the procedure(s) that fix it. AI proposes from this sensor’s approved procedures; you approve what goes live.</p>
-            <button onClick={generate} disabled={gen} className="tap inline-flex items-center gap-1.5 rounded-lg bg-gradient-to-br from-brand-600 to-brand-800 text-white px-3 py-1.5 text-xs font-semibold hover:from-brand-700 transition disabled:opacity-60">
-              {gen ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />} {gen ? 'Generating…' : 'Generate with AI'}
+      <div className="bg-white px-4 sm:px-5 py-4 space-y-3">
+        <p className="text-xs text-slate-500">
+          Maps a stated problem → the procedure(s) that fix it. AI proposes from this sensor’s approved procedures; you approve what goes live for the assistant.
+        </p>
+
+        {rules.isLoading ? (
+          <div className="text-sm text-slate-400">Loading…</div>
+        ) : list.length === 0 ? (
+          <div className="rounded-xl border-2 border-dashed border-brand-200 bg-brand-50/50 p-5 text-center">
+            <Sparkles size={22} className="text-brand-600 mx-auto mb-2" />
+            <div className="text-sm font-medium text-slate-800">No routing rules yet</div>
+            <div className="text-xs text-slate-500 mt-1 mb-3 max-w-sm mx-auto">Generate problem→procedure rules from this sensor’s documented procedures, then approve the ones that look right.</div>
+            <button onClick={generate} disabled={gen} className="tap inline-flex items-center gap-1.5 rounded-lg bg-gradient-to-br from-brand-600 to-brand-800 text-white px-4 py-2 text-sm font-semibold hover:from-brand-700 transition disabled:opacity-60">
+              {gen ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />} {gen ? 'Generating…' : 'Generate routing rules'}
             </button>
           </div>
-
-          {rules.isLoading ? (
-            <div className="text-sm text-slate-400">Loading…</div>
-          ) : list.length === 0 ? (
-            <div className="text-sm text-slate-500 bg-slate-50 rounded-lg p-3 text-center">No rules yet. Click <strong>Generate with AI</strong> to propose some from this sensor’s procedures.</div>
-          ) : (
-            <>
-              {proposed.length > 0 && (
-                <div className="space-y-2">
-                  <div className="text-[11px] uppercase tracking-wide font-semibold text-amber-700">Proposed — review</div>
-                  {proposed.map((r) => <RuleRow key={r.id} r={r} onApprove={() => setStatus(r.id, 'approved')} onReject={() => setStatus(r.id, 'rejected')} />)}
-                </div>
-              )}
-              {approved.length > 0 && (
-                <div className="space-y-2">
-                  <div className="text-[11px] uppercase tracking-wide font-semibold text-emerald-700">Live rules</div>
-                  {approved.map((r) => <RuleRow key={r.id} r={r} approved onRemove={() => remove(r.id)} />)}
-                </div>
-              )}
-            </>
-          )}
-        </div>
-      )}
+        ) : (
+          <>
+            {proposed.length > 0 && (
+              <div className="space-y-2">
+                <div className="text-[11px] uppercase tracking-wide font-semibold text-amber-700">Proposed — review &amp; approve</div>
+                {proposed.map((r) => <RuleRow key={r.id} r={r} onApprove={() => setStatus(r.id, 'approved')} onReject={() => setStatus(r.id, 'rejected')} />)}
+              </div>
+            )}
+            {approved.length > 0 && (
+              <div className="space-y-2">
+                <div className="text-[11px] uppercase tracking-wide font-semibold text-emerald-700">Live rules</div>
+                {approved.map((r) => <RuleRow key={r.id} r={r} approved onRemove={() => remove(r.id)} />)}
+              </div>
+            )}
+          </>
+        )}
+      </div>
     </div>
   );
 }
