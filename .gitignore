@@ -9,6 +9,7 @@ _tmp
 .vscode
 .idea
 .claude/
+data-backup-*.json
 
 # Unrelated separate project living in this directory — never track it here
 illuminati-estates-redesign/
