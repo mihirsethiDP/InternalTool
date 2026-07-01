@@ -23,7 +23,7 @@ import type { SubmissionSection } from '../lib/types';
  */
 export default function ConsolidatedEditor() {
   const { id } = useParams();
-  const { profile } = useAuth();
+  const { profile, loading } = useAuth();
   const nav = useNavigate();
   const qc = useQueryClient();
 
@@ -73,7 +73,7 @@ export default function ConsolidatedEditor() {
     }
   }
 
-  if (cdoc.isLoading) return <div className="muted p-6">Loading…</div>;
+  if (loading || cdoc.isLoading) return <div className="muted p-6">Loading…</div>;
   if (!isAdmin(profile)) return <div className="card text-sm">Admins only.</div>;
   if (!cdoc.data) return <div className="card text-sm">Consolidated document not found.</div>;
 

@@ -10,7 +10,7 @@ import InsightsPanel from '../components/InsightsPanel';
 type AdminTab = 'insights' | 'review' | 'consolidated' | 'categories' | 'users' | 'types';
 
 export default function Admin() {
-  const { profile } = useAuth();
+  const { profile, loading } = useAuth();
   const qc = useQueryClient();
   const [tab, setTab] = useState<AdminTab>('insights');
 
@@ -27,6 +27,9 @@ export default function Admin() {
     refetchInterval: 30_000,
   });
 
+  if (loading) {
+    return <div className="card text-sm text-slate-500">Loading…</div>;
+  }
   if (!isAdmin(profile)) {
     return <div className="card text-sm">Admin only.</div>;
   }

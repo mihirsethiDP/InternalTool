@@ -299,6 +299,15 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
     sendingRef.current = true;
     setInput('');
     let activeScope = scope;
+
+    // Echo the user's message + a loading placeholder IMMEDIATELY — before any
+    // network work (routing/retrieval) — so the typed message never lags behind
+    // the ~1s routing call. The label is filled in once routing resolves.
+    setTurns((t) => [
+      ...t,
+      { role: 'user', text: q },
+      { role: 'bot', query: q, loading: true, narrowedLabel: activeScope?.label },
+    ]);
     try {
       // If we have no scope yet, infer the likely sensor TYPE from the symptom so
       // the answer is type-relevant and the picker leads with the right type.
@@ -313,11 +322,6 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
         }
       }
 
-      setTurns((t) => [
-        ...t,
-        { role: 'user', text: q },
-        { role: 'bot', query: q, loading: true, narrowedLabel: activeScope?.label },
-      ]);
       const fallback = activeScope?.modelId
         ? () => scopedRetrieve(q, activeScope!.modelId!, activeScope!.generalModelId ?? null)
         : activeScope?.categoryId

@@ -17,7 +17,7 @@ import { classifyDoc, MISMATCH_CONFIDENCE } from '../lib/classify';
    List page — /review
 ========================================================= */
 export function ReviewQueueList() {
-  const { profile } = useAuth();
+  const { profile, loading } = useAuth();
   const [status, setStatus] = useState<'pending' | 'changes_requested' | 'approved' | 'rejected' | 'all'>('pending');
 
   const subs = useQuery({
@@ -46,6 +46,7 @@ export function ReviewQueueList() {
     },
   });
 
+  if (loading) return <div className="card text-sm text-slate-500">Loading…</div>;
   if (!isAdmin(profile)) {
     return <div className="card text-sm">Admins only.</div>;
   }
@@ -104,7 +105,7 @@ function StatusPill({ s }: { s: string }) {
 ========================================================= */
 export function ReviewQueueDetail() {
   const { id } = useParams();
-  const { profile } = useAuth();
+  const { profile, loading } = useAuth();
   const nav = useNavigate();
   const qc = useQueryClient();
 
@@ -165,6 +166,7 @@ export function ReviewQueueDetail() {
   }
 
   const s = sub.data;
+  if (loading) return <div className="card text-sm text-slate-500">Loading…</div>;
   if (!isAdmin(profile)) return <div className="card text-sm">Admins only.</div>;
   if (sub.isLoading) return <div className="muted">Loading…</div>;
   if (!s) return <div className="card text-sm">Submission not found.</div>;
