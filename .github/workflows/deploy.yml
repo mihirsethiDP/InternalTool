@@ -10,9 +10,13 @@ permissions:
   pages: write
   id-token: write
 
+# Do NOT cancel an in-progress deploy: aborting deploy-pages mid-flight can leave
+# the github-pages environment with a stuck/pending deployment that makes every
+# later run poll until "Timeout reached, aborting!". Queue instead (GitHub's own
+# recommended Pages setting).
 concurrency:
   group: pages
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -36,9 +40,13 @@ jobs:
   deploy:
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - id: deployment
         uses: actions/deploy-pages@v4
+        with:
+          # Give GitHub's Pages backend more headroom (default 600000 = 10 min).
+          timeout: 900000
