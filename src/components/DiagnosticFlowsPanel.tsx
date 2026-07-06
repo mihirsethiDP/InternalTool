@@ -329,44 +329,81 @@ function NodeRow({ n, depth, editing, onText }: { n: FlowNode; depth: number; ed
 }
 
 // ---------- escalation directory ----------
+// The right person differs per plant (electrician, equipment access) and per
+// sensor make (vendor support), so a skill can have many entries: a global
+// default, per-plant people, and per-make vendor contacts.
 function EscalationContactsCard() {
   const qc = useQueryClient();
   const contacts = useQuery({
     queryKey: ['escalation-contacts'],
-    queryFn: async () => (await supabase.from('escalation_contacts').select('*').order('sort_order')).data ?? [],
+    queryFn: async () => (await supabase
+      .from('escalation_contacts')
+      .select('*, plants(name), sensor_makes(name)')
+      .order('sort_order')).data ?? [],
   });
+  const plants = useQuery({ queryKey: ['plant-options'], queryFn: async () => (await supabase.from('plants').select('id,name').order('name')).data ?? [] });
+  const makes = useQuery({ queryKey: ['makes'], queryFn: async () => (await supabase.from('sensor_makes').select('id,name').order('name')).data ?? [] });
 
+  const refresh = () => qc.invalidateQueries({ queryKey: ['escalation-contacts'] });
   async function patch(id: string, fields: Partial<EscalationContact>) {
     await supabase.from('escalation_contacts').update(fields).eq('id', id);
-    qc.invalidateQueries({ queryKey: ['escalation-contacts'] });
+    refresh();
   }
+  async function remove(id: string) {
+    await supabase.from('escalation_contacts').delete().eq('id', id);
+    refresh();
+  }
+
+  const list = (contacts.data ?? []) as any[];
+  // Group entries by skill; keep the seed sort_order for group order.
+  const groups = new Map<string, any[]>();
+  for (const c of list) { if (!groups.has(c.skill_key)) groups.set(c.skill_key, []); groups.get(c.skill_key)!.push(c); }
 
   return (
     <div className="rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
       <div className="bg-slate-50 px-4 sm:px-5 py-3 border-b border-slate-200">
         <div className="text-sm font-semibold text-slate-800 flex items-center gap-2"><PhoneCall size={14} className="text-slate-500" /> Escalation directory</div>
-        <div className="text-[11px] text-slate-500 mt-0.5">Who Dr. Paani points to when a flow needs outside help. Fill in the person + how to reach them.</div>
+        <div className="text-[11px] text-slate-500 mt-0.5">
+          Who Dr. Paani points to when a flow needs outside help. Add a default per skill, then plant-specific people or make-specific vendor contacts where they differ.
+        </div>
       </div>
       <div className="bg-white divide-y divide-slate-100">
-        {(contacts.data ?? []).map((c: any) => <ContactRow key={c.id} c={c} onPatch={patch} />)}
-        {!contacts.isLoading && (contacts.data ?? []).length === 0 && (
-          <div className="px-4 py-4 text-sm text-slate-400">No skills defined. Run migration 034 to seed the directory.</div>
+        {[...groups.entries()].map(([skill, rows]) => (
+          <div key={skill} className="px-4 sm:px-5 py-3 space-y-1.5">
+            <div className="flex items-baseline gap-2">
+              <div className="text-xs font-semibold text-slate-800">{rows[0]?.label ?? skill}</div>
+              <div className="font-mono text-[10px] text-slate-400">{skill}</div>
+            </div>
+            {rows.map((c) => <ContactRow key={c.id} c={c} onPatch={patch} onRemove={() => remove(c.id)} />)}
+          </div>
+        ))}
+        {!contacts.isLoading && list.length === 0 && (
+          <div className="px-4 py-4 text-sm text-slate-400">No entries yet. If the seeded skills aren’t showing, make sure migrations 034 and 035 have been run.</div>
         )}
+        <AddContactRow
+          skills={[...groups.entries()].map(([k, rows]) => ({ key: k, label: rows[0]?.label ?? k }))}
+          plants={(plants.data ?? []) as any[]}
+          makes={(makes.data ?? []) as any[]}
+          onAdded={refresh}
+        />
       </div>
     </div>
   );
 }
 
-function ContactRow({ c, onPatch }: { c: any; onPatch: (id: string, f: Partial<EscalationContact>) => Promise<void> }) {
+function ContactRow({ c, onPatch, onRemove }: { c: any; onPatch: (id: string, f: Partial<EscalationContact>) => Promise<void>; onRemove: () => void }) {
   const [name, setName] = useState(c.person_name ?? '');
   const [contact, setContact] = useState(c.contact ?? '');
   const dirty = name !== (c.person_name ?? '') || contact !== (c.contact ?? '');
+  const plantName = (Array.isArray(c.plants) ? c.plants[0] : c.plants)?.name;
+  const makeName = (Array.isArray(c.sensor_makes) ? c.sensor_makes[0] : c.sensor_makes)?.name;
   return (
-    <div className="px-4 sm:px-5 py-2.5 flex items-center gap-2 flex-wrap">
-      <div className="min-w-[160px] flex-1">
-        <div className="text-xs font-medium text-slate-800">{c.label}</div>
-        <div className="font-mono text-[10px] text-slate-400">{c.skill_key}</div>
-      </div>
+    <div className="flex items-center gap-2 flex-wrap">
+      <span className={`shrink-0 text-[10px] rounded-full px-2 py-0.5 font-medium ${
+        makeName ? 'bg-violet-100 text-violet-700' : plantName ? 'bg-sky-100 text-sky-700' : 'bg-slate-100 text-slate-500'
+      }`}>
+        {makeName ?? plantName ?? 'Default'}
+      </span>
       <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Person" className="input text-xs w-32" />
       <input value={contact} onChange={(e) => setContact(e.target.value)} placeholder="Phone / how to reach" className="input text-xs w-44" />
       <label className="flex items-center gap-1 text-[11px] text-slate-500">
@@ -375,6 +412,74 @@ function ContactRow({ c, onPatch }: { c: any; onPatch: (id: string, f: Partial<E
       {dirty && (
         <button onClick={() => onPatch(c.id, { person_name: name || null, contact: contact || null })}
           className="tap rounded-md bg-brand-700 text-white px-2.5 py-1 text-xs font-medium hover:bg-brand-800">Save</button>
+      )}
+      <button onClick={onRemove} aria-label="Delete entry" className="tap text-slate-300 hover:text-red-500 transition"><Trash2 size={13} /></button>
+    </div>
+  );
+}
+
+// Add an entry: existing skill (or a new one), optional plant OR make scope.
+function AddContactRow({ skills, plants, makes, onAdded }: {
+  skills: { key: string; label: string }[];
+  plants: { id: string; name: string }[];
+  makes: { id: string; name: string }[];
+  onAdded: () => void;
+}) {
+  const [skill, setSkill] = useState('');
+  const [newLabel, setNewLabel] = useState('');
+  const [scope, setScope] = useState(''); // '', 'plant:<id>', 'make:<id>'
+  const [name, setName] = useState('');
+  const [contact, setContact] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  async function add() {
+    const isNew = skill === '__new__';
+    const key = isNew ? newLabel.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '') : skill;
+    const label = isNew ? newLabel.trim() : (skills.find((s) => s.key === skill)?.label ?? key);
+    if (!key || !label) return;
+    setBusy(true);
+    await supabase.from('escalation_contacts').insert({
+      skill_key: key,
+      label,
+      person_name: name.trim() || null,
+      contact: contact.trim() || null,
+      plant_id: scope.startsWith('plant:') ? scope.slice(6) : null,
+      make_id: scope.startsWith('make:') ? scope.slice(5) : null,
+      sort_order: 100,
+    });
+    setBusy(false);
+    setSkill(''); setNewLabel(''); setScope(''); setName(''); setContact('');
+    onAdded();
+  }
+
+  return (
+    <div className="px-4 sm:px-5 py-3 bg-slate-50/60 flex items-center gap-2 flex-wrap">
+      <select value={skill} onChange={(e) => setSkill(e.target.value)} className="input text-xs w-44">
+        <option value="">Add entry — pick skill…</option>
+        {skills.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
+        <option value="__new__">+ New skill…</option>
+      </select>
+      {skill === '__new__' && (
+        <input value={newLabel} onChange={(e) => setNewLabel(e.target.value)} placeholder="Skill name (e.g. Pump vendor)" className="input text-xs w-40" />
+      )}
+      {skill && (
+        <>
+          <select value={scope} onChange={(e) => setScope(e.target.value)} className="input text-xs w-40">
+            <option value="">Everywhere (default)</option>
+            {plants.length > 0 && <optgroup label="Only at plant">
+              {plants.map((p) => <option key={p.id} value={`plant:${p.id}`}>{p.name}</option>)}
+            </optgroup>}
+            {makes.length > 0 && <optgroup label="Only for make (vendor)">
+              {makes.map((m) => <option key={m.id} value={`make:${m.id}`}>{m.name}</option>)}
+            </optgroup>}
+          </select>
+          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Person" className="input text-xs w-32" />
+          <input value={contact} onChange={(e) => setContact(e.target.value)} placeholder="Phone / how to reach" className="input text-xs w-44" />
+          <button onClick={add} disabled={busy || (skill === '__new__' && !newLabel.trim())}
+            className="tap rounded-md bg-brand-700 text-white px-2.5 py-1 text-xs font-medium hover:bg-brand-800 disabled:opacity-50">
+            {busy ? 'Adding…' : 'Add'}
+          </button>
+        </>
       )}
     </div>
   );

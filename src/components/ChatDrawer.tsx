@@ -10,7 +10,7 @@ import { SECTION_LABEL, parseSections } from '../lib/consolidated';
 import { renderMarkdown, normalizeAnswerSteps } from '../lib/markdown';
 import { conversationalReply } from '../lib/chatIntent';
 import { matchRule, type RouteMatch } from '../lib/routing';
-import { matchFlow, getNode, failTarget, fetchContacts, type DiagnosticFlow, type FlowNode, type EscalationContact } from '../lib/flows';
+import { matchFlow, getNode, failTarget, fetchContacts, contactsForSkill, type DiagnosticFlow, type FlowNode, type EscalationContact } from '../lib/flows';
 import { correctSpelling } from '../lib/lexicon';
 import { useAuth } from '../lib/auth';
 import AnswerFeedback from './AnswerFeedback';
@@ -55,7 +55,7 @@ type Turn =
       flowNode?: FlowNode;
       flowTitle?: string; // set on the first node so the user sees which flow started
       flowTerminal?: boolean; // resolve/escalate — end of the run (feedback shows here)
-      escalateContact?: EscalationContact | null; // resolved directory entry for escalate nodes
+      escalateContacts?: EscalationContact[]; // resolved directory entries (make/global/per-plant)
     };
 
 
@@ -409,9 +409,18 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
 
   async function nodeTurn(flow: DiagnosticFlow, node: FlowNode, opts?: { first?: boolean; scopeLabel?: string }): Promise<Extract<Turn, { role: 'bot' }>> {
     const terminal = node.kind === 'resolve' || node.kind === 'escalate';
-    let contact: EscalationContact | null = null;
+    let contacts: EscalationContact[] = [];
     if (node.kind === 'escalate' && node.skill) {
-      try { contact = (await fetchContacts()).find((c) => c.skill_key === node.skill) ?? null; } catch { contact = null; }
+      try {
+        // The right person differs by plant and (for vendor support) by make —
+        // resolve against the scoped sensor's make; plant rows are all shown.
+        let makeId: string | null = null;
+        if (scope?.modelId) {
+          const { data: m } = await supabase.from('sensor_models').select('make_id').eq('id', scope.modelId).maybeSingle();
+          makeId = (m as any)?.make_id ?? null;
+        }
+        contacts = contactsForSkill(await fetchContacts(), node.skill, { makeId });
+      } catch { contacts = []; }
     }
     return {
       role: 'bot',
@@ -421,7 +430,7 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
       flowNode: node,
       flowTitle: opts?.first ? flow.title : undefined,
       flowTerminal: terminal,
-      escalateContact: contact,
+      escalateContacts: contacts,
     };
   }
 
@@ -948,7 +957,8 @@ function FlowNodeCard({ turn, active, failNext, onChoose, onTicket }: {
   }
 
   if (n.kind === 'escalate') {
-    const c = turn.escalateContact;
+    const list = turn.escalateContacts ?? [];
+    const withInfo = list.filter((c) => c.person_name || c.contact);
     return (
       <div className="rounded-2xl rounded-tl-md border border-red-200 bg-white shadow-sm overflow-hidden">
         <div className="bg-gradient-to-r from-red-500 to-red-600 px-3.5 py-2 inline-flex items-center gap-1.5 w-full">
@@ -957,12 +967,32 @@ function FlowNodeCard({ turn, active, failNext, onChoose, onTicket }: {
         </div>
         <div className="p-3.5 space-y-2.5">
           <div className="text-sm text-slate-700 leading-relaxed">{n.text}</div>
-          <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-            <div className="text-xs font-semibold text-slate-800">{c?.label ?? n.skill}</div>
-            {c?.person_name && <div className="text-xs text-slate-600 mt-0.5">{c.person_name}</div>}
-            {c?.contact && <div className="text-xs text-brand-700 font-medium mt-0.5">{c.contact}</div>}
-            {!c?.person_name && !c?.contact && <div className="text-[11px] text-slate-400 mt-0.5">Ask your supervisor who covers this.</div>}
-          </div>
+          <div className="text-xs font-semibold text-slate-800">{list[0]?.label ?? n.skill}</div>
+          {withInfo.length > 0 ? (
+            <div className="space-y-1.5">
+              {withInfo.slice(0, 5).map((c) => (
+                <div key={c.id} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 flex items-center gap-2">
+                  <div className="min-w-0 flex-1">
+                    {c.person_name && <div className="text-xs text-slate-700 font-medium">{c.person_name}</div>}
+                    {c.contact && <div className="text-xs text-brand-700 font-medium">{c.contact}</div>}
+                  </div>
+                  <span className={`shrink-0 text-[10px] rounded-full px-2 py-0.5 font-medium ${
+                    c.make_name ? 'bg-violet-100 text-violet-700' : c.plant_name ? 'bg-sky-100 text-sky-700' : 'bg-slate-200 text-slate-600'
+                  }`}>
+                    {c.make_name ?? c.plant_name ?? 'Default'}
+                  </span>
+                </div>
+              ))}
+              {withInfo.length > 5 && <div className="text-[11px] text-slate-400">+{withInfo.length - 5} more in the directory</div>}
+              {withInfo.some((c) => c.plant_name) && (
+                <div className="text-[10px] text-slate-400">Pick the person for your plant.</div>
+              )}
+            </div>
+          ) : (
+            <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] text-slate-400">
+              No contact on file yet — ask your supervisor who covers this.
+            </div>
+          )}
           <button onClick={onTicket}
             className="tap w-full inline-flex items-center justify-center gap-1.5 rounded-lg bg-gradient-to-br from-brand-600 to-brand-800 text-white px-3 py-2 text-xs font-semibold hover:from-brand-700 transition">
             Log a support ticket

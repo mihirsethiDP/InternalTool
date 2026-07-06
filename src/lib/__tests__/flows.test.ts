@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { validateFlowDefinition, getNode, failTarget, scoreFlow, type FlowDefinition } from '../flows';
+import { validateFlowDefinition, getNode, failTarget, scoreFlow, contactsForSkill, type FlowDefinition, type EscalationContact } from '../flows';
 
 const GOOD: FlowDefinition = {
   start: 'n1',
@@ -52,6 +52,32 @@ describe('walk helpers', () => {
     const action = getNode(GOOD, 'n2')!;
     expect(failTarget(GOOD, action)).toBe('n5'); // no fail_next → first escalate
     expect(failTarget(GOOD, { ...action, fail_next: 'n3' })).toBe('n3');
+  });
+});
+
+describe('contactsForSkill', () => {
+  const mk = (over: Partial<EscalationContact>): EscalationContact => ({
+    id: Math.random().toString(36).slice(2), skill_key: 'electrical_engineer', label: 'Electrical engineer',
+    person_name: 'X', contact: '99', notes: null, active: true, plant_id: null, make_id: null, ...over,
+  });
+  const contacts = [
+    mk({ id: 'global' }),
+    mk({ id: 'plantB', plant_id: 'pB', plant_name: 'B Plant' }),
+    mk({ id: 'plantA', plant_id: 'pA', plant_name: 'A Plant' }),
+    mk({ id: 'makeX', make_id: 'mX', make_name: 'MakeX' }),
+    mk({ id: 'makeY', make_id: 'mY', make_name: 'MakeY' }),
+    mk({ id: 'otherSkill', skill_key: 'supervisor' }),
+  ];
+  it('orders: matching make → global → plants (alphabetical); drops other makes', () => {
+    const r = contactsForSkill(contacts, 'electrical_engineer', { makeId: 'mX' });
+    expect(r.map((c) => c.id)).toEqual(['makeX', 'global', 'plantA', 'plantB']);
+  });
+  it('without a make in scope, drops all make-scoped rows', () => {
+    const r = contactsForSkill(contacts, 'electrical_engineer', {});
+    expect(r.map((c) => c.id)).toEqual(['global', 'plantA', 'plantB']);
+  });
+  it('filters by skill', () => {
+    expect(contactsForSkill(contacts, 'supervisor', {}).map((c) => c.id)).toEqual(['otherSkill']);
   });
 });
 
