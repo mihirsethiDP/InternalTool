@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { X, Send, ArrowRight, ExternalLink, ChevronDown, Sparkles, Bot, Trash2, Wrench, Cpu, Globe, Compass } from 'lucide-react';
+import { X, Send, ArrowRight, ExternalLink, ChevronDown, Sparkles, Bot, Trash2, Wrench, Cpu, Globe, Compass, CheckCircle2, PhoneCall, GitBranch } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { runSearch } from '../lib/search';
 import { logUnanswered, logEvent } from '../lib/telemetry';
@@ -10,6 +10,8 @@ import { SECTION_LABEL, parseSections } from '../lib/consolidated';
 import { renderMarkdown, normalizeAnswerSteps } from '../lib/markdown';
 import { conversationalReply } from '../lib/chatIntent';
 import { matchRule, type RouteMatch } from '../lib/routing';
+import { matchFlow, getNode, failTarget, fetchContacts, type DiagnosticFlow, type FlowNode, type EscalationContact } from '../lib/flows';
+import { correctSpelling } from '../lib/lexicon';
 import { useAuth } from '../lib/auth';
 import AnswerFeedback from './AnswerFeedback';
 import TicketModal from './TicketModal';
@@ -49,6 +51,11 @@ type Turn =
       webAnswer?: { answer: string; sources: { title: string; url: string }[] } | null;
       // Router layer: an approved problem→procedure rule matched this question.
       routed?: RouteMatch | null;
+      // Diagnostic flow runner: this turn shows one node of an approved flow.
+      flowNode?: FlowNode;
+      flowTitle?: string; // set on the first node so the user sees which flow started
+      flowTerminal?: boolean; // resolve/escalate — end of the run (feedback shows here)
+      escalateContact?: EscalationContact | null; // resolved directory entry for escalate nodes
     };
 
 
@@ -120,9 +127,16 @@ async function categoryRetrieve(query: string, categoryId: string): Promise<Hit[
   return enrichHits(merged);
 }
 
-// Infer the likely sensor TYPE(s) from a free-text symptom (elicitation/router
-// level 1). Returns categories ranked most-likely-first + a confidence on the top.
-async function routeQuery(query: string): Promise<{ categories: { id: string; name: string }[]; top: { id: string; name: string; confidence: number } | null } | null> {
+// Interpret a free-text message (elicitation/router level 1): sensor TYPE(s)
+// ranked most-likely-first, the user's intent, a normalized restatement of a
+// vague/misspelled problem, and any make/model the message itself mentions.
+async function routeQuery(query: string): Promise<{
+  categories: { id: string; name: string }[];
+  top: { id: string; name: string; confidence: number } | null;
+  intent?: 'troubleshoot' | 'howto' | 'info' | 'other';
+  normalized?: string | null;
+  slots?: { make: string | null; model: string | null };
+} | null> {
   try {
     const { data, error } = await supabase.functions.invoke('chat-answer', { body: { mode: 'route', query } });
     if (error || !data || (data as any).error) return null;
@@ -204,6 +218,9 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
   // Ordered sensor-type ids from the last AI route call, used to order the
   // guided picker's type chips (most-likely first).
   const [routeOrder, setRouteOrder] = useState<string[]>([]);
+  // Active diagnostic flow run — while set, chips drive the conversation and
+  // the doc-RAG path is bypassed. Typing a new message cancels the run.
+  const [flowRun, setFlowRun] = useState<{ flow: DiagnosticFlow } | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
@@ -298,6 +315,8 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
 
     sendingRef.current = true;
     setInput('');
+    // Typing a fresh message abandons any in-progress diagnostic flow.
+    setFlowRun(null);
     let activeScope = scope;
 
     // Echo the user's message + a loading placeholder IMMEDIATELY — before any
@@ -309,12 +328,40 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
       { role: 'bot', query: q, loading: true, narrowedLabel: activeScope?.label },
     ]);
     try {
-      // If we have no scope yet, infer the likely sensor TYPE from the symptom so
-      // the answer is type-relevant and the picker leads with the right type.
+      // Spell-tolerance: the ECHO shows exactly what they typed, but matching
+      // (flows, rules, routing, retrieval) runs on the corrected text.
+      let mq = q;
+      try { mq = (await correctSpelling(q)).text; } catch { /* raw query still works */ }
+
+      // If we have no scope yet, interpret the message: sensor TYPE + intent +
+      // any make/model actually mentioned (handles vague/misspelled phrasing).
       if (!activeScope) {
-        const r = await routeQuery(q);
+        const r = await routeQuery(mq);
         if (r?.categories?.length) setRouteOrder(r.categories.map((c) => c.id));
-        if (r?.top && r.top.confidence >= 0.6) {
+        // A normalized restatement beats our token-level correction for matching.
+        if (r?.normalized) mq = r.normalized;
+        // If the message itself names a model we have, scope straight to it —
+        // no need to make the user tap through the picker.
+        if (r?.slots?.model) {
+          const { data: m } = await supabase
+            .from('sensor_models')
+            .select('id, model_no, name, category_id, sensor_makes(name)')
+            .eq('is_general', false)
+            .ilike('model_no', `%${r.slots.model}%`)
+            .limit(2);
+          if (m && m.length === 1) {
+            const mk = Array.isArray((m[0] as any).sensor_makes) ? (m[0] as any).sensor_makes[0] : (m[0] as any).sensor_makes;
+            const { data: gm } = await supabase.from('sensor_models').select('id').eq('is_general', true).eq('category_id', (m[0] as any).category_id).maybeSingle();
+            activeScope = {
+              modelId: (m[0] as any).id,
+              generalModelId: (gm as any)?.id ?? null,
+              categoryId: (m[0] as any).category_id,
+              label: `${mk?.name ?? ''} ${(m[0] as any).model_no || (m[0] as any).name}`.trim(),
+            };
+            setScope(activeScope);
+          }
+        }
+        if (!activeScope && r?.top && r.top.confidence >= 0.6) {
           // Resolve the category's general model so type-level routing rules apply.
           const { data: gm } = await supabase.from('sensor_models').select('id').eq('is_general', true).eq('category_id', r.top.id).maybeSingle();
           activeScope = { categoryId: r.top.id, generalModelId: (gm as any)?.id ?? null, label: `${r.top.name} sensors` };
@@ -322,19 +369,26 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
         }
       }
 
+      // ---- Priority 1: an approved diagnostic flow matches → run it instead of RAG.
+      const flow = await matchFlow(mq, { categoryId: activeScope?.categoryId ?? null, modelId: activeScope?.modelId ?? null });
+      if (flow) {
+        await startFlow(flow, activeScope?.label);
+        return;
+      }
+
       const fallback = activeScope?.modelId
-        ? () => scopedRetrieve(q, activeScope!.modelId!, activeScope!.generalModelId ?? null)
+        ? () => scopedRetrieve(mq, activeScope!.modelId!, activeScope!.generalModelId ?? null)
         : activeScope?.categoryId
-          ? () => categoryRetrieve(q, activeScope!.categoryId!)
+          ? () => categoryRetrieve(mq, activeScope!.categoryId!)
           : async () => {
-              const { data } = await supabase.rpc('chat_search', { q, p_limit: 5 });
+              const { data } = await supabase.rpc('chat_search', { q: mq, p_limit: 5 });
               return enrichHits((data as Hit[]) ?? []);
             };
-      // Router: match the problem to an approved rule for the sensor(s) in scope.
+      // ---- Priority 2+3: routed rule + grounded RAG answer (in parallel).
       const candidateIds = [activeScope?.modelId, activeScope?.generalModelId].filter(Boolean) as string[];
       const [result, routed] = await Promise.all([
-        askAssistant(q, { sensorModelId: activeScope?.modelId ?? null, categoryId: activeScope?.categoryId ?? null }, fallback),
-        candidateIds.length ? matchRule(q, candidateIds) : Promise.resolve(null),
+        askAssistant(mq, { sensorModelId: activeScope?.modelId ?? null, categoryId: activeScope?.categoryId ?? null }, fallback),
+        candidateIds.length ? matchRule(mq, candidateIds) : Promise.resolve(null),
       ]);
       if (!result.answer && result.hits.length === 0) {
         logUnanswered({ query: q, source: 'chat', sensorModelId: activeScope?.modelId ?? null });
@@ -347,6 +401,52 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
     } finally {
       sendingRef.current = false;
     }
+  }
+
+  // ---------- Diagnostic flow runner ----------
+  // Present one node per bot turn; option chips (or Done / Didn't work) drive
+  // the walk. Terminal nodes (resolve/escalate) end the run and show feedback.
+
+  async function nodeTurn(flow: DiagnosticFlow, node: FlowNode, opts?: { first?: boolean; scopeLabel?: string }): Promise<Extract<Turn, { role: 'bot' }>> {
+    const terminal = node.kind === 'resolve' || node.kind === 'escalate';
+    let contact: EscalationContact | null = null;
+    if (node.kind === 'escalate' && node.skill) {
+      try { contact = (await fetchContacts()).find((c) => c.skill_key === node.skill) ?? null; } catch { contact = null; }
+    }
+    return {
+      role: 'bot',
+      query: flow.title,
+      loading: false,
+      narrowedLabel: opts?.scopeLabel,
+      flowNode: node,
+      flowTitle: opts?.first ? flow.title : undefined,
+      flowTerminal: terminal,
+      escalateContact: contact,
+    };
+  }
+
+  async function startFlow(flow: DiagnosticFlow, scopeLabel?: string) {
+    const start = getNode(flow.definition, flow.definition.start);
+    if (!start) return; // validator should prevent this; RAG path already skipped, show not-found
+    setFlowRun({ flow });
+    const turn = await nodeTurn(flow, start, { first: true, scopeLabel });
+    const terminal = start.kind === 'resolve' || start.kind === 'escalate';
+    if (terminal) setFlowRun(null);
+    setTurns((t) => fillLoadingTurn(t, turn));
+  }
+
+  // Advance from the node shown in the LAST bot turn via a chip tap.
+  async function advanceFlow(choiceLabel: string, nextId: string | null) {
+    if (!flowRun) return;
+    const { flow } = flowRun;
+    const next = nextId ? getNode(flow.definition, nextId) : null;
+    if (!next) { setFlowRun(null); return; }
+    const terminal = next.kind === 'resolve' || next.kind === 'escalate';
+    // Echo the choice as a user bubble, then show the next node.
+    setTurns((t) => [...t, { role: 'user', text: choiceLabel }, { role: 'bot', query: flow.title, loading: true }]);
+    const turn = await nodeTurn(flow, next);
+    if (terminal) setFlowRun(null);
+    setTurns((t) => fillLoadingTurn(t, turn));
   }
 
   // Re-scope a bot turn to a specific sensor (+ its category general guidance),
@@ -495,6 +595,14 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
                 <div className="rounded-2xl rounded-tl-md bg-white border border-slate-200 shadow-sm px-3.5 py-3 text-sm text-slate-700 leading-relaxed">
                   {turn.note}
                 </div>
+              ) : turn.flowNode ? (
+                <FlowNodeCard
+                  turn={turn}
+                  active={i === turns.length - 1 && !!flowRun}
+                  onChoose={advanceFlow}
+                  failNext={flowRun ? failTarget(flowRun.flow.definition, turn.flowNode) : null}
+                  onTicket={() => openTicket(turn)}
+                />
               ) : turn.answer ? (
                 <AnswerCard
                   answer={turn.answer}
@@ -544,8 +652,9 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
 
               {/* Did this help? — feedback + continue + log-a-ticket (tracked).
                   Shown on every real attempt, including no-result (they may have
-                  resolved it via the web / a ticket). */}
-              {!turn.loading && !turn.note && (
+                  resolved it via the web / a ticket). Mid-flow nodes skip it —
+                  feedback belongs at the end of a diagnostic run. */}
+              {!turn.loading && !turn.note && (!turn.flowNode || turn.flowTerminal) && (
                 <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5">
                   <AnswerFeedback
                     key={`${turn.narrowedLabel ?? ''}|${turn.answer ? turn.answer.slice(0, 24) : (turn.hits?.[0]?.document_id ?? '')}`}
@@ -560,8 +669,9 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
               )}
 
               {/* Guided sensor picker — shown until narrowed to a specific model.
-                  When a TYPE is already inferred/scoped it jumps to the make step. */}
-              {!turn.loading && !turn.note && i === turns.length - 1 && !scope?.modelId && (
+                  When a TYPE is already inferred/scoped it jumps to the make step.
+                  Hidden during a flow run — the flow's own chips drive the turn. */}
+              {!turn.loading && !turn.note && !turn.flowNode && !flowRun && i === turns.length - 1 && !scope?.modelId && (
                 <GuidedNarrow
                   key={`gn-${i}-${scope?.categoryId ?? 'none'}`}
                   initialCategoryId={scope?.categoryId ?? undefined}
@@ -578,7 +688,7 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
         <div className="border-t border-slate-200 p-3 bg-white">
           {turns.length > 0 && (
             <div className="flex justify-end mb-2">
-              <button onClick={() => { setTurns([]); setScope(null); }} className="inline-flex items-center gap-1 text-xs text-slate-500 hover:text-brand-700 transition">
+              <button onClick={() => { setTurns([]); setScope(null); setFlowRun(null); }} className="inline-flex items-center gap-1 text-xs text-slate-500 hover:text-brand-700 transition">
                 <Trash2 size={12} /> {t('chat.clearConversation')}
               </button>
             </div>
@@ -808,6 +918,87 @@ function RoutedCard({ routed, onOpen }: { routed: RouteMatch; onOpen: (docId: st
           ))}
         </div>
       </div>
+    </div>
+  );
+}
+
+// One node of a diagnostic flow run. Question nodes show tappable option
+// chips, action nodes a step with Done / Didn't-work, resolve and escalate
+// nodes are terminal (escalate resolves the contact from the directory).
+function FlowNodeCard({ turn, active, failNext, onChoose, onTicket }: {
+  turn: Extract<Turn, { role: 'bot' }>;
+  active: boolean;
+  failNext: string | null;
+  onChoose: (label: string, nextId: string | null) => void;
+  onTicket: () => void;
+}) {
+  const n = turn.flowNode!;
+  const chip = 'tap text-left rounded-lg border border-slate-200 bg-white hover:border-brand-700 hover:text-brand-700 px-3 py-2 text-xs font-medium transition';
+
+  if (n.kind === 'resolve') {
+    return (
+      <div className="rounded-2xl rounded-tl-md border border-emerald-200 bg-emerald-50/60 shadow-sm px-3.5 py-3 space-y-1.5">
+        <div className="inline-flex items-center gap-1.5 text-emerald-800 text-[11px] font-semibold uppercase tracking-wide">
+          <CheckCircle2 size={13} /> Should be fixed
+        </div>
+        <div className="text-sm text-slate-700 leading-relaxed">{n.text}</div>
+        <div className="text-[11px] text-slate-500">Still not right? Use “Didn’t help” below to log it.</div>
+      </div>
+    );
+  }
+
+  if (n.kind === 'escalate') {
+    const c = turn.escalateContact;
+    return (
+      <div className="rounded-2xl rounded-tl-md border border-red-200 bg-white shadow-sm overflow-hidden">
+        <div className="bg-gradient-to-r from-red-500 to-red-600 px-3.5 py-2 inline-flex items-center gap-1.5 w-full">
+          <PhoneCall size={12} className="text-white" />
+          <span className="text-white text-[11px] font-semibold uppercase tracking-wide">Needs outside help</span>
+        </div>
+        <div className="p-3.5 space-y-2.5">
+          <div className="text-sm text-slate-700 leading-relaxed">{n.text}</div>
+          <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+            <div className="text-xs font-semibold text-slate-800">{c?.label ?? n.skill}</div>
+            {c?.person_name && <div className="text-xs text-slate-600 mt-0.5">{c.person_name}</div>}
+            {c?.contact && <div className="text-xs text-brand-700 font-medium mt-0.5">{c.contact}</div>}
+            {!c?.person_name && !c?.contact && <div className="text-[11px] text-slate-400 mt-0.5">Ask your supervisor who covers this.</div>}
+          </div>
+          <button onClick={onTicket}
+            className="tap w-full inline-flex items-center justify-center gap-1.5 rounded-lg bg-gradient-to-br from-brand-600 to-brand-800 text-white px-3 py-2 text-xs font-semibold hover:from-brand-700 transition">
+            Log a support ticket
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // question / action
+  return (
+    <div className="rounded-2xl rounded-tl-md bg-white border border-slate-200 shadow-sm px-3.5 py-3 space-y-2.5">
+      {turn.flowTitle && (
+        <div className="inline-flex items-center gap-1.5 text-brand-700 text-[11px] font-semibold uppercase tracking-wide">
+          <GitBranch size={12} /> Diagnosing: {turn.flowTitle}
+        </div>
+      )}
+      <div className="text-sm text-slate-700 leading-relaxed">{n.text}</div>
+      {n.kind === 'action' && n.source_section && (
+        <div className="text-[10px] text-slate-400">From: {SECTION_LABEL[n.source_section as SubmissionSection] ?? n.source_section}</div>
+      )}
+      {active ? (
+        <div className="flex flex-col gap-1.5">
+          {n.kind === 'question' && (n.options ?? []).map((o, idx) => (
+            <button key={idx} onClick={() => onChoose(o.label, o.next)} className={chip}>{o.label}</button>
+          ))}
+          {n.kind === 'action' && (
+            <>
+              <button onClick={() => onChoose('Done — what’s next?', n.next ?? null)} className={chip}>✓ Done — what’s next?</button>
+              <button onClick={() => onChoose('That didn’t work', failNext)} className={`${chip} hover:border-red-400 hover:text-red-600`}>✗ That didn’t work</button>
+            </>
+          )}
+        </div>
+      ) : (
+        <div className="text-[11px] text-slate-400 italic">Answered above ↑</div>
+      )}
     </div>
   );
 }
