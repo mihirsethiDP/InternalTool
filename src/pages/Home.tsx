@@ -11,6 +11,7 @@ import { DocCard } from '../components/DocCard';
 import { runSearch } from '../lib/search';
 import { supabase } from '../lib/supabase';
 import { openDocument } from '../lib/openDoc';
+import { useAuth, isAdmin } from '../lib/auth';
 
 // Operator-phrased problems — clicking one asks the assistant directly.
 const PROBLEM_PROMPTS = [
@@ -30,6 +31,7 @@ export default function Home() {
   const [modelId, setModelId] = useState('');
   const nav = useNavigate();
   const { t } = useTranslation();
+  const { profile } = useAuth();
 
   // Reference data for the "narrow to your sensor" probe
   const makes = useQuery({ queryKey: ['makes'], queryFn: async () => (await supabase.from('sensor_makes').select('id,name').order('name')).data ?? [] });
@@ -311,7 +313,9 @@ export default function Home() {
             ))}
             {(recent.data ?? []).length === 0 && (
               <div className="card text-sm text-slate-500 col-span-full text-center">
-                {t('home.noRecent')}
+                {/* Admins get the actionable pointer (they run the Review queue);
+                    everyone else gets plain language — no internal jargon. */}
+                {t(isAdmin(profile) ? 'home.noRecent' : 'home.noRecentUser')}
               </div>
             )}
           </div>
