@@ -368,6 +368,13 @@ function ApproveModal({ submission, editedText, onClose, onDone }: any) {
         }
       } catch (e) { console.warn('notify maker failed', e); }
 
+      // Auto-draft diagnostic flows from the freshly merged doc (fire-and-forget:
+      // approval must never fail or slow down because generation hiccuped).
+      // Drafts land in Admin → Diagnostic flows for review.
+      supabase.functions.invoke('chat-answer', { body: { mode: 'generate-flow', consolidated_doc_id: cdoc.id } })
+        .then(() => qc.invalidateQueries({ queryKey: ['admin-draft-flows-count'] }))
+        .catch((e) => console.warn('auto generate-flow failed', e));
+
       qc.invalidateQueries({ queryKey: ['review-queue'] });
       qc.invalidateQueries({ queryKey: ['review-queue-counts'] });
       qc.invalidateQueries({ queryKey: ['my-submissions'] });

@@ -109,6 +109,7 @@ Deno.serve(async (req) => {
     : payload.mode === 'classify' ? 'classify'
     : payload.mode === 'route' ? 'route'
     : payload.mode === 'generate-rules' ? 'generate-rules'
+    : payload.mode === 'generate-flow' ? 'generate-flow'
     : 'docs';
 
   const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
@@ -240,6 +241,134 @@ Deno.serve(async (req) => {
     return json({ rules: fresh ?? [] });
   }
 
+  // ---------- GENERATE-FLOW MODE: draft diagnostic decision trees from a doc ----------
+  // AI drafts symptom→checks→fix decision trees (with escalation exits) from an
+  // APPROVED consolidated document. Saved as 'draft' for an admin to review and
+  // approve; only approved flows ever reach the assistant.
+  if (mode === 'generate-flow') {
+    const docId = ((payload as any).consolidated_doc_id ?? '').toString();
+    if (!docId) return json({ error: 'consolidated_doc_id required' }, 400);
+    const supabase = createClient(SUPABASE_URL, SERVICE_KEY);
+
+    // Writes drafts via the service role (bypasses RLS) — enforce admin here.
+    const token = (req.headers.get('Authorization') ?? '').replace(/^Bearer\s+/i, '');
+    const { data: who } = await supabase.auth.getUser(token);
+    if (!who?.user) return json({ error: 'unauthorized' }, 401);
+    const { data: prof } = await supabase.from('profiles').select('role').eq('id', who.user.id).maybeSingle();
+    if ((prof as any)?.role !== 'admin') return json({ error: 'admin only' }, 403);
+
+    const { data: cdoc, error: cErr } = await supabase
+      .from('consolidated_docs')
+      .select('id, content_markdown, sensor_model_id, sensor_models(model_no, name, is_general, category_id, sensor_makes(name), sensor_categories(id, name))')
+      .eq('id', docId)
+      .maybeSingle();
+    if (cErr || !cdoc) { console.error('generate-flow doc lookup error', cErr); return json({ error: 'doc not found' }, 404); }
+    const md = ((cdoc as any).content_markdown ?? '').trim();
+    if (md.length < 200) return json({ flows: [], note: 'not enough documented content to build flows' });
+
+    const sm = (cdoc as any).sensor_models;
+    const smObj = Array.isArray(sm) ? sm[0] : sm;
+    const cat = smObj ? (Array.isArray(smObj.sensor_categories) ? smObj.sensor_categories[0] : smObj.sensor_categories) : null;
+    if (!cat?.id) return json({ error: 'doc has no sensor category' }, 400);
+    const mk = smObj ? (Array.isArray(smObj.sensor_makes) ? smObj.sensor_makes[0] : smObj.sensor_makes) : null;
+    const isGeneral = Boolean(smObj?.is_general);
+    const label = isGeneral
+      ? `${cat.name} sensors (category-level)`
+      : `${mk?.name ?? ''} ${smObj?.model_no || smObj?.name || ''}`.trim() || 'this sensor';
+
+    // The generator may only reference escalation skills that exist in the directory.
+    const { data: skills } = await supabase
+      .from('escalation_contacts').select('skill_key, label').eq('active', true).order('sort_order');
+    const skillList = (skills ?? []) as { skill_key: string; label: string }[];
+    const skillKeys = skillList.map((s) => s.skill_key);
+    const skillStr = skillList.map((s) => `${s.skill_key} (${s.label})`).join(', ') || 'supervisor (Plant supervisor)';
+
+    const sys = [
+      'You design DIAGNOSTIC DECISION TREES for water/wastewater sensor technicians, strictly from the provided documentation.',
+      'Rules:',
+      '- Base every check and action ONLY on the documentation. Do NOT invent steps, values, part names, or wiring details.',
+      '- Technicians may be low-literacy: one short instruction per node, simple words, no jargon beyond what the doc uses.',
+      '- When the documentation does not cover a branch, end it with an "escalate" node instead of guessing.',
+      '- Every question node needs 2+ options. Every path must end in a "resolve" or "escalate" node.',
+      'Respond with strict JSON only.',
+    ].join('\n');
+    const user = [
+      `Sensor: ${label}`,
+      `Allowed escalation skill keys (use ONLY these): ${skillStr}`,
+      '',
+      `Documentation (markdown):\n${md.slice(0, 9000)}`,
+      '',
+      'Return strict JSON:',
+      '{"flows":[{"title":"<symptom as the technician would say it>",',
+      ' "trigger_symptoms":["<3 to 6 alternate phrasings, including vague ones like \'not working\' variants>"],',
+      ' "definition":{"start":"<node id>","nodes":[',
+      '   {"id":"n1","kind":"question","text":"...","options":[{"label":"Yes","next":"n2"},{"label":"No","next":"n3"}]},',
+      '   {"id":"n2","kind":"action","text":"<one concrete step>","source_section":"<section key the step came from>","next":"n4"},',
+      '   {"id":"n4","kind":"resolve","text":"<what should now be true>"},',
+      '   {"id":"n5","kind":"escalate","skill":"<allowed skill key>","text":"<why this needs them>"}]}}]}',
+      'Create 1 to 3 flows for the MOST COMMON problems the documentation actually covers. 5-14 nodes per flow.',
+    ].join('\n');
+
+    const raw = await groqComplete(sys, user, GROQ_API_KEY, MODEL, true);
+    let parsed: any = {};
+    try { parsed = JSON.parse(raw ?? '{}'); } catch { parsed = {}; }
+
+    // Server-side validation mirror: never store a definition the runner can't walk.
+    function validateDef(def: any): boolean {
+      if (!def || !Array.isArray(def.nodes) || def.nodes.length === 0 || def.nodes.length > 24) return false;
+      const ids = new Set<string>();
+      for (const n of def.nodes) { if (!n?.id || ids.has(n.id)) return false; ids.add(n.id); }
+      if (!def.start || !ids.has(def.start)) return false;
+      for (const n of def.nodes) {
+        if (!String(n.text ?? '').trim()) return false;
+        if (n.kind === 'question') {
+          if (!Array.isArray(n.options) || n.options.length < 2) return false;
+          for (const o of n.options) if (!o?.label || !ids.has(o.next)) return false;
+        } else if (n.kind === 'action') {
+          if (!n.next || !ids.has(n.next)) return false;
+          if (n.fail_next && !ids.has(n.fail_next)) return false;
+        } else if (n.kind === 'escalate') {
+          if (!n.skill || !skillKeys.includes(n.skill)) return false;
+        } else if (n.kind !== 'resolve') return false;
+      }
+      return true;
+    }
+
+    const flows = (Array.isArray(parsed.flows) ? parsed.flows : [])
+      .map((f: any) => ({
+        title: String(f.title ?? '').slice(0, 200).trim(),
+        trigger_symptoms: Array.isArray(f.trigger_symptoms)
+          ? f.trigger_symptoms.map((s: any) => String(s).slice(0, 160).trim()).filter(Boolean).slice(0, 8)
+          : [],
+        definition: f.definition,
+      }))
+      .filter((f: any) => f.title && validateDef(f.definition))
+      .slice(0, 3);
+    if (flows.length === 0) return json({ flows: [], note: 'no valid flows generated' });
+
+    // Insert the fresh drafts FIRST, then delete older drafts from the same
+    // source doc — a failed insert never wipes existing drafts.
+    const stamp = new Date().toISOString();
+    const { error: insErr } = await supabase.from('diagnostic_flows').insert(flows.map((f: any) => ({
+      sensor_category_id: cat.id,
+      sensor_model_id: isGeneral ? null : (cdoc as any).sensor_model_id,
+      title: f.title,
+      trigger_symptoms: f.trigger_symptoms,
+      definition: f.definition,
+      status: 'draft',
+      source_doc_id: docId,
+      created_by: who.user.id,
+      created_at: stamp,
+    })));
+    if (insErr) { console.error('generate-flow insert error', insErr); return json({ error: 'could not save flows' }, 502); }
+    await supabase.from('diagnostic_flows').delete()
+      .eq('source_doc_id', docId).eq('status', 'draft').lt('created_at', stamp);
+    const { data: fresh } = await supabase
+      .from('diagnostic_flows').select('*')
+      .eq('source_doc_id', docId).eq('status', 'draft').order('created_at');
+    return json({ flows: fresh ?? [] });
+  }
+
   if (!query) return json({ error: 'empty query' }, 400);
 
   // ---------- ROUTE MODE: infer the sensor TYPE (category) from the symptom ----------
@@ -263,13 +392,24 @@ Deno.serve(async (req) => {
     const cats = [...catMap.entries()].map(([id, name], i) => ({ idx: i + 1, id, name }));
     if (cats.length === 0) return json({ categories: [], top: null });
 
-    const sys = 'You map a water/wastewater technician\'s free-text symptom to the most likely sensor TYPE, choosing only from the numbered list. Respond with strict JSON only.';
+    // The user may be vague, non-technical, or misspell things ("presure senser
+    // not workng") — the model normalizes that AND extracts intent + any
+    // make/model actually mentioned, so the client can scope without re-asking.
+    const sys = [
+      'You interpret a water/wastewater technician\'s free-text message. The writer may be non-technical, vague, use Hinglish, or misspell words — interpret charitably.',
+      'Map it to the most likely sensor TYPE (choosing only from the numbered list), classify the INTENT, and extract any sensor make/model the message itself mentions.',
+      'Respond with strict JSON only.',
+    ].join('\n');
     const user = [
       `Sensor types (numbered):\n${cats.map((c) => `${c.idx}. ${c.name}`).join('\n')}`,
       '',
       `Technician's message: ${query}`,
       '',
-      'Return strict JSON: {"ranking": [<type numbers, most likely first, up to 4>], "confidence": <0 to 1 that the top type is correct>}',
+      'Return strict JSON: {"ranking": [<type numbers, most likely first, up to 4>], "confidence": <0 to 1 that the top type is correct>,',
+      ' "intent": "<troubleshoot | howto | info | other>",',
+      ' "normalized": "<the message restated as one clear English problem statement>",',
+      ' "make": "<manufacturer name if the message mentions one, else empty string>",',
+      ' "model": "<model number/name if the message mentions one, else empty string>"}',
     ].join('\n');
     const raw = await groqComplete(sys, user, GROQ_API_KEY, MODEL, true);
     let parsed: any = {};
@@ -279,9 +419,16 @@ Deno.serve(async (req) => {
     // Append any categories the model didn't rank, so the full set is still offered.
     for (const c of cats) if (!ordered.find((o) => o.id === c.id)) ordered.push({ id: c.id, name: c.name });
     const confidence = Math.max(0, Math.min(1, Number(parsed.confidence) || 0));
+    const VALID_INTENTS = ['troubleshoot', 'howto', 'info', 'other'];
     return json({
       categories: ordered.map((c) => ({ id: c.id, name: c.name })),
       top: ordered[0] ? { id: ordered[0].id, name: ordered[0].name, confidence } : null,
+      intent: VALID_INTENTS.includes(parsed.intent) ? parsed.intent : 'other',
+      normalized: String(parsed.normalized ?? '').slice(0, 300) || null,
+      slots: {
+        make: String(parsed.make ?? '').slice(0, 80) || null,
+        model: String(parsed.model ?? '').slice(0, 80) || null,
+      },
     });
   }
 

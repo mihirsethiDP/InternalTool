@@ -6,8 +6,9 @@ import { useAuth, isAdmin } from '../lib/auth';
 import PageHeader from '../components/PageHeader';
 import { ReviewQueueList } from './ReviewQueue';
 import InsightsPanel from '../components/InsightsPanel';
+import DiagnosticFlowsPanel from '../components/DiagnosticFlowsPanel';
 
-type AdminTab = 'insights' | 'review' | 'consolidated' | 'categories' | 'users' | 'types';
+type AdminTab = 'insights' | 'review' | 'flows' | 'consolidated' | 'categories' | 'users' | 'types';
 
 export default function Admin() {
   const { profile, loading } = useAuth();
@@ -22,6 +23,19 @@ export default function Admin() {
         .from('document_submissions')
         .select('id', { count: 'exact', head: true })
         .eq('status', 'pending');
+      return count ?? 0;
+    },
+    refetchInterval: 30_000,
+  });
+
+  // Draft diagnostic flows awaiting review (badge on the Flows tab)
+  const draftFlows = useQuery({
+    queryKey: ['admin-draft-flows-count'],
+    queryFn: async () => {
+      const { count } = await supabase
+        .from('diagnostic_flows')
+        .select('id', { count: 'exact', head: true })
+        .eq('status', 'draft');
       return count ?? 0;
     },
     refetchInterval: 30_000,
@@ -46,6 +60,7 @@ export default function Admin() {
       <div className="border-b border-slate-200 flex gap-1 overflow-x-auto">
         <Tab name="insights" active={tab} onClick={setTab}>Insights</Tab>
         <Tab name="review" active={tab} onClick={setTab} badge={pending.data ?? 0}>Review queue</Tab>
+        <Tab name="flows" active={tab} onClick={setTab} badge={draftFlows.data ?? 0}>Diagnostic flows</Tab>
         <Tab name="consolidated" active={tab} onClick={setTab}>Consolidated references</Tab>
         <Tab name="categories" active={tab} onClick={setTab}>Categories</Tab>
         <Tab name="users" active={tab} onClick={setTab}>Users</Tab>
@@ -54,6 +69,7 @@ export default function Admin() {
 
       {tab === 'insights' && <InsightsPanel />}
       {tab === 'review' && <ReviewQueueList />}
+      {tab === 'flows' && <DiagnosticFlowsPanel />}
       {tab === 'consolidated' && <ConsolidatedDocsPanel />}
       {tab === 'categories' && <CategoriesPanel />}
       {tab === 'users' && <UsersPanel onChanged={() => qc.invalidateQueries({ queryKey: ['admin-users'] })} />}
