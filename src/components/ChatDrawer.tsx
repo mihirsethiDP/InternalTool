@@ -8,7 +8,7 @@ import { runSearch } from '../lib/search';
 import { logUnanswered, logEvent } from '../lib/telemetry';
 import { SECTION_LABEL, parseSections } from '../lib/consolidated';
 import { renderMarkdown, normalizeAnswerSteps } from '../lib/markdown';
-import { conversationalReply } from '../lib/chatIntent';
+import { conversationalReply, isVagueQuery } from '../lib/chatIntent';
 import { matchRule, type RouteMatch } from '../lib/routing';
 import { matchFlow, getNode, failTarget, fetchContacts, contactsForSkill, type DiagnosticFlow, type FlowNode, type EscalationContact } from '../lib/flows';
 import { correctSpelling } from '../lib/lexicon';
@@ -51,6 +51,10 @@ type Turn =
       webAnswer?: { answer: string; sources: { title: string; url: string }[] } | null;
       // Router layer: an approved problem→procedure rule matched this question.
       routed?: RouteMatch | null;
+      // Probe turn: the message was too vague to answer ("sensor not working"),
+      // so ask what it's doing instead of dumping a generic answer. Options are
+      // tappable symptom chips sourced from approved flows/rules in scope.
+      probe?: { text: string; options: string[] };
       // Diagnostic flow runner: this turn shows one node of an approved flow.
       flowNode?: FlowNode;
       flowTitle?: string; // set on the first node so the user sees which flow started
@@ -200,6 +204,38 @@ const SUGGESTIONS = [
   'Flow meter shows zero despite flow',
 ];
 
+// Fallback symptom chips for the vague-query probe when no approved
+// flows/rules exist in scope yet. Phrased the way an operator would tap.
+const GENERIC_SYMPTOMS = [
+  'No reading / shows zero',
+  'Reading looks wrong or unstable',
+  'Display is blank',
+  'Error or alarm on screen',
+  'Leaking or physical damage',
+];
+
+// Symptom chips for the probe, sourced from what we can actually diagnose in
+// scope: approved flow titles (category-scoped) + approved rule problems
+// (model-scoped), topped up with the generic list.
+async function symptomOptions(scope: { categoryId?: string | null; modelId?: string | null; generalModelId?: string | null } | null): Promise<string[]> {
+  const opts: string[] = [];
+  try {
+    let fq = supabase.from('diagnostic_flows').select('title').eq('status', 'approved').limit(6);
+    if (scope?.categoryId) fq = fq.eq('sensor_category_id', scope.categoryId);
+    const { data: flows } = await fq;
+    opts.push(...((flows ?? []) as any[]).map((f) => f.title));
+    const ids = [scope?.modelId, scope?.generalModelId].filter(Boolean) as string[];
+    if (ids.length) {
+      const { data: rules } = await supabase
+        .from('routing_rules').select('problem').in('sensor_model_id', ids).eq('status', 'approved').limit(6);
+      opts.push(...((rules ?? []) as any[]).map((r) => r.problem));
+    }
+  } catch { /* fall through to generic */ }
+  const uniq = [...new Set(opts.map((s) => (s ?? '').trim()).filter(Boolean))];
+  for (const g of GENERIC_SYMPTOMS) { if (uniq.length >= 6) break; if (!uniq.includes(g)) uniq.push(g); }
+  return uniq.slice(0, 6);
+}
+
 export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
   open: boolean;
   onClose: () => void;
@@ -332,6 +368,10 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
       // (flows, rules, routing, retrieval) runs on the corrected text.
       let mq = q;
       try { mq = (await correctSpelling(q)).text; } catch { /* raw query still works */ }
+      // Judge vagueness on what the USER actually said (corrected) — the
+      // router's normalized restatement below is for retrieval and would make
+      // "sensor not working" look specific ("not functioning correctly").
+      const vague = isVagueQuery(mq);
 
       // If we have no scope yet, interpret the message: sensor TYPE + intent +
       // any make/model actually mentioned (handles vague/misspelled phrasing).
@@ -373,6 +413,18 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
       const flow = await matchFlow(mq, { categoryId: activeScope?.categoryId ?? null, modelId: activeScope?.modelId ?? null });
       if (flow) {
         await startFlow(flow, activeScope?.label);
+        return;
+      }
+
+      // ---- Too vague to answer ("sensor not working") → PROBE, don't dump a
+      // generic answer. Ask what it's doing (symptom chips); if the sensor kind
+      // isn't known yet, the guided picker below asks that too.
+      if (vague) {
+        const options = await symptomOptions(activeScope);
+        const text = activeScope
+          ? `Got it — trouble with ${activeScope.label ? `your ${activeScope.label.replace(/ sensors$/, '')} sensor` : 'your sensor'}. What exactly is it doing?`
+          : 'Let’s figure this out together. What is the sensor doing?';
+        setTurns((t) => fillLoadingTurn(t, { role: 'bot', query: q, loading: false, narrowedLabel: activeScope?.label, probe: { text, options } }));
         return;
       }
 
@@ -461,9 +513,22 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
   // Re-scope a bot turn to a specific sensor (+ its category general guidance),
   // and remember the scope so following questions stay scoped too.
   async function narrowTurn(turnIndex: number, query: string, modelId: string, generalModelId: string | null, label: string) {
-    setScope((prev) => ({ modelId, generalModelId, label, categoryId: prev?.categoryId ?? null }));
+    const newScope = { modelId, generalModelId, label, categoryId: scope?.categoryId ?? null };
+    setScope(newScope);
     setTurns((t) => t.map((turn, i) => (i === turnIndex && turn.role === 'bot') ? { ...turn, loading: true } : turn));
     try {
+      // The original question may have been vague ("sensor not working") — now
+      // that we know WHICH sensor, ask what it's doing rather than re-running
+      // a search that can only produce a generic dump.
+      let vague = false;
+      try { vague = isVagueQuery((await correctSpelling(query)).text); } catch { vague = isVagueQuery(query); }
+      if (vague) {
+        const options = await symptomOptions(newScope);
+        setTurns((t) => t.map((turn, i) => (i === turnIndex && turn.role === 'bot')
+          ? { ...turn, loading: false, narrowedLabel: label, answer: null, citations: [], hits: [], routed: null, probe: { text: `Got it — your ${label}. What exactly is it doing?`, options } }
+          : turn));
+        return;
+      }
       const [result, routed] = await Promise.all([
         askAssistant(query, { sensorModelId: modelId }, () => scopedRetrieve(query, modelId, generalModelId)),
         matchRule(query, [modelId, generalModelId].filter(Boolean) as string[]),
@@ -604,6 +669,19 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
                 <div className="rounded-2xl rounded-tl-md bg-white border border-slate-200 shadow-sm px-3.5 py-3 text-sm text-slate-700 leading-relaxed">
                   {turn.note}
                 </div>
+              ) : turn.probe ? (
+                <div className="rounded-2xl rounded-tl-md bg-white border border-slate-200 shadow-sm px-3.5 py-3 space-y-2.5">
+                  <div className="text-sm text-slate-700 leading-relaxed">{turn.probe.text}</div>
+                  <div className="flex flex-col gap-1.5">
+                    {turn.probe.options.map((o, idx) => (
+                      <button key={idx} onClick={() => send(o)}
+                        className="tap text-left rounded-lg border border-slate-200 bg-white hover:border-brand-700 hover:text-brand-700 px-3 py-2 text-xs font-medium transition">
+                        {o}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="text-[11px] text-slate-400">…or type what’s happening in your own words.</div>
+                </div>
               ) : turn.flowNode ? (
                 <FlowNodeCard
                   turn={turn}
@@ -663,7 +741,7 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
                   Shown on every real attempt, including no-result (they may have
                   resolved it via the web / a ticket). Mid-flow nodes skip it —
                   feedback belongs at the end of a diagnostic run. */}
-              {!turn.loading && !turn.note && (!turn.flowNode || turn.flowTerminal) && (
+              {!turn.loading && !turn.note && !turn.probe && (!turn.flowNode || turn.flowTerminal) && (
                 <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5">
                   <AnswerFeedback
                     key={`${turn.narrowedLabel ?? ''}|${turn.answer ? turn.answer.slice(0, 24) : (turn.hits?.[0]?.document_id ?? '')}`}

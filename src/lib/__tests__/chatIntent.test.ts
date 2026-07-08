@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { conversationalReply } from '../chatIntent';
+import { conversationalReply, isVagueQuery } from '../chatIntent';
 
 describe('conversationalReply', () => {
   it('responds to greetings', () => {
@@ -37,5 +37,29 @@ describe('conversationalReply', () => {
   it('returns null for empty input', () => {
     expect(conversationalReply('')).toBeNull();
     expect(conversationalReply('   ')).toBeNull();
+  });
+});
+
+describe('isVagueQuery', () => {
+  it('flags device-only complaints with no symptom', () => {
+    expect(isVagueQuery('sensor not working')).toBe(true);
+    expect(isVagueQuery('my sensor is broken')).toBe(true);
+    expect(isVagueQuery('there is a problem with the device')).toBe(true);
+    expect(isVagueQuery('meter kharab hai')).toBe(true);
+    expect(isVagueQuery('probe kaam nahi chalta')).toBe(true);
+    expect(isVagueQuery('please help fix the sensor')).toBe(true);
+  });
+
+  it('passes queries that name a symptom, parameter, or model', () => {
+    expect(isVagueQuery('flow sensor shows zero')).toBe(false);
+    expect(isVagueQuery('pH reading is drifting')).toBe(false);
+    expect(isVagueQuery('display is blank')).toBe(false);
+    expect(isVagueQuery('UPCS-MAG-110 not working')).toBe(false); // model no. = specific
+    expect(isVagueQuery('sensor leaking')).toBe(false);
+    expect(isVagueQuery('how do I calibrate the sensor')).toBe(false);
+  });
+
+  it('does not flag empty input (small-talk handles that)', () => {
+    expect(isVagueQuery('')).toBe(false);
   });
 });
