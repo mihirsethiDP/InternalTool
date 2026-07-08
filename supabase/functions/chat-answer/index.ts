@@ -290,6 +290,9 @@ Deno.serve(async (req) => {
       '- Technicians may be low-literacy: one short instruction per node, simple words, no jargon beyond what the doc uses.',
       '- When the documentation does not cover a branch, end it with an "escalate" node instead of guessing.',
       '- Every question node needs 2+ options. Every path must end in a "resolve" or "escalate" node.',
+      '- The assistant ALREADY establishes which sensor the user has before a flow starts. NEVER ask whether the sensor is a particular model ("Is it a VizSens pH?").',
+      '- If the documentation covers multiple VARIANTS and their steps genuinely differ, use ONE question node listing the variants as options ("Which type is it?" with one option per variant) — never a chain of yes/no identity questions. If the steps are the same for all variants, do not mention variants at all.',
+      '- Questions should be about the SYMPTOM or the result of a check ("Is the display blank?", "Did the reading stabilise?"), not about what equipment the user owns.',
       'Respond with strict JSON only.',
     ].join('\n');
     const user = [
