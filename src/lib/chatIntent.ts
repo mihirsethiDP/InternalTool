@@ -22,11 +22,20 @@ export function conversationalReply(raw: string): string | null {
   return null;
 }
 
+// Hinglish complaint vocabulary — the SINGLE source shared with the spelling
+// lexicon (which must know these words so the corrector never rewrites them,
+// e.g. 'band' must not become 'brand'; vagueness detection needs them intact).
+export const HINGLISH_COMPLAINT_WORDS = [
+  'kharab', 'kaam', 'nahi', 'nahin', 'chal', 'chalta', 'kar', 'karta', 'karti', 'hua', 'hui',
+  'raha', 'rahi', 'gaya', 'gayi', 'band', 'theek', 'thik', 'hai', 'ho', 'mera', 'meri',
+  'apna', 'koi', 'kuch', 'jaldi', 'bhai', 'ji', 'sir', 'madam',
+];
+
 // Words that say "something is broken" without saying WHAT: naming the device
 // or a complaint, but no symptom, parameter, or model. A message made only of
 // these (e.g. "sensor not working", "meter kharab hai") can't be answered from
 // docs — the assistant should PROBE (which sensor? what is it doing?) instead
-// of dumping a generic answer. Includes common Hinglish complaint words.
+// of dumping a generic answer.
 const GENERIC_TOKENS = new Set([
   // the device, generically
   'sensor', 'sensors', 'probe', 'meter', 'device', 'instrument', 'transmitter', 'equipment', 'machine', 'unit',
@@ -37,15 +46,22 @@ const GENERIC_TOKENS = new Set([
   // negation / filler that carries no searchable signal
   'not', 'no', 'isnt', 'doesnt', 'dont', 'wont', 'cant', 'stopped', 'stops',
   'please', 'there', 'something', 'anything', 'very', 'really',
-  // Hinglish complaint words
-  'kharab', 'kaam', 'nahi', 'nahin', 'chal', 'chalta', 'raha', 'rahi', 'gaya', 'gayi', 'band', 'theek', 'thik', 'hai', 'ho',
+  'at', 'all', 'still', 'now', 'again', 'always', 'since', 'urgent', 'urgently',
+  ...HINGLISH_COMPLAINT_WORDS,
 ]);
 
 // True when the message contains no token that could actually narrow a search —
 // run on SPELL-CORRECTED text so "senser not workng" is judged as "sensor not
 // working". Empty-token messages are NOT vague here (small-talk handles them).
+// This client heuristic is the fast path; the route-mode LLM's `vague` flag
+// (chat-answer edge function) backs it up for phrasings this list misses.
 export function isVagueQuery(corrected: string): boolean {
-  const toks = queryTokens(corrected);
+  // Uppercase DO = dissolved oxygen (a named parameter, so NOT vague) — but
+  // lowercase "do" is just a verb queryTokens drops as a stopword anyway.
+  if (/\bDO\b/.test(corrected)) return false;
+  // Strip apostrophes BEFORE tokenizing so "isn't" matches the 'isnt' token
+  // (queryTokens would otherwise split it into 'isn' + dropped 't').
+  const toks = queryTokens(corrected.replace(/['’]/g, ''));
   if (toks.length === 0) return false;
   return toks.every((t) => GENERIC_TOKENS.has(t));
 }

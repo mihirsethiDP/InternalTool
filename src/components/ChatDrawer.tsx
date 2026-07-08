@@ -138,6 +138,7 @@ async function routeQuery(query: string): Promise<{
   categories: { id: string; name: string }[];
   top: { id: string; name: string; confidence: number } | null;
   intent?: 'troubleshoot' | 'howto' | 'info' | 'other';
+  vague?: boolean;
   normalized?: string | null;
   slots?: { make: string | null; model: string | null };
 } | null> {
@@ -204,6 +205,10 @@ const SUGGESTIONS = [
   'Flow meter shows zero despite flow',
 ];
 
+// One tappable-chip style for every quick-reply in the drawer (probe symptoms,
+// guided narrowing, flow options) — keep visuals in lockstep.
+export const CHIP_CLS = 'tap text-left rounded-lg border border-slate-200 bg-white hover:border-brand-700 hover:text-brand-700 px-3 py-2 text-xs font-medium transition';
+
 // Fallback symptom chips for the vague-query probe when no approved
 // flows/rules exist in scope yet. Phrased the way an operator would tap.
 const GENERIC_SYMPTOMS = [
@@ -215,25 +220,37 @@ const GENERIC_SYMPTOMS = [
 ];
 
 // Symptom chips for the probe, sourced from what we can actually diagnose in
-// scope: approved flow titles (category-scoped) + approved rule problems
-// (model-scoped), topped up with the generic list.
+// scope, topped up with the generic list. Flow titles are only offered when a
+// CATEGORY is known (cross-category titles would advertise flows that
+// matchFlow then refuses to run); model-specific flows for OTHER models are
+// excluded for the same reason.
 async function symptomOptions(scope: { categoryId?: string | null; modelId?: string | null; generalModelId?: string | null } | null): Promise<string[]> {
   const opts: string[] = [];
   try {
-    let fq = supabase.from('diagnostic_flows').select('title').eq('status', 'approved').limit(6);
-    if (scope?.categoryId) fq = fq.eq('sensor_category_id', scope.categoryId);
-    const { data: flows } = await fq;
-    opts.push(...((flows ?? []) as any[]).map((f) => f.title));
-    const ids = [scope?.modelId, scope?.generalModelId].filter(Boolean) as string[];
-    if (ids.length) {
-      const { data: rules } = await supabase
-        .from('routing_rules').select('problem').in('sensor_model_id', ids).eq('status', 'approved').limit(6);
-      opts.push(...((rules ?? []) as any[]).map((r) => r.problem));
+    let fq = null;
+    if (scope?.categoryId) {
+      let q = supabase.from('diagnostic_flows').select('title')
+        .eq('status', 'approved').eq('sensor_category_id', scope.categoryId)
+        .order('created_at', { ascending: false }).limit(6);
+      if (scope.modelId) q = q.or(`sensor_model_id.is.null,sensor_model_id.eq.${scope.modelId}`);
+      fq = q;
     }
+    const ids = [scope?.modelId, scope?.generalModelId].filter(Boolean) as string[];
+    const rq = ids.length
+      ? supabase.from('routing_rules').select('problem').in('sensor_model_id', ids).eq('status', 'approved').limit(6)
+      : null;
+    const [flows, rules] = await Promise.all([fq, rq]);
+    opts.push(...(((flows as any)?.data ?? []) as any[]).map((f) => f.title));
+    opts.push(...(((rules as any)?.data ?? []) as any[]).map((r) => r.problem));
   } catch { /* fall through to generic */ }
-  const uniq = [...new Set(opts.map((s) => (s ?? '').trim()).filter(Boolean))];
-  for (const g of GENERIC_SYMPTOMS) { if (uniq.length >= 6) break; if (!uniq.includes(g)) uniq.push(g); }
-  return uniq.slice(0, 6);
+  return [...new Set([...opts.map((s) => (s ?? '').trim()).filter(Boolean), ...GENERIC_SYMPTOMS])].slice(0, 6);
+}
+
+// The probe's phrasing, shared by send() and narrowTurn() so the copy never drifts.
+function probeText(scopeLabel?: string | null): string {
+  return scopeLabel
+    ? `Got it — trouble with your ${scopeLabel}. What exactly is it doing?`
+    : 'Let’s figure this out together. What is the sensor doing?';
 }
 
 export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
@@ -371,13 +388,16 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
       // Judge vagueness on what the USER actually said (corrected) — the
       // router's normalized restatement below is for retrieval and would make
       // "sensor not working" look specific ("not functioning correctly").
-      const vague = isVagueQuery(mq);
+      let vague = isVagueQuery(mq);
 
       // If we have no scope yet, interpret the message: sensor TYPE + intent +
       // any make/model actually mentioned (handles vague/misspelled phrasing).
       if (!activeScope) {
         const r = await routeQuery(mq);
         if (r?.categories?.length) setRouteOrder(r.categories.map((c) => c.id));
+        // The LLM backs up the client word-list for vague phrasings it misses
+        // ("sensor not working at all", "mera meter kharab hai").
+        if (r?.vague === true) vague = true;
         // A normalized restatement beats our token-level correction for matching.
         if (r?.normalized) mq = r.normalized;
         // If the message itself names a model we have, scope straight to it —
@@ -409,22 +429,32 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
         }
       }
 
-      // ---- Priority 1: an approved diagnostic flow matches → run it instead of RAG.
-      const flow = await matchFlow(mq, { categoryId: activeScope?.categoryId ?? null, modelId: activeScope?.modelId ?? null });
+      // ---- Priority 1+2: approved flow, and routed rule (in parallel — the
+      // rule must be checked BEFORE the vague gate, or a rule whose approved
+      // problem text is itself generic ("sensor stopped working") becomes
+      // unreachable and its probe chip would loop forever).
+      const candidateIds = [activeScope?.modelId, activeScope?.generalModelId].filter(Boolean) as string[];
+      const [flow, routed] = await Promise.all([
+        matchFlow(mq, { categoryId: activeScope?.categoryId ?? null, modelId: activeScope?.modelId ?? null }),
+        candidateIds.length ? matchRule(mq, candidateIds) : Promise.resolve(null),
+      ]);
       if (flow) {
         await startFlow(flow, activeScope?.label);
         return;
       }
 
-      // ---- Too vague to answer ("sensor not working") → PROBE, don't dump a
-      // generic answer. Ask what it's doing (symptom chips); if the sensor kind
-      // isn't known yet, the guided picker below asks that too.
+      // ---- Too vague to answer ("sensor not working") → don't dump a generic
+      // answer. If a rule still routed it, point at the procedure; otherwise
+      // PROBE: ask what it's doing (symptom chips) and log the gap so admins
+      // see which phrasings users actually bring.
       if (vague) {
+        if (routed) {
+          setTurns((t) => fillLoadingTurn(t, { role: 'bot', query: q, loading: false, narrowedLabel: activeScope?.label, answer: null, citations: [], hits: [], routed }));
+          return;
+        }
+        logUnanswered({ query: q, source: 'chat', sensorModelId: activeScope?.modelId ?? null });
         const options = await symptomOptions(activeScope);
-        const text = activeScope
-          ? `Got it — trouble with ${activeScope.label ? `your ${activeScope.label.replace(/ sensors$/, '')} sensor` : 'your sensor'}. What exactly is it doing?`
-          : 'Let’s figure this out together. What is the sensor doing?';
-        setTurns((t) => fillLoadingTurn(t, { role: 'bot', query: q, loading: false, narrowedLabel: activeScope?.label, probe: { text, options } }));
+        setTurns((t) => fillLoadingTurn(t, { role: 'bot', query: q, loading: false, narrowedLabel: activeScope?.label, probe: { text: probeText(activeScope?.label), options } }));
         return;
       }
 
@@ -436,12 +466,8 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
               const { data } = await supabase.rpc('chat_search', { q: mq, p_limit: 5 });
               return enrichHits((data as Hit[]) ?? []);
             };
-      // ---- Priority 2+3: routed rule + grounded RAG answer (in parallel).
-      const candidateIds = [activeScope?.modelId, activeScope?.generalModelId].filter(Boolean) as string[];
-      const [result, routed] = await Promise.all([
-        askAssistant(mq, { sensorModelId: activeScope?.modelId ?? null, categoryId: activeScope?.categoryId ?? null }, fallback),
-        candidateIds.length ? matchRule(mq, candidateIds) : Promise.resolve(null),
-      ]);
+      // ---- Priority 3: grounded RAG answer.
+      const result = await askAssistant(mq, { sensorModelId: activeScope?.modelId ?? null, categoryId: activeScope?.categoryId ?? null }, fallback);
       if (!result.answer && result.hits.length === 0) {
         logUnanswered({ query: q, source: 'chat', sensorModelId: activeScope?.modelId ?? null });
       }
@@ -512,20 +538,25 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
 
   // Re-scope a bot turn to a specific sensor (+ its category general guidance),
   // and remember the scope so following questions stay scoped too.
-  async function narrowTurn(turnIndex: number, query: string, modelId: string, generalModelId: string | null, label: string) {
-    const newScope = { modelId, generalModelId, label, categoryId: scope?.categoryId ?? null };
+  async function narrowTurn(turnIndex: number, query: string, modelId: string, generalModelId: string | null, label: string, categoryId: string | null) {
+    // The picker supplies the model's REAL category — never trust the render
+    // closure's scope here (send() may have set a category concurrently).
+    const newScope = { modelId, generalModelId, label, categoryId };
     setScope(newScope);
     setTurns((t) => t.map((turn, i) => (i === turnIndex && turn.role === 'bot') ? { ...turn, loading: true } : turn));
     try {
       // The original question may have been vague ("sensor not working") — now
-      // that we know WHICH sensor, ask what it's doing rather than re-running
+      // that we know WHICH sensor, check the router first (a rule may handle
+      // the generic phrasing), then ask what it's doing rather than re-running
       // a search that can only produce a generic dump.
       let vague = false;
       try { vague = isVagueQuery((await correctSpelling(query)).text); } catch { vague = isVagueQuery(query); }
       if (vague) {
-        const options = await symptomOptions(newScope);
+        const routed = await matchRule(query, [modelId, generalModelId].filter(Boolean) as string[]);
+        if (!routed) logUnanswered({ query, source: 'chat', sensorModelId: modelId });
+        const options = routed ? [] : await symptomOptions(newScope);
         setTurns((t) => t.map((turn, i) => (i === turnIndex && turn.role === 'bot')
-          ? { ...turn, loading: false, narrowedLabel: label, answer: null, citations: [], hits: [], routed: null, probe: { text: `Got it — your ${label}. What exactly is it doing?`, options } }
+          ? { ...turn, loading: false, narrowedLabel: label, answer: null, citations: [], hits: [], routed: routed ?? null, probe: routed ? undefined : { text: probeText(label), options } }
           : turn));
         return;
       }
@@ -674,10 +705,7 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
                   <div className="text-sm text-slate-700 leading-relaxed">{turn.probe.text}</div>
                   <div className="flex flex-col gap-1.5">
                     {turn.probe.options.map((o, idx) => (
-                      <button key={idx} onClick={() => send(o)}
-                        className="tap text-left rounded-lg border border-slate-200 bg-white hover:border-brand-700 hover:text-brand-700 px-3 py-2 text-xs font-medium transition">
-                        {o}
-                      </button>
+                      <button key={idx} onClick={() => send(o)} className={CHIP_CLS}>{o}</button>
                     ))}
                   </div>
                   <div className="text-[11px] text-slate-400">…or type what’s happening in your own words.</div>
@@ -763,7 +791,7 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
                   key={`gn-${i}-${scope?.categoryId ?? 'none'}`}
                   initialCategoryId={scope?.categoryId ?? undefined}
                   orderedCategoryIds={routeOrder}
-                  onPick={(modelId, generalModelId, label) => narrowTurn(i, turn.query, modelId, generalModelId, label)}
+                  onPick={(modelId, generalModelId, label, categoryId) => narrowTurn(i, turn.query, modelId, generalModelId, label, categoryId)}
                 />
               )}
               </div>
@@ -837,7 +865,7 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
 // chips, so they don't need to know (or type) the make/model. Picking a model
 // re-runs their question scoped to that sensor (+ its category guidance).
 function GuidedNarrow({ onPick, initialCategoryId, orderedCategoryIds }: {
-  onPick: (modelId: string, generalModelId: string | null, label: string) => void;
+  onPick: (modelId: string, generalModelId: string | null, label: string, categoryId: string | null) => void;
   initialCategoryId?: string;
   orderedCategoryIds?: string[];
 }) {
@@ -875,10 +903,11 @@ function GuidedNarrow({ onPick, initialCategoryId, orderedCategoryIds }: {
 
   function pickModel(m: any) {
     const generalModelId = (generalModels.data ?? []).find((g: any) => g.category_id === m.category_id)?.id ?? null;
-    onPick(m.id, generalModelId, `${makeName(makeId)} ${m.model_no || m.name}`.trim());
+    // Pass the model's REAL category so downstream scoping never guesses.
+    onPick(m.id, generalModelId, `${makeName(makeId)} ${m.model_no || m.name}`.trim(), m.category_id ?? null);
   }
 
-  const chip = 'tap text-left rounded-lg border border-slate-200 bg-white hover:border-brand-700 hover:text-brand-700 px-3 py-2 text-xs font-medium transition';
+  const chip = CHIP_CLS;
 
   return (
     <div className="bg-gradient-to-br from-brand-50 to-white border border-brand-100 rounded-xl px-3 py-3 space-y-2.5 shadow-sm">
@@ -1020,7 +1049,7 @@ function FlowNodeCard({ turn, active, failNext, onChoose, onTicket }: {
   onTicket: () => void;
 }) {
   const n = turn.flowNode!;
-  const chip = 'tap text-left rounded-lg border border-slate-200 bg-white hover:border-brand-700 hover:text-brand-700 px-3 py-2 text-xs font-medium transition';
+  const chip = CHIP_CLS;
 
   if (n.kind === 'resolve') {
     return (

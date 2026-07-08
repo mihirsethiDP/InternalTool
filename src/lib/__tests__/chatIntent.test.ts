@@ -59,6 +59,22 @@ describe('isVagueQuery', () => {
     expect(isVagueQuery('how do I calibrate the sensor')).toBe(false);
   });
 
+  it('handles apostrophes ("isn\'t working" = "isnt working")', () => {
+    expect(isVagueQuery("sensor isn't working")).toBe(true);
+    expect(isVagueQuery('sensor doesn’t work')).toBe(true);
+  });
+
+  it('flags filler-padded and Hinglish auxiliary phrasings', () => {
+    expect(isVagueQuery('sensor not working at all')).toBe(true);
+    expect(isVagueQuery('sensor kaam nahi kar raha hai')).toBe(true);
+    expect(isVagueQuery('mera meter kharab ho gaya')).toBe(true);
+  });
+
+  it('treats uppercase DO (dissolved oxygen) as specific', () => {
+    expect(isVagueQuery('DO sensor not working')).toBe(false);
+    expect(isVagueQuery('is my DO probe faulty')).toBe(false);
+  });
+
   it('does not flag empty input (small-talk handles that)', () => {
     expect(isVagueQuery('')).toBe(false);
   });

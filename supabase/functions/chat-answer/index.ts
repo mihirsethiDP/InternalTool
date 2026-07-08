@@ -407,6 +407,7 @@ Deno.serve(async (req) => {
       '',
       'Return strict JSON: {"ranking": [<type numbers, most likely first, up to 4>], "confidence": <0 to 1 that the top type is correct>,',
       ' "intent": "<troubleshoot | howto | info | other>",',
+      ' "vague": <true if the message gives NO concrete symptom, parameter, or model — just "broken/not working"-style complaints — so the assistant should ask what the sensor is doing>,',
       ' "normalized": "<the message restated as one clear English problem statement>",',
       ' "make": "<manufacturer name if the message mentions one, else empty string>",',
       ' "model": "<model number/name if the message mentions one, else empty string>"}',
@@ -424,6 +425,7 @@ Deno.serve(async (req) => {
       categories: ordered.map((c) => ({ id: c.id, name: c.name })),
       top: ordered[0] ? { id: ordered[0].id, name: ordered[0].name, confidence } : null,
       intent: VALID_INTENTS.includes(parsed.intent) ? parsed.intent : 'other',
+      vague: parsed.vague === true,
       normalized: String(parsed.normalized ?? '').slice(0, 300) || null,
       slots: {
         make: String(parsed.make ?? '').slice(0, 80) || null,

@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { HINGLISH_COMPLAINT_WORDS } from './chatIntent';
 
 // Spell-tolerant input normalization for Dr. Paani.
 //
@@ -19,9 +20,9 @@ const CORE_WORDS = [
   'error', 'fault', 'alarm', 'blank', 'zero', 'drift', 'drifting', 'fluctuating',
   'unstable', 'stuck', 'frozen', 'leaking', 'cable', 'wiring', 'power', 'supply',
   'voltage', 'output', 'working', 'showing', 'wrong', 'broken', 'problem',
-  // Hinglish complaint words — known so the corrector never "fixes" them
-  // (e.g. 'band' must not become 'brand'); vagueness detection needs them intact.
-  'kharab', 'kaam', 'nahi', 'chalta', 'band', 'theek',
+  // Hinglish complaint words (shared list) — known so the corrector never
+  // "fixes" them (e.g. 'band' → 'brand'); vagueness detection needs them intact.
+  ...HINGLISH_COMPLAINT_WORDS,
 ];
 
 let lexicon: Set<string> | null = null;
