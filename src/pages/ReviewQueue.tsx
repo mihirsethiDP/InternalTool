@@ -5,6 +5,7 @@ import { FileText } from 'lucide-react';
 import SegmentedFilter from '../components/SegmentedFilter';
 import { supabase } from '../lib/supabase';
 import { useAuth, isAdmin } from '../lib/auth';
+import { softDeleteSubmission } from '../lib/recycleBin';
 import PageHeader from '../components/PageHeader';
 import type { SubmissionSection } from '../lib/types';
 import {
@@ -26,6 +27,7 @@ export function ReviewQueueList() {
       let q = supabase
         .from('document_submissions')
         .select('*, document_types(label), sensor_models(model_no, sensor_makes(name))')
+        .is('deleted_at', null)
         .order('uploaded_at', { ascending: false });
       if (status !== 'all') q = q.eq('status', status);
       const { data } = await q;
@@ -39,7 +41,7 @@ export function ReviewQueueList() {
       const r: any = {};
       for (const s of ['pending', 'changes_requested', 'approved', 'rejected'] as const) {
         const { count } = await supabase
-          .from('document_submissions').select('id', { count: 'exact', head: true }).eq('status', s);
+          .from('document_submissions').select('id', { count: 'exact', head: true }).eq('status', s).is('deleted_at', null);
         r[s] = count ?? 0;
       }
       return r;
@@ -205,7 +207,7 @@ export function ReviewQueueDetail() {
           <div className="flex items-center gap-3 flex-wrap">
             {s.reviewer_notes && <div className="text-xs text-slate-600"><strong>Note:</strong> {s.reviewer_notes}</div>}
             {(s.status === 'rejected' || s.status === 'changes_requested') && s.storage_path && (
-              <button onClick={() => setDeleteOpen(true)} className="text-xs text-red-600 hover:underline">Delete file permanently</button>
+              <button onClick={() => setDeleteOpen(true)} className="text-xs text-red-600 hover:underline">Move to recycle bin</button>
             )}
           </div>
         )}
@@ -557,24 +559,22 @@ function RejectModal({ submission, onClose, onDone }: any) {
 }
 
 /* =========================================================
-   Delete file permanently — explicit purge of a non-pending submission
+   Delete submission — soft delete into the 30-day recycle bin
 ========================================================= */
 function DeleteFileModal({ submission, onClose, onDone }: any) {
   const qc = useQueryClient();
+  const { userId } = useAuth();
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   async function confirm() {
     setBusy(true); setErr(null);
     try {
-      if (submission.storage_path) {
-        const { error: storageErr } = await supabase.storage.from('documents').remove([submission.storage_path]);
-        if (storageErr) console.warn('storage delete:', storageErr);
-      }
-      const upd = await supabase.from('document_submissions').update({ storage_path: null }).eq('id', submission.id);
-      if (upd.error) throw upd.error;
+      await softDeleteSubmission(submission.id, userId);
       qc.invalidateQueries({ queryKey: ['review-queue'] });
+      qc.invalidateQueries({ queryKey: ['review-queue-counts'] });
       qc.invalidateQueries({ queryKey: ['submission', submission.id] });
+      qc.invalidateQueries({ queryKey: ['bin-subs'] });
       onDone();
     } catch (e: any) {
       setErr(e.message || String(e));
@@ -586,13 +586,13 @@ function DeleteFileModal({ submission, onClose, onDone }: any) {
     <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-4" onClick={(e) => e.stopPropagation()}>
         <div>
-          <h3 className="text-lg font-bold">Delete file permanently?</h3>
-          <p className="text-sm text-slate-500">This removes the uploaded file from storage for good. The submission record and its notes are kept for audit. Use this only for junk or sensitive uploads.</p>
+          <h3 className="text-lg font-bold">Move to recycle bin?</h3>
+          <p className="text-sm text-slate-500">The submission and its file move to Admin → Recycle bin, restorable for 30 days. After that they're removed for good. You can also delete forever from the bin.</p>
         </div>
         {err && <div className="text-sm text-red-700 bg-red-50 border border-red-100 rounded px-3 py-2">{err}</div>}
         <div className="flex justify-end gap-2">
           <button onClick={onClose} className="btn-ghost">Cancel</button>
-          <button onClick={confirm} disabled={busy} className="btn bg-red-600 text-white hover:bg-red-700">{busy ? 'Deleting…' : 'Delete permanently'}</button>
+          <button onClick={confirm} disabled={busy} className="btn bg-red-600 text-white hover:bg-red-700">{busy ? 'Moving…' : 'Move to recycle bin'}</button>
         </div>
       </div>
     </div>

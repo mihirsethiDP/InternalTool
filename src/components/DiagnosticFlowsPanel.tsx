@@ -32,7 +32,7 @@ export default function DiagnosticFlowsPanel() {
     queryFn: async () => {
       const { data } = await supabase
         .from('consolidated_docs')
-        .select('id, content_markdown, sensor_models(model_no, name, is_general, sensor_makes(name), sensor_categories(name))');
+        .select('id, content_markdown, sensor_models(model_no, name, is_general, sensor_makes(name), sensor_categories(name))').is('deleted_at', null);
       return ((data ?? []) as any[])
         .filter((d) => (d.content_markdown ?? '').trim().length >= 200)
         .map((d): DocOption => {
@@ -364,29 +364,59 @@ function EscalationContactsCard() {
       <div className="bg-slate-50 px-4 sm:px-5 py-3 border-b border-slate-200">
         <div className="text-sm font-semibold text-slate-800 flex items-center gap-2"><PhoneCall size={14} className="text-slate-500" /> Escalation directory</div>
         <div className="text-[11px] text-slate-500 mt-0.5">
-          Who Dr. Paani points to when a flow needs outside help. Add a default per skill, then plant-specific people or make-specific vendor contacts where they differ.
+          Who Dr. Paani points to when a diagnosis needs outside help. Tap a skill to manage its people.
         </div>
       </div>
+      {/* Progressive disclosure: one calm summary row per skill; details on demand. */}
       <div className="bg-white divide-y divide-slate-100">
         {[...groups.entries()].map(([skill, rows]) => (
-          <div key={skill} className="px-4 sm:px-5 py-3 space-y-1.5">
-            <div className="flex items-baseline gap-2">
-              <div className="text-xs font-semibold text-slate-800">{rows[0]?.label ?? skill}</div>
-              <div className="font-mono text-[10px] text-slate-400">{skill}</div>
-            </div>
-            {rows.map((c) => <ContactRow key={c.id} c={c} onPatch={patch} onRemove={() => remove(c.id)} />)}
-          </div>
+          <SkillGroup key={skill} skill={skill} rows={rows}
+            plants={(plants.data ?? []) as any[]} makes={(makes.data ?? []) as any[]}
+            onPatch={patch} onRemove={remove} onAdded={refresh} />
         ))}
         {!contacts.isLoading && list.length === 0 && (
-          <div className="px-4 py-4 text-sm text-slate-400">No entries yet. If the seeded skills aren’t showing, make sure migrations 034 and 035 have been run.</div>
+          <div className="px-4 py-4 text-sm text-slate-400">No entries yet. If the seeded skills aren’t showing, make sure migrations 034–036 have been run.</div>
         )}
         <AddContactRow
-          skills={[...groups.entries()].map(([k, rows]) => ({ key: k, label: rows[0]?.label ?? k }))}
+          skills={[]}
           plants={(plants.data ?? []) as any[]}
           makes={(makes.data ?? []) as any[]}
           onAdded={refresh}
         />
       </div>
+    </div>
+  );
+}
+
+// One collapsed row per skill: name + whether anyone is reachable. Expanding
+// reveals the entries and a scoped add form for THAT skill.
+function SkillGroup({ skill, rows, plants, makes, onPatch, onRemove, onAdded }: {
+  skill: string; rows: any[]; plants: { id: string; name: string }[]; makes: { id: string; name: string }[];
+  onPatch: (id: string, f: Partial<EscalationContact>) => Promise<void>;
+  onRemove: (id: string) => Promise<void>;
+  onAdded: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const reachable = rows.filter((c) => c.active && (c.person_name || c.contact)).length;
+  return (
+    <div>
+      <button onClick={() => setOpen((v) => !v)} aria-expanded={open}
+        className="tap w-full px-4 sm:px-5 py-3 flex items-center gap-2.5 text-left hover:bg-slate-50 transition">
+        {open ? <ChevronDown size={15} className="text-slate-400 shrink-0" /> : <ChevronRight size={15} className="text-slate-400 shrink-0" />}
+        <span className="text-sm font-medium text-slate-800 flex-1 min-w-0 truncate">{rows[0]?.label ?? skill}</span>
+        <span className={`shrink-0 text-[11px] rounded-full px-2 py-0.5 font-medium ${
+          reachable > 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-800'
+        }`}>
+          {reachable > 0 ? `${reachable} contact${reachable === 1 ? '' : 's'}` : 'no contact yet'}
+        </span>
+      </button>
+      {open && (
+        <div className="px-4 sm:px-5 pb-3 pl-11 space-y-1.5">
+          {rows.map((c) => <ContactRow key={c.id} c={c} onPatch={onPatch} onRemove={() => onRemove(c.id)} />)}
+          <AddContactRow skills={[{ key: skill, label: rows[0]?.label ?? skill }]}
+            plants={plants} makes={makes} onAdded={onAdded} fixedSkill={skill} />
+        </div>
+      )}
     </div>
   );
 }
@@ -418,14 +448,16 @@ function ContactRow({ c, onPatch, onRemove }: { c: any; onPatch: (id: string, f:
   );
 }
 
-// Add an entry: existing skill (or a new one), optional plant OR make scope.
-function AddContactRow({ skills, plants, makes, onAdded }: {
+// Add an entry. With fixedSkill (inside an expanded group) it adds people to
+// that skill; without, it only creates a brand-new skill.
+function AddContactRow({ skills, plants, makes, onAdded, fixedSkill }: {
   skills: { key: string; label: string }[];
   plants: { id: string; name: string }[];
   makes: { id: string; name: string }[];
   onAdded: () => void;
+  fixedSkill?: string;
 }) {
-  const [skill, setSkill] = useState('');
+  const [skill, setSkill] = useState(fixedSkill ?? '');
   const [newLabel, setNewLabel] = useState('');
   const [scope, setScope] = useState(''); // '', 'plant:<id>', 'make:<id>'
   const [name, setName] = useState('');
@@ -448,17 +480,19 @@ function AddContactRow({ skills, plants, makes, onAdded }: {
       sort_order: 100,
     });
     setBusy(false);
-    setSkill(''); setNewLabel(''); setScope(''); setName(''); setContact('');
+    setSkill(fixedSkill ?? ''); setNewLabel(''); setScope(''); setName(''); setContact('');
     onAdded();
   }
 
   return (
-    <div className="px-4 sm:px-5 py-3 bg-slate-50/60 flex items-center gap-2 flex-wrap">
-      <select value={skill} onChange={(e) => setSkill(e.target.value)} className="input text-xs w-44">
-        <option value="">Add entry — pick skill…</option>
-        {skills.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
-        <option value="__new__">+ New skill…</option>
-      </select>
+    <div className={`flex items-center gap-2 flex-wrap ${fixedSkill ? 'pt-1' : 'px-4 sm:px-5 py-3 bg-slate-50/60'}`}>
+      {!fixedSkill && (
+        <select value={skill} onChange={(e) => setSkill(e.target.value)} className="input text-xs w-44" aria-label="New skill">
+          <option value="">Add a new skill…</option>
+          <option value="__new__">+ New skill…</option>
+        </select>
+      )}
+      {fixedSkill && <span className="text-[11px] text-slate-400 shrink-0">Add person:</span>}
       {skill === '__new__' && (
         <input value={newLabel} onChange={(e) => setNewLabel(e.target.value)} placeholder="Skill name (e.g. Pump vendor)" className="input text-xs w-40" />
       )}

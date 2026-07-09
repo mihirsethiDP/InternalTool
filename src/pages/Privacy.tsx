@@ -17,7 +17,7 @@ export default function Privacy() {
 
         <div className="bg-white rounded-2xl border border-slate-200 p-8 prose-policy">
           <div className="text-xs uppercase tracking-wider text-brand-700 font-semibold mb-2">DigitalPaani</div>
-          <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Privacy Notice — Internal Document Hub</h1>
+          <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Privacy Notice — Sensor Troubleshooting Tool</h1>
           <p className="text-sm text-slate-500 mt-1">Last updated: 16 June 2026 · Applies to the internal Sensor Troubleshooting Hub</p>
 
           <Section title="1. Who this applies to">

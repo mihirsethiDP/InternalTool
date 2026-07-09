@@ -1097,7 +1097,7 @@ function FlowNodeCard({ turn, active, failNext, onChoose, onTicket }: {
             </div>
           ) : (
             <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] text-slate-400">
-              No contact on file yet — ask your supervisor who covers this.
+              No contact on file yet — an admin can add one in the escalation directory.
             </div>
           )}
           <button onClick={onTicket}

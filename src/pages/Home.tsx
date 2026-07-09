@@ -99,7 +99,7 @@ export default function Home() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('sensor_models')
-        .select('id, model_no, name, is_pilot, sensor_makes(name), sensor_categories(name), consolidated_docs(id)')
+        .select('id, model_no, name, is_pilot, sensor_makes(name), sensor_categories(name), consolidated_docs(id)').is('consolidated_docs.deleted_at', null)
         .eq('is_pilot', true);
       if (error) return [];
       return data ?? [];
@@ -111,7 +111,7 @@ export default function Home() {
     queryFn: async () => {
       const { data } = await supabase
         .from('consolidated_docs')
-        .select('id, last_updated_at, sensor_models(model_no, sensor_makes(name))')
+        .select('id, last_updated_at, sensor_models(model_no, sensor_makes(name))').is('deleted_at', null)
         .order('last_updated_at', { ascending: false })
         .limit(6);
       return data ?? [];

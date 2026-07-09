@@ -18,8 +18,9 @@ export default function RecoveryGate() {
   useEffect(() => {
     // The recovery token is parsed from the URL hash by supabase-js on init,
     // which can emit PASSWORD_RECOVERY before this listener attaches. Catch that
-    // case by also checking the URL hash on mount.
-    if (/[#&]type=recovery/.test(window.location.hash)) setActive(true);
+    // case by also checking the URL hash on mount. Admin INVITES land the same
+    // way with type=invite — the invitee must set a password too.
+    if (/[#&]type=(recovery|invite)/.test(window.location.hash)) setActive(true);
     const { data: sub } = supabase.auth.onAuthStateChange((event) => {
       if (event === 'PASSWORD_RECOVERY') setActive(true);
     });

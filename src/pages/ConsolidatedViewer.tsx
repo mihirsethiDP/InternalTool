@@ -7,7 +7,7 @@ import {
   ExternalLink, FlaskConical, Droplets, CalendarClock, CheckCircle2, Circle,
   FileStack, BookOpenText, History, ScanSearch, Settings,
   Plug, Replace, Globe2, Sparkles, ChevronRight,
-  BookOpen, Cpu, Search as SearchIcon,
+  BookOpen, Cpu, Search as SearchIcon, Type as TypeIcon, Trash2,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth, isAdmin } from '../lib/auth';
@@ -31,6 +31,24 @@ export const SECTION_ICON: Record<SubmissionSection, React.ReactNode> = {
 };
 
 type ViewMode = 'docs' | 'consolidated';
+
+// ---------- Kindle-style reader preferences ----------
+// Three classic themes + font size + serif/sans, persisted per device.
+type ReaderTheme = 'white' | 'sepia' | 'dark';
+interface ReaderPrefs { theme: ReaderTheme; size: number; serif: boolean }
+const READER_SIZES = [15, 16.5, 18, 20, 22];
+const READER_THEMES: Record<ReaderTheme, { page: string; card: string; head: string; border: string; ink: string; heading: string; muted: string; mark: string; markActive: string }> = {
+  white: { page: '#f8fafc', card: '#ffffff', head: '#f8fafc', border: '#e2e8f0', ink: '#1f2937', heading: '#193458', muted: '#64748b', mark: 'rgba(255,213,0,.45)', markActive: 'rgba(255,132,0,.7)' },
+  sepia: { page: '#f3ead7', card: '#fbf0d9', head: '#f3e6c8', border: '#e2d3ae', ink: '#503e28', heading: '#463319', muted: '#8a7452', mark: 'rgba(214,158,0,.4)', markActive: 'rgba(202,108,0,.65)' },
+  dark: { page: '#0f1521', card: '#161f2e', head: '#121a28', border: '#273449', ink: '#cbd5e1', heading: '#e2e8f0', muted: '#7c8ba1', mark: 'rgba(202,138,4,.5)', markActive: 'rgba(234,88,12,.75)' },
+};
+function loadReaderPrefs(): ReaderPrefs {
+  try {
+    const p = JSON.parse(localStorage.getItem('dp-reader') ?? '');
+    if (p && READER_THEMES[p.theme as ReaderTheme]) return { theme: p.theme, size: Math.min(4, Math.max(0, p.size ?? 2)), serif: p.serif !== false };
+  } catch { /* first visit */ }
+  return { theme: 'white', size: 2, serif: true };
+}
 
 export default function ConsolidatedViewer() {
   const { id } = useParams();
@@ -62,6 +80,23 @@ export default function ConsolidatedViewer() {
   const [expanded, setExpanded] = useState<Set<SubmissionSection>>(new Set());
   const toggleExpand = (s: SubmissionSection) =>
     setExpanded((prev) => { const n = new Set(prev); n.has(s) ? n.delete(s) : n.add(s); return n; });
+
+  // Kindle-style reader: theme / type size / face, plus reading progress.
+  const [reader, setReader] = useState<ReaderPrefs>(loadReaderPrefs);
+  const [aaOpen, setAaOpen] = useState(false);
+  const [progress, setProgress] = useState(0);
+  useEffect(() => { try { localStorage.setItem('dp-reader', JSON.stringify(reader)); } catch { /* private mode */ } }, [reader]);
+  useEffect(() => {
+    function onScroll() {
+      const el = document.documentElement;
+      const max = el.scrollHeight - el.clientHeight;
+      setProgress(max > 0 ? Math.min(100, Math.round((el.scrollTop / max) * 100)) : 0);
+    }
+    window.addEventListener('scroll', onScroll, { passive: true });
+    onScroll();
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
+  const rt = READER_THEMES[reader.theme];
 
   const containerRef = useRef<HTMLDivElement>(null);
   const sectionRefs = useRef<Partial<Record<SubmissionSection, HTMLElement | null>>>({});
@@ -240,9 +275,36 @@ export default function ConsolidatedViewer() {
   const title = `${sm?.sensor_makes?.name ?? ''} ${sm?.model_no ?? ''}`.trim();
 
   return (
-    <div className="space-y-5">
-      {/* Page-wide tinted backdrop */}
-      <div aria-hidden className="fixed inset-0 -z-10 bg-gradient-to-b from-brand-50 via-slate-50 to-white" />
+    <div
+      className="space-y-5"
+      data-rt={reader.theme}
+      style={{
+        ['--r-ink' as any]: rt.ink,
+        ['--r-heading' as any]: rt.heading,
+        ['--r-muted' as any]: rt.muted,
+        ['--r-card' as any]: rt.card,
+        ['--r-head' as any]: rt.head,
+        ['--r-border' as any]: rt.border,
+        ['--r-mark' as any]: rt.mark,
+        ['--r-mark-active' as any]: rt.markActive,
+        ['--r-size' as any]: `${READER_SIZES[reader.size]}px`,
+        ['--r-font' as any]: reader.serif ? "Georgia, 'Noto Serif', 'Times New Roman', serif" : "system-ui, 'Segoe UI', sans-serif",
+      }}
+    >
+      {/* Page backdrop follows the reading theme (Kindle-style) */}
+      <div aria-hidden className="fixed inset-0 -z-10 transition-colors" style={{ background: rt.page }} />
+      {/* Reading progress — thin bar pinned to the very top */}
+      <div aria-hidden className="fixed top-0 left-0 right-0 h-[3px] z-50 pointer-events-none">
+        <div className="h-full bg-brand-600 transition-[width] duration-150" style={{ width: `${progress}%` }} />
+      </div>
+
+      {/* In the recycle bin? (only admins can even load it) */}
+      {cdoc.data.deleted_at && (
+        <div className="rounded-xl border border-amber-300 bg-amber-50 text-amber-900 text-sm px-4 py-3 flex items-center gap-2">
+          <Trash2 size={15} className="shrink-0" />
+          This reference is in the recycle bin — it's hidden from users and Dr. Paani. Restore it from Admin → Recycle bin.
+        </div>
+      )}
 
       {/* Hero */}
       <div className="relative overflow-hidden rounded-2xl px-5 py-5 sm:px-7 sm:py-6 shadow-md bg-gradient-to-br from-brand-700 via-brand-800 to-brand-900 text-white">
@@ -335,6 +397,67 @@ export default function ConsolidatedViewer() {
 
           {mode === 'consolidated' && (
             <div className="flex items-center gap-2">
+              {/* Aa — Kindle-style reading preferences */}
+              <div className="relative">
+                <button
+                  onClick={() => setAaOpen((v) => !v)}
+                  aria-expanded={aaOpen}
+                  aria-label="Reading settings"
+                  className={`tap inline-flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition ${
+                    aaOpen ? 'bg-brand-700 text-white border-brand-700' : 'bg-white text-slate-600 border-slate-200 hover:border-brand-700'
+                  }`}
+                >
+                  <TypeIcon size={13} /> Aa
+                </button>
+                {aaOpen && (
+                  <>
+                    <button aria-label="Close reading settings" className="fixed inset-0 z-40 cursor-default" onClick={() => setAaOpen(false)} />
+                    {/* Centered sheet on small screens (an anchored dropdown would hang off-screen); anchored to the button from sm: up */}
+                    <div className="fixed left-1/2 -translate-x-1/2 top-28 sm:absolute sm:left-auto sm:right-0 sm:top-full sm:translate-x-0 sm:mt-2 z-50 w-64 max-w-[calc(100vw-1.5rem)] bg-white rounded-2xl border border-slate-200 shadow-xl p-4 space-y-4">
+                      {/* Theme */}
+                      <div>
+                        <div className="text-[11px] uppercase tracking-wide font-semibold text-slate-400 mb-2">Background</div>
+                        <div className="flex gap-2">
+                          {(['white', 'sepia', 'dark'] as ReaderTheme[]).map((th) => (
+                            <button key={th} onClick={() => setReader((r) => ({ ...r, theme: th }))}
+                              aria-pressed={reader.theme === th}
+                              className={`tap flex-1 rounded-xl border-2 px-2 py-3 text-center text-sm font-semibold transition ${
+                                reader.theme === th ? 'border-brand-600' : 'border-slate-200 hover:border-slate-300'
+                              }`}
+                              style={{ background: READER_THEMES[th].card, color: READER_THEMES[th].ink }}
+                            >
+                              Aa
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      {/* Size */}
+                      <div>
+                        <div className="text-[11px] uppercase tracking-wide font-semibold text-slate-400 mb-2">Text size</div>
+                        <div className="flex items-center gap-2">
+                          <button onClick={() => setReader((r) => ({ ...r, size: Math.max(0, r.size - 1) }))} disabled={reader.size === 0}
+                            aria-label="Smaller text"
+                            className="tap flex-1 rounded-lg border border-slate-200 py-2 text-sm font-semibold text-slate-700 hover:border-brand-600 disabled:opacity-40">A−</button>
+                          <button onClick={() => setReader((r) => ({ ...r, size: Math.min(READER_SIZES.length - 1, r.size + 1) }))} disabled={reader.size === READER_SIZES.length - 1}
+                            aria-label="Larger text"
+                            className="tap flex-1 rounded-lg border border-slate-200 py-2 text-lg font-semibold text-slate-700 hover:border-brand-600 disabled:opacity-40">A+</button>
+                        </div>
+                      </div>
+                      {/* Typeface */}
+                      <div>
+                        <div className="text-[11px] uppercase tracking-wide font-semibold text-slate-400 mb-2">Typeface</div>
+                        <div className="flex gap-2">
+                          <button onClick={() => setReader((r) => ({ ...r, serif: true }))} aria-pressed={reader.serif}
+                            className={`tap flex-1 rounded-lg border py-2 text-sm transition ${reader.serif ? 'border-brand-600 text-brand-800 font-semibold' : 'border-slate-200 text-slate-600'}`}
+                            style={{ fontFamily: 'Georgia, serif' }}>Serif</button>
+                          <button onClick={() => setReader((r) => ({ ...r, serif: false }))} aria-pressed={!reader.serif}
+                            className={`tap flex-1 rounded-lg border py-2 text-sm transition ${!reader.serif ? 'border-brand-600 text-brand-800 font-semibold' : 'border-slate-200 text-slate-600'}`}>Sans</button>
+                        </div>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
               {!isGeneralDoc && hasGeneral && (
                 <button
                   onClick={() => setShowGeneral((v) => !v)}
@@ -474,22 +597,22 @@ export default function ConsolidatedViewer() {
                   key={s}
                   data-section={s}
                   ref={(el) => { sectionRefs.current[s] = el; }}
-                  className={`bg-white rounded-2xl border overflow-hidden scroll-mt-24 transition ${
-                    isMatch && chatAnswer ? 'border-brand-300 ring-2 ring-brand-200 shadow-md' : 'border-slate-200 shadow-sm'
+                  className={`reader-card rounded-2xl border overflow-hidden scroll-mt-24 transition ${
+                    isMatch && chatAnswer ? 'border-brand-300 ring-2 ring-brand-200 shadow-md' : 'shadow-sm'
                   }`}
                 >
                   <button
                     type="button"
                     onClick={collapsible ? () => toggleExpand(s) : undefined}
                     aria-expanded={collapsible ? open : undefined}
-                    className={`w-full flex items-center gap-3 px-4 sm:px-6 py-3.5 border-b border-slate-200 text-left ${
-                      isMatch && chatAnswer ? 'bg-gradient-to-r from-brand-50 to-white' : 'bg-slate-50/80'
-                    } ${collapsible ? 'cursor-pointer hover:bg-slate-100/80 transition' : 'cursor-default'}`}
+                    className={`reader-card-head w-full flex items-center gap-3 px-4 sm:px-6 py-3.5 border-b text-left ${
+                      collapsible ? 'cursor-pointer transition' : 'cursor-default'
+                    }`}
                   >
                     <span className="bg-brand-700 text-white rounded-lg w-8 h-8 flex items-center justify-center shrink-0 shadow-sm">
                       {SECTION_ICON[s]}
                     </span>
-                    <h2 className="text-sm font-semibold text-brand-900 tracking-tight flex-1">{SECTION_LABEL[s]}</h2>
+                    <h2 className="reader-heading text-sm font-semibold tracking-tight flex-1">{SECTION_LABEL[s]}</h2>
                     {isMatch && chatAnswer && (
                       <span className="badge-blue text-[10px] shrink-0">Relevant</span>
                     )}
@@ -510,8 +633,8 @@ export default function ConsolidatedViewer() {
 
                       {/* General (category-level) guidance, layered below */}
                       {showGeneral && !isGeneralDoc && generalSections[s] && (
-                        <div className={`px-4 sm:px-6 py-5 bg-slate-50/70 ${sections[s] ? 'border-t border-slate-200' : ''}`}>
-                          <div className="inline-flex items-center gap-1.5 text-[11px] uppercase tracking-wide font-semibold text-slate-500 mb-2">
+                        <div className={`reader-card-sub px-4 sm:px-6 py-5 ${sections[s] ? 'border-t' : ''}`}>
+                          <div className="reader-muted inline-flex items-center gap-1.5 text-[11px] uppercase tracking-wide font-semibold mb-2">
                             <Globe2 size={12} />
                             General {cdoc.data?.sensor_models?.sensor_categories?.name} guidance
                           </div>
@@ -576,28 +699,46 @@ export default function ConsolidatedViewer() {
       </div>
 
       <style>{`
-        .doc-prose { color: #1f2937; font-size: 0.925rem; line-height: 1.7; }
-        .doc-prose > * + * { margin-top: 0.65rem; }
-        .doc-prose h2 { font-size: 1.05rem; font-weight: 600; color: #193458; margin-top: 1.4rem; padding-bottom: 0.3rem; border-bottom: 1px solid #e2e8f0; }
-        .doc-prose h3 { font-size: 0.975rem; font-weight: 600; color: #2a4470; margin-top: 1.1rem; }
+        /* ---------- Kindle-style themed reading surface ----------
+           All colors/type come from CSS variables set by the reader prefs. */
+        .reader-card { background: var(--r-card); border-color: var(--r-border); }
+        .reader-card-head { background: var(--r-head); border-color: var(--r-border); }
+        .reader-card-head:hover { filter: brightness(0.985); }
+        .reader-card-sub { background: var(--r-head); border-color: var(--r-border); }
+        .reader-heading { color: var(--r-heading); }
+        .reader-muted { color: var(--r-muted); }
+
+        .doc-prose {
+          color: var(--r-ink);
+          font-size: var(--r-size);
+          font-family: var(--r-font);
+          line-height: 1.75;
+          max-width: 70ch;
+        }
+        .doc-prose > * + * { margin-top: 0.7rem; }
+        .doc-prose h2 { font-size: 1.15em; font-weight: 650; color: var(--r-heading); margin-top: 1.5rem; padding-bottom: 0.3rem; border-bottom: 1px solid var(--r-border); text-wrap: balance; }
+        .doc-prose h3 { font-size: 1.05em; font-weight: 650; color: var(--r-heading); margin-top: 1.15rem; }
         .doc-prose ul { list-style: disc; padding-left: 1.5rem; }
         .doc-prose ol { list-style: decimal; padding-left: 1.5rem; }
-        .doc-prose li { margin: 0.25rem 0; padding-left: 0.15rem; }
-        .doc-prose li::marker { color: #193458; }
-        .doc-prose blockquote { border-left: 3px solid #cbd5e1; padding: 0.2rem 0 0.2rem 0.9rem; color: #475569; }
-        .doc-prose hr { border: none; border-top: 1px dashed #cbd5e1; margin: 1.2rem 0; }
-        .doc-prose .doc-note { display: block; background: #eef2f7; color: #2a4470; border-left: 3px solid #193458; border-radius: 0 6px 6px 0; padding: 0.45rem 0.8rem; font-size: 0.8rem; font-style: italic; }
-        .doc-prose strong { color: #0f2747; font-weight: 600; }
+        .doc-prose li { margin: 0.3rem 0; padding-left: 0.15rem; }
+        .doc-prose li::marker { color: var(--r-heading); }
+        .doc-prose blockquote { border-left: 3px solid var(--r-border); padding: 0.2rem 0 0.2rem 0.9rem; color: var(--r-muted); }
+        .doc-prose hr { border: none; border-top: 1px dashed var(--r-border); margin: 1.2rem 0; }
+        .doc-prose .doc-note { display: block; background: var(--r-head); color: var(--r-heading); border-left: 3px solid var(--r-heading); border-radius: 0 6px 6px 0; padding: 0.45rem 0.8rem; font-size: 0.82em; font-style: italic; }
+        .doc-prose strong { color: var(--r-heading); font-weight: 650; }
         .doc-prose mark {
-          background: rgba(255, 213, 0, 0.45);
+          background: var(--r-mark);
+          color: inherit;
           padding: 0 1px; border-radius: 2px;
           transition: background 120ms;
         }
         .doc-prose mark.dp-mark-active {
-          background: rgba(255, 132, 0, 0.7);
+          background: var(--r-mark-active);
           outline: 2px solid #fb923c;
           outline-offset: 1px;
         }
+        /* The answer-in-focus card keeps its own white panel in all themes */
+        [data-rt] .answer-panel .doc-prose { color: #1f2937; max-width: none; font-size: 0.925rem; font-family: system-ui, 'Segoe UI', sans-serif; }
       `}</style>
 
       {historyOpen && cdoc.data && (
@@ -649,7 +790,7 @@ function AnswerFocusCard({ answer, focusMode, canFocus, onToggleFocus }: {
           )}
         </div>
         {/* Answer text in a white panel so the gradient frames it without hurting readability */}
-        <div className="rounded-xl bg-white shadow-sm p-4">
+        <div className="answer-panel rounded-xl bg-white shadow-sm p-4">
           <div className="doc-prose text-slate-800" dangerouslySetInnerHTML={{ __html: html }} />
         </div>
         <div className="mt-3 text-[11px] text-white/75 inline-flex items-center gap-1.5">

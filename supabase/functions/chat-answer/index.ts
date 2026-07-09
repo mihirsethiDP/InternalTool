@@ -110,6 +110,7 @@ Deno.serve(async (req) => {
     : payload.mode === 'route' ? 'route'
     : payload.mode === 'generate-rules' ? 'generate-rules'
     : payload.mode === 'generate-flow' ? 'generate-flow'
+    : payload.mode === 'invite-user' ? 'invite-user'
     : 'docs';
 
   const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
@@ -281,7 +282,7 @@ Deno.serve(async (req) => {
       .from('escalation_contacts').select('skill_key, label').eq('active', true).order('sort_order');
     const skillList = (skills ?? []) as { skill_key: string; label: string }[];
     const skillKeys = skillList.map((s) => s.skill_key);
-    const skillStr = skillList.map((s) => `${s.skill_key} (${s.label})`).join(', ') || 'supervisor (Plant supervisor)';
+    const skillStr = skillList.map((s) => `${s.skill_key} (${s.label})`).join(', ') || 'vendor_support (Sensor vendor support)';
 
     const sys = [
       'You design DIAGNOSTIC DECISION TREES for water/wastewater sensor technicians, strictly from the provided documentation.',
@@ -370,6 +371,37 @@ Deno.serve(async (req) => {
       .from('diagnostic_flows').select('*')
       .eq('source_doc_id', docId).eq('status', 'draft').order('created_at');
     return json({ flows: fresh ?? [] });
+  }
+
+  // ---------- INVITE-USER MODE: admin invites a teammate by email ----------
+  // Sends Supabase's invite email (the link lands on the app, where the
+  // RecoveryGate has the invitee set a password) and pre-creates the profile
+  // with the chosen role. Service-role write → admin enforced here.
+  if (mode === 'invite-user') {
+    const supabase = createClient(SUPABASE_URL, SERVICE_KEY);
+    const token = (req.headers.get('Authorization') ?? '').replace(/^Bearer\s+/i, '');
+    const { data: who } = await supabase.auth.getUser(token);
+    if (!who?.user) return json({ error: 'unauthorized' }, 401);
+    const { data: prof } = await supabase.from('profiles').select('role').eq('id', who.user.id).maybeSingle();
+    if ((prof as any)?.role !== 'admin') return json({ error: 'admin only' }, 403);
+
+    const email = ((payload as any).email ?? '').toString().trim().toLowerCase();
+    const role = ['viewer', 'uploader', 'admin'].includes((payload as any).role) ? (payload as any).role : 'viewer';
+    const fullName = ((payload as any).full_name ?? '').toString().slice(0, 120).trim() || null;
+    if (!/^[^@\s]+@digitalpaani\.com$/.test(email)) return json({ error: 'use a @digitalpaani.com email' }, 400);
+
+    const redirectTo = 'https://mihirsethidp.github.io/InternalTool/';
+    const { data: invited, error: invErr } = await supabase.auth.admin.inviteUserByEmail(email, { redirectTo });
+    if (invErr) {
+      // Most common: the user already exists.
+      const msg = /already/i.test(invErr.message) ? 'That email already has an account.' : invErr.message;
+      return json({ error: msg }, 400);
+    }
+    const uid = invited?.user?.id;
+    if (uid) {
+      await supabase.from('profiles').upsert({ id: uid, email, role, full_name: fullName });
+    }
+    return json({ ok: true, email, role });
   }
 
   if (!query) return json({ error: 'empty query' }, 400);

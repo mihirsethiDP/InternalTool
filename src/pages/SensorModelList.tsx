@@ -49,7 +49,7 @@ export default function SensorModelList() {
     queryKey: ['coverage-map'],
     enabled: showCoverage,
     queryFn: async () => {
-      const { data } = await supabase.from('consolidated_docs').select('sensor_model_id, content_markdown');
+      const { data } = await supabase.from('consolidated_docs').select('sensor_model_id, content_markdown').is('deleted_at', null);
       const map: Record<string, ReturnType<typeof coverageOf>> = {};
       for (const d of data ?? []) map[(d as any).sensor_model_id] = coverageOf((d as any).content_markdown);
       return map;

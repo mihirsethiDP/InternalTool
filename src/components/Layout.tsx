@@ -104,7 +104,7 @@ function Inner() {
       <main className="flex-1"><div className="max-w-7xl mx-auto px-4 sm:px-5 py-6 sm:py-8"><Outlet /></div></main>
 
       <footer className="border-t border-slate-200 bg-white text-xs text-slate-500 py-4 text-center">
-        DigitalPaani · Internal Document Hub
+        DigitalPaani · Sensor Troubleshooting Tool
         <span className="mx-2 text-slate-300">·</span>
         <NavLink to="/privacy" className="hover:text-brand-700 hover:underline">Privacy</NavLink>
       </footer>

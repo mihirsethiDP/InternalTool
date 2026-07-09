@@ -45,7 +45,7 @@ export default function InsightsPanel() {
     queryKey: ['insights-coverage'],
     queryFn: async () => (await supabase
       .from('sensor_models')
-      .select('id, consolidated_docs(content_markdown)')
+      .select('id, consolidated_docs(content_markdown)').is('consolidated_docs.deleted_at', null)
       .eq('is_general', false)).data ?? [],
   });
 
