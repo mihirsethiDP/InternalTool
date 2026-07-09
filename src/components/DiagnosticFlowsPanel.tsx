@@ -413,8 +413,11 @@ function SkillGroup({ skill, rows, plants, makes, onPatch, onRemove, onAdded }: 
       {open && (
         <div className="px-4 sm:px-5 pb-3 pl-11 space-y-1.5">
           {rows.map((c) => <ContactRow key={c.id} c={c} onPatch={onPatch} onRemove={() => onRemove(c.id)} />)}
+          {/* The everywhere-default lives in the row above; this form only adds
+              extra scoped contacts once a default already exists. */}
           <AddContactRow skills={[{ key: skill, label: rows[0]?.label ?? skill }]}
-            plants={plants} makes={makes} onAdded={onAdded} fixedSkill={skill} />
+            plants={plants} makes={makes} onAdded={onAdded} fixedSkill={skill}
+            hasDefault={rows.some((c) => !c.plant_id && !c.make_id)} />
         </div>
       )}
     </div>
@@ -449,13 +452,17 @@ function ContactRow({ c, onPatch, onRemove }: { c: any; onPatch: (id: string, f:
 }
 
 // Add an entry. With fixedSkill (inside an expanded group) it adds people to
-// that skill; without, it only creates a brand-new skill.
-function AddContactRow({ skills, plants, makes, onAdded, fixedSkill }: {
+// that skill; without, it only creates a brand-new skill. When hasDefault is
+// true the skill already has an everywhere-default (the row above), so this
+// form drops "Everywhere (default)" and requires a plant/vendor scope — you
+// can't create a duplicate default from here.
+function AddContactRow({ skills, plants, makes, onAdded, fixedSkill, hasDefault }: {
   skills: { key: string; label: string }[];
   plants: { id: string; name: string }[];
   makes: { id: string; name: string }[];
   onAdded: () => void;
   fixedSkill?: string;
+  hasDefault?: boolean;
 }) {
   const [skill, setSkill] = useState(fixedSkill ?? '');
   const [newLabel, setNewLabel] = useState('');
@@ -498,8 +505,11 @@ function AddContactRow({ skills, plants, makes, onAdded, fixedSkill }: {
       )}
       {skill && (
         <>
-          <select value={scope} onChange={(e) => setScope(e.target.value)} className="input text-xs w-40">
-            <option value="">Everywhere (default)</option>
+          <select value={scope} onChange={(e) => setScope(e.target.value)} className="input text-xs w-44"
+            aria-label="Where this contact applies">
+            {hasDefault
+              ? <option value="" disabled>Choose a plant or vendor…</option>
+              : <option value="">Everywhere (default)</option>}
             {plants.length > 0 && <optgroup label="Only at plant">
               {plants.map((p) => <option key={p.id} value={`plant:${p.id}`}>{p.name}</option>)}
             </optgroup>}
@@ -509,7 +519,7 @@ function AddContactRow({ skills, plants, makes, onAdded, fixedSkill }: {
           </select>
           <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Person" className="input text-xs w-32" />
           <input value={contact} onChange={(e) => setContact(e.target.value)} placeholder="Phone / how to reach" className="input text-xs w-44" />
-          <button onClick={add} disabled={busy || (skill === '__new__' && !newLabel.trim())}
+          <button onClick={add} disabled={busy || (skill === '__new__' && !newLabel.trim()) || (hasDefault && !scope)}
             className="tap rounded-md bg-brand-700 text-white px-2.5 py-1 text-xs font-medium hover:bg-brand-800 disabled:opacity-50">
             {busy ? 'Adding…' : 'Add'}
           </button>

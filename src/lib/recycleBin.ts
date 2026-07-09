@@ -51,7 +51,11 @@ export async function restoreConsolidated(doc: { id: string; sensor_model_id: st
 }
 
 export async function hardDeleteConsolidated(docId: string) {
-  // Row cascade removes chunks/revisions; flows lose source_doc_id (set null).
+  // Delete the diagnostic flows generated from this reference FIRST — the FK is
+  // ON DELETE SET NULL, so without this they'd survive as orphans with a null
+  // source_doc_id. Flows belong to their reference: reference gone → flows gone.
+  await supabase.from('diagnostic_flows').delete().eq('source_doc_id', docId);
+  // Row delete cascades to chunks/revisions.
   const { error } = await supabase.from('consolidated_docs').delete().eq('id', docId);
   if (error) throw error;
 }
