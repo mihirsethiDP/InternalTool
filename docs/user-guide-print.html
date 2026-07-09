@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sensor Troubleshooting Hub — User Guide</title>
+<style>
+  :root{
+    --ink:#17253B; --brand:#1D4370; --aqua:#0E7C86;
+    --muted:#5A6B82; --amber:#8A6D1F; --line:#DDE4EC; --card:#F2F5F9;
+  }
+  *{box-sizing:border-box;}
+  @page{ size:A4; margin:16mm 15mm 15mm; }
+  html{ -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+  body{
+    font-family:"Segoe UI",system-ui,Roboto,"Noto Sans",sans-serif;
+    color:var(--ink); line-height:1.6; margin:0; font-size:10.6pt;
+  }
+  header.masthead{ border-bottom:2.5px solid var(--brand); padding-bottom:14px; margin-bottom:22px; }
+  .brandrow{ display:flex; align-items:center; gap:11px; margin-bottom:12px; }
+  .logo{ width:34px; height:34px; flex:0 0 auto; }
+  .brandname{ font-size:11px; letter-spacing:.16em; text-transform:uppercase; color:var(--brand); font-weight:700; }
+  .eyebrow{ font-size:10px; letter-spacing:.15em; text-transform:uppercase; color:var(--aqua); font-weight:600; margin:0 0 5px; }
+  h1{ font-size:23pt; font-weight:650; letter-spacing:-.015em; margin:0 0 9px; line-height:1.1; }
+  .lede{ color:var(--muted); margin:0; font-size:10.5pt; max-width:60ch; }
+  .lede code{ font-family:Consolas,ui-monospace,monospace; font-size:9.5pt; background:var(--card); padding:1px 6px; border-radius:4px; color:var(--brand); }
+  h2{ font-size:14pt; font-weight:650; letter-spacing:-.01em; margin:0 0 3px; }
+  h3{ font-size:11pt; font-weight:650; margin:18px 0 4px; color:var(--brand); }
+  p,li{ font-size:10.4pt; }
+  p{ margin:8px 0; max-width:64ch; }
+  ul,ol{ padding-left:19px; margin:8px 0; }
+  li{ margin:3.5px 0; max-width:62ch; }
+  li::marker{ color:var(--aqua); font-weight:600; }
+  strong{ font-weight:640; }
+  .role{ border-left:3px solid var(--aqua); padding-left:15px; margin-top:26px; break-inside:avoid; }
+  .role.uploader{ border-color:var(--amber); }
+  .role.admin{ border-color:var(--brand); }
+  .role .who{ font-size:9.5px; letter-spacing:.13em; text-transform:uppercase; font-weight:700; color:var(--aqua); margin:0 0 1px; }
+  .role.uploader .who{ color:var(--amber); }
+  .role.admin .who{ color:var(--brand); }
+  .role h2{ margin-top:0; }
+  .tip{ background:var(--card); border-radius:6px; padding:9px 13px; font-size:9.8pt; margin:11px 0; break-inside:avoid; }
+  .tip b{ color:var(--brand); }
+  dl.statuses{ display:grid; grid-template-columns:max-content 1fr; gap:4px 13px; font-size:10pt; margin:8px 0; }
+  dl.statuses dt{ font-weight:640; color:var(--brand); }
+  dl.statuses dd{ margin:0; color:var(--muted); }
+  table{ border-collapse:collapse; width:100%; font-size:10pt; margin:8px 0; }
+  th{ text-align:left; font-size:9px; letter-spacing:.1em; text-transform:uppercase; color:var(--muted); font-weight:700; padding:7px 12px 7px 0; border-bottom:1.5px solid var(--line); }
+  td{ padding:7px 12px 7px 0; border-bottom:1px solid var(--line); vertical-align:top; }
+  td:first-child{ font-weight:600; width:38%; }
+  tr{ break-inside:avoid; }
+  .kbd{ display:inline-block; border:1px solid var(--line); border-bottom-width:2px; border-radius:4px; padding:0 5px; font-size:9pt; background:#fff; }
+  footer{ margin-top:30px; padding-top:12px; border-top:1px solid var(--line); font-size:9pt; color:var(--muted); }
+  h2,h3{ break-after:avoid; }
+</style>
+</head>
+<body>
+  <header class="masthead">
+    <div class="brandrow">
+      <svg class="logo" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><circle cx="50" cy="50" r="50" fill="#193458"/><g fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"><path d="M50 16 C50 16 74 44 74 60 a24 24 0 1 1 -48 0 C26 44 50 16 50 16 Z"/><path d="M42 54 a10 10 0 0 1 16 -3"/><path d="M58 51 l1 -5 m-1 5 l-5 -1"/><path d="M58 64 a10 10 0 0 1 -16 3"/><path d="M42 67 l-1 5 m1 -5 l5 1"/></g></svg>
+      <span class="brandname">DigitalPaani</span>
+    </div>
+    <p class="eyebrow">Sensor Troubleshooting Tool · User Guide</p>
+    <h1>Getting started with the Sensor Troubleshooting Hub</h1>
+    <p class="lede">Open <code>mihirsethidp.github.io/InternalTool</code> on your phone or computer and sign in with your <strong>@digitalpaani.com</strong> email. Forgot your password? Use <em>Forgot password?</em> or <em>Email me a one-time code</em> on the sign-in page. New here? Ask an admin to invite you.</p>
+  </header>
+
+  <p>Tap the <span class="kbd">&#9855;</span> icon in the top bar to switch the app's language (English, हिन्दी, বাংলা, मराठी, తెలుగు, தமிழ், ગુજરાતી, ಕನ್ನಡ), enlarge text, or turn on high contrast.</p>
+
+  <section class="role">
+    <p class="who">For everyone</p>
+    <h2>Fixing a sensor problem</h2>
+
+    <h3>Ask Dr. Paani &#129657; — the fastest way</h3>
+    <p>Dr. Paani is the assistant on the home page — <em>“Sensor acting up? Let’s diagnose it together.”</em> Type what’s wrong <strong>in your own words</strong>. All of these work:</p>
+    <ul>
+      <li>“senser not working” <em>(spelling mistakes are fine)</em></li>
+      <li>“pH reading keeps changing”</li>
+      <li>“meter kharab hai”</li>
+    </ul>
+    <p>Dr. Paani will do one of four things:</p>
+    <ul>
+      <li><strong>Walk you through it step by step</strong> — answer its questions by tapping the buttons (Yes / No / Done / That didn’t work) and follow along.</li>
+      <li><strong>Ask what the sensor is doing</strong> — tap the option that matches, or type it.</li>
+      <li><strong>Ask which sensor it is</strong> — tap the type, brand, and model. Not sure? Pick just the type; general guidance still works.</li>
+      <li><strong>Answer with sources</strong> — every answer cites the exact document it came from. Tap a source to read the original.</li>
+    </ul>
+
+    <h3>When someone else is needed</h3>
+    <p>Some problems need an electrician, the vendor, or a person authorized to switch equipment. Dr. Paani shows <strong>who to contact and how to reach them</strong> — pick the person listed for <em>your</em> plant. You can also tap <strong>Log a support ticket</strong> so the issue is recorded.</p>
+
+    <div class="tip"><b>After every answer, tap Solved or Didn’t help.</b> This genuinely improves the tool — unanswered questions are reviewed and turned into new guidance.</div>
+
+    <h3>Reading a sensor reference</h3>
+    <p>Open any sensor reference to read its consolidated guidance. Tap <span class="kbd">Aa</span> to set a comfortable <strong>text size, typeface, and background</strong> (white, sepia, or dark) — like an e-reader. A progress bar tracks how far you’ve read.</p>
+
+    <h3>Searching directly</h3>
+    <ul>
+      <li><strong>Home search bar</strong> — type a model number, brand, or problem.</li>
+      <li><strong>Browse</strong> — filter every document by type, category, or brand.</li>
+      <li><strong>Sensors</strong> — the full catalog; open any sensor to see everything we have.</li>
+    </ul>
+    <p>If nothing matches, Dr. Paani can <strong>search the web</strong> for you — web answers are clearly marked <em>unverified</em>, so double-check before acting.</p>
+  </section>
+
+  <section class="role uploader">
+    <p class="who">For uploaders</p>
+    <h2>Adding documentation</h2>
+    <ol>
+      <li>Tap <strong>Upload</strong> in the top bar and pick the PDF (manual, datasheet, procedure…).</li>
+      <li>Choose the <strong>document type</strong> and the <strong>sensor</strong> it belongs to (brand + model). If the sensor isn’t listed, add it right there.</li>
+      <li>Submit. Your file goes to the review team — it is <strong>not</strong> public yet.</li>
+      <li>Track progress under <strong>Uploads</strong>. You’ll get a notification on every decision.</li>
+    </ol>
+    <dl class="statuses">
+      <dt>Pending</dt><dd>waiting for review</dd>
+      <dt>Changes requested</dt><dd>open it, read the reviewer’s note, fix, resubmit</dd>
+      <dt>Approved</dt><dd>merged into the sensor’s reference — searchable and used by Dr. Paani</dd>
+      <dt>Rejected</dt><dd>the note explains why</dd>
+    </dl>
+    <div class="tip"><b>Good uploads:</b> original vendor PDFs, one document per file, correct brand and model. The clearer the source, the better Dr. Paani’s answers.</div>
+  </section>
+
+  <section class="role admin">
+    <p class="who">For admins</p>
+    <h2>Running the tool</h2>
+    <p>Everything lives under <strong>Admin</strong> in the top bar.</p>
+
+    <h3>Review queue</h3>
+    <ul>
+      <li>Read the extracted text (edit it if the PDF scanned badly).</li>
+      <li>Heed the <strong>AI match banner</strong> — it warns when a document looks filed under the wrong sensor or category — and the <strong>duplicate warning</strong>.</li>
+      <li><strong>Approve</strong> into the right activity section (Install, Configure, Clean, Calibrate, Troubleshoot &amp; Repair…), <strong>request changes</strong>, or <strong>reject</strong>. The uploader is notified automatically.</li>
+    </ul>
+
+    <h3>Diagnostic flows — what powers the step-by-step walks</h3>
+    <ul>
+      <li>Every approval <strong>auto-drafts</strong> 1–3 diagnostic flows from the new content; a badge shows drafts awaiting review.</li>
+      <li>Open a draft, read the tree (Ask → Do → Fixed / Escalate), edit any step’s wording, then <strong>Approve</strong>. Only approved flows reach users.</li>
+      <li><strong>Generate with AI</strong> back-fills flows from any existing document.</li>
+    </ul>
+
+    <h3>Escalation directory — who Dr. Paani tells users to call</h3>
+    <p>Tap a skill (electrical engineer, vendor support, equipment access…) to add people: a <strong>Default</strong> used everywhere, <strong>plant-specific</strong> people, and <strong>make-specific</strong> vendor contacts. Keep names and phone numbers current — field technicians see these mid-diagnosis.</p>
+
+    <h3>Invite teammates</h3>
+    <p>In <strong>Users</strong>, use <strong>Invite a teammate</strong>: enter their work email and role (viewer, uploader, or admin). They receive an email link and set their own password on arrival.</p>
+
+    <h3>Recycle bin — deletions are reversible</h3>
+    <p>Deleting a reference or submission moves it to the <strong>Recycle bin</strong>, where it stays for <strong>30 days</strong>. Restore brings it back complete (search and Dr. Paani included); <strong>Delete forever</strong> is available inside the bin. After 30 days, items are removed automatically.</p>
+
+    <h3>Routing rules, insights, and taxonomy</h3>
+    <ul>
+      <li>On each sensor’s page: <strong>Generate with AI</strong>, then approve the problem → procedure rules that look right.</li>
+      <li><strong>Insights</strong> shows “Didn’t help” feedback, unanswered questions, and web-search usage — your guide to what documentation to add next.</li>
+      <li>Manage accounts, categories, and document types in the matching tabs. Roles: <strong>Viewer</strong> (search, browse, ask), <strong>Uploader</strong> (+ submit documents), <strong>Admin</strong> (everything).</li>
+    </ul>
+  </section>
+
+  <section class="role" style="border-color:var(--muted)">
+    <p class="who" style="color:var(--muted)">Quick answers</p>
+    <h2>Common questions</h2>
+    <table>
+      <tr><th>Question</th><th>Answer</th></tr>
+      <tr><td>The chatbot didn’t understand me</td><td>Tap one of the buttons it offers, or add the sensor’s brand or model to your message</td></tr>
+      <tr><td>Can I type in Hindi / Hinglish?</td><td>Yes — “meter kharab hai” works; app menus also switch language (&#9855; menu)</td></tr>
+      <tr><td>The answer was wrong or unhelpful</td><td>Tap <strong>Didn’t help</strong> — admins review every one</td></tr>
+      <tr><td>Who sees my uploads?</td><td>Only reviewers until approved; then everyone</td></tr>
+      <tr><td>Nothing matches my search</td><td>Ask Dr. Paani — it can search the web (marked unverified) or log a ticket</td></tr>
+      <tr><td>Is the AI making things up?</td><td>No — answers come only from approved documents and cite their sources; when it doesn’t know, it says so</td></tr>
+    </table>
+  </section>
+
+  <footer>Questions or account issues: contact your DigitalPaani admin. &nbsp;·&nbsp; Digital Ecoinnovision Pvt. Ltd.</footer>
+</body>
+</html>
