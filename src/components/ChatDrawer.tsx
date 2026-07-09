@@ -587,10 +587,14 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
   // (who to call); if the flow has none, fall back to raising a ticket.
   async function flowStillStuck(onNoEscalate: () => void) {
     const flow = flowRef.current;
-    const esc = flow?.definition.nodes.find((n) => n.kind === 'escalate');
-    if (!flow || !esc) { onNoEscalate(); return; }
-    setTurns((t) => [...t, { role: 'user', text: 'It still didn’t work' }, { role: 'bot', query: flow.title, loading: true }]);
-    const turn = await nodeTurn(flow, esc);
+    // Only auto-route to a contact when the flow has ONE escalation — with
+    // multiple branches we can't know which applies, so raise a ticket instead
+    // of pointing the technician at the wrong person.
+    const escs = flow?.definition.nodes.filter((n) => n.kind === 'escalate') ?? [];
+    if (!flow || escs.length !== 1) { onNoEscalate(); return; }
+    const stuckLabel = i18n.t('chat.stillStuck');
+    setTurns((prev) => [...prev, { role: 'user', text: stuckLabel }, { role: 'bot', query: flow.title, loading: true }]);
+    const turn = await nodeTurn(flow, escs[0]);
     setFlowRun(null);
     setTurns((t) => fillLoadingTurn(t, turn));
   }
@@ -795,7 +799,7 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
                     && turns.filter((tn) => tn.role === 'bot' && (tn as any).flowNode).length >= 2
                     ? flowBack : undefined}
                   onStillStuck={() => flowStillStuck(() => openTicket(turn))}
-                  hasEscalation={!!flowRef.current?.definition.nodes.some((n) => n.kind === 'escalate')}
+                  hasEscalation={(flowRef.current?.definition.nodes.filter((n) => n.kind === 'escalate').length ?? 0) === 1}
                 />
               ) : turn.answer ? (
                 <AnswerCard

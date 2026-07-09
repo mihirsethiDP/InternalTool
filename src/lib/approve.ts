@@ -75,7 +75,9 @@ export async function approveSubmission(opts: {
     })
     .catch((e) => console.warn('auto generate-flow failed', e));
 
+  // Base points are already written (awaited above), so refresh the score now
+  // to show +10 promptly; the .then() refreshes again when the flow bonus lands.
   ['my-score', 'contribution-leaderboard', 'review-queue', 'review-queue-counts',
-   'my-submissions', 'admin-consolidated-docs', 'recent-consolidated', 'admin-coverage']
+   'my-submissions', 'admin-consolidated-docs', 'recent-consolidated', 'admin-coverage', 'admin-draft-flows-count']
     .forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
 }

@@ -103,8 +103,9 @@ export function ReviewQueueList() {
                 </div>
               </div>
             </Link>
-            {/* One-click approve for pending items — same routine as the full screen. */}
-            {s.status === 'pending' && <QuickApprove submission={s} qc={qc} />}
+            {/* One-click approve — only when there's extracted text to merge;
+                empty submissions must be opened so the admin sees it's blank. */}
+            {s.status === 'pending' && (s.extracted_text || '').trim() && <QuickApprove submission={s} qc={qc} />}
           </div>
         ))}
         {!subs.isLoading && rows.length === 0 && (

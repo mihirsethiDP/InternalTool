@@ -128,7 +128,9 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
       setReading(true);
       extractPdfText(f)
         .then((pages) => setExtracted({ text: pages.map((p) => `[Page ${p.page}]\n${p.text}`).join('\n\n'), pages: pages.length }))
-        .catch((e) => { console.warn('pdf extract failed', e); setExtracted({ text: '', pages: 0 }); })
+        // On a hard failure leave `extracted` null so submit() retries fresh —
+        // never store empty text from a transient parse error.
+        .catch((e) => { console.warn('pdf extract failed', e); setExtracted(null); })
         .finally(() => setReading(false));
     }
   }
@@ -457,10 +459,10 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
             <button type="button" onClick={onClose} className="btn-ghost">Cancel</button>
             <button
               type="submit"
-              disabled={busy}
+              disabled={busy || reading}
               className="group relative inline-flex items-center gap-2 rounded-xl bg-gradient-to-br from-brand-700 to-brand-900 text-white px-5 py-2.5 text-sm font-semibold shadow-sm hover:shadow-md hover:from-brand-600 transition disabled:opacity-60"
             >
-              {busy ? (<><span className="animate-spin">⟳</span> Submitting…</>) : (<>⬆ Submit for review</>)}
+              {busy ? (<><span className="animate-spin">⟳</span> Submitting…</>) : reading ? (<>Reading document…</>) : (<>⬆ Submit for review</>)}
             </button>
           </div>
 

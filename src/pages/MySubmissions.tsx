@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { FileText, Award, ArrowRight } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import SegmentedFilter from '../components/SegmentedFilter';
@@ -47,23 +47,23 @@ export default function MySubmissions() {
     enabled: Boolean(userId),
   });
 
-  // Map each of my approved submissions to the reference it became part of,
-  // so "see where it landed" can deep-link to the exact section.
+  // Map each approved submission's sensor to the reference it became part of,
+  // so "see where it landed" can deep-link. Model ids come from the already-
+  // loaded submissions list (no extra fetch); one query for the docs.
+  const approvedModelIds = useMemo(
+    () => [...new Set((submissions.data ?? []).filter((s: any) => s.status === 'approved').map((s: any) => s.sensor_model_id).filter(Boolean))],
+    [submissions.data],
+  );
   const landed = useQuery({
-    queryKey: ['my-landed', userId],
+    queryKey: ['my-landed', approvedModelIds],
+    enabled: approvedModelIds.length > 0,
     queryFn: async () => {
-      if (!userId) return {} as Record<string, string>;
-      const { data: subs } = await supabase
-        .from('document_submissions').select('sensor_model_id').eq('uploaded_by', userId).eq('status', 'approved');
-      const modelIds = [...new Set((subs ?? []).map((s: any) => s.sensor_model_id).filter(Boolean))];
-      if (modelIds.length === 0) return {} as Record<string, string>;
       const { data: docs } = await supabase
-        .from('consolidated_docs').select('id, sensor_model_id').in('sensor_model_id', modelIds).is('deleted_at', null);
+        .from('consolidated_docs').select('id, sensor_model_id').in('sensor_model_id', approvedModelIds).is('deleted_at', null);
       const map: Record<string, string> = {};
       for (const d of (docs ?? []) as any[]) map[d.sensor_model_id] = d.id;
       return map;
     },
-    enabled: Boolean(userId),
   });
 
   const counts = useQuery({

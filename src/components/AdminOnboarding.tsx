@@ -13,18 +13,19 @@ export default function AdminOnboarding() {
   const state = useQuery({
     queryKey: ['admin-onboarding'],
     queryFn: async () => {
-      const q = (t: string, f: (b: any) => any) => f(supabase.from(t).select('id', { count: 'exact', head: true }));
+      // Only presence matters — fetch one id, not a full COUNT(*) aggregate.
+      const has = (t: string, f: (b: any) => any) => f(supabase.from(t).select('id').limit(1));
       const [sensors, docs, flows, contacts] = await Promise.all([
-        q('sensor_models', (b) => b.eq('is_general', false)),
-        q('consolidated_docs', (b) => b.is('deleted_at', null)),
-        q('diagnostic_flows', (b) => b.eq('status', 'approved')),
-        supabase.from('escalation_contacts').select('id', { count: 'exact', head: true }).or('person_name.not.is.null,contact.not.is.null'),
+        has('sensor_models', (b) => b.eq('is_general', false)),
+        has('consolidated_docs', (b) => b.is('deleted_at', null)),
+        has('diagnostic_flows', (b) => b.eq('status', 'approved')),
+        supabase.from('escalation_contacts').select('id').or('person_name.not.is.null,contact.not.is.null').limit(1),
       ]);
       return {
-        sensors: sensors.count ?? 0,
-        docs: docs.count ?? 0,
-        flows: flows.count ?? 0,
-        contacts: contacts.count ?? 0,
+        sensors: (sensors.data ?? []).length,
+        docs: (docs.data ?? []).length,
+        flows: (flows.data ?? []).length,
+        contacts: (contacts.data ?? []).length,
       };
     },
   });

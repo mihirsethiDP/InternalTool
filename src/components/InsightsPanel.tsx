@@ -228,7 +228,7 @@ export default function InsightsPanel() {
                 <span className={`w-6 h-6 rounded-full text-xs font-bold flex items-center justify-center shrink-0 ${
                   i === 0 ? 'bg-amber-100 text-amber-700' : i === 1 ? 'bg-slate-200 text-slate-600' : i === 2 ? 'bg-orange-100 text-orange-700' : 'bg-slate-100 text-slate-500'
                 }`}>{i + 1}</span>
-                <span className="text-sm text-slate-800 flex-1 truncate">{r.full_name || r.email || 'Unknown'}</span>
+                <span className="text-sm text-slate-800 flex-1 truncate">{r.full_name || 'Contributor'}</span>
                 <span className="text-xs text-slate-400">{r.approvals} approved</span>
                 <span className="rounded-full bg-brand-50 text-brand-700 text-xs font-bold px-2.5 py-0.5">{r.total_points} pts</span>
               </li>

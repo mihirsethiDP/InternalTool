@@ -42,7 +42,7 @@ export async function fetchMyScore(userId: string | null | undefined): Promise<C
   }, { ...empty });
 }
 
-export interface LeaderRow { user_id: string; full_name: string | null; email: string | null; total_points: number; approvals: number }
+export interface LeaderRow { user_id: string; full_name: string | null; total_points: number; approvals: number }
 
 export async function fetchLeaderboard(): Promise<LeaderRow[]> {
   const { data, error } = await supabase.rpc('contribution_leaderboard');
