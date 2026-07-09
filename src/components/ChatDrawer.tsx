@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { X, Send, ArrowRight, ExternalLink, ChevronDown, Sparkles, Bot, Trash2, Wrench, Cpu, Globe, Compass, CheckCircle2, PhoneCall, GitBranch } from 'lucide-react';
+import i18n from '../i18n';
+import { X, Send, ArrowRight, ExternalLink, ChevronDown, Sparkles, Bot, Trash2, Wrench, Cpu, Globe, Compass, CheckCircle2, PhoneCall, GitBranch, Phone, Mic, Undo2 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { runSearch } from '../lib/search';
 import { logUnanswered, logEvent } from '../lib/telemetry';
@@ -209,6 +210,16 @@ const SUGGESTIONS = [
 // guided narrowing, flow options) — keep visuals in lockstep.
 export const CHIP_CLS = 'tap text-left rounded-lg border border-slate-200 bg-white hover:border-brand-700 hover:text-brand-700 px-3 py-2 text-xs font-medium transition';
 
+// A tel: link for a contact string that actually looks like a phone number
+// (≥6 digits) — lets a field tech tap to dial mid-diagnosis. Returns null for
+// emails / free-text so we don't render a broken call link.
+function telHref(contact: string | null | undefined): string | null {
+  if (!contact || contact.includes('@')) return null;
+  const digits = contact.replace(/[^\d]/g, '');
+  if (digits.length < 6) return null;
+  return 'tel:' + contact.replace(/[^\d+]/g, '');
+}
+
 // Fallback symptom chips for the vague-query probe when no approved
 // flows/rules exist in scope yet. Phrased the way an operator would tap.
 const GENERIC_SYMPTOMS = [
@@ -246,11 +257,12 @@ async function symptomOptions(scope: { categoryId?: string | null; modelId?: str
   return [...new Set([...opts.map((s) => (s ?? '').trim()).filter(Boolean), ...GENERIC_SYMPTOMS])].slice(0, 6);
 }
 
-// The probe's phrasing, shared by send() and narrowTurn() so the copy never drifts.
+// The probe's phrasing, shared by send() and narrowTurn() so the copy never
+// drifts — localized (falls back to English via i18n).
 function probeText(scopeLabel?: string | null): string {
   return scopeLabel
-    ? `Got it — trouble with your ${scopeLabel}. What exactly is it doing?`
-    : 'Let’s figure this out together. What is the sensor doing?';
+    ? i18n.t('chat.probeScoped', { label: scopeLabel })
+    : i18n.t('chat.probeVague');
 }
 
 export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
@@ -260,9 +272,12 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
   onSeedConsumed?: () => void;
 }) {
   const nav = useNavigate();
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { email } = useAuth();
   const [input, setInput] = useState('');
+  const [listening, setListening] = useState(false);
+  const recogRef = useRef<any>(null);
+  const voiceSupported = typeof window !== 'undefined' && !!((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition);
   const [turns, setTurns] = useState<Turn[]>([]);
   const [ticket, setTicket] = useState<{ query?: string; description?: string } | null>(null);
   // Active sensor scope: once the operator picks a make & model, all following
@@ -274,6 +289,9 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
   // Active diagnostic flow run — while set, chips drive the conversation and
   // the doc-RAG path is bypassed. Typing a new message cancels the run.
   const [flowRun, setFlowRun] = useState<{ flow: DiagnosticFlow } | null>(null);
+  // The flow persists here across terminal nodes so "Back" / "still didn't
+  // work" can still reference it after the run's chips have stopped.
+  const flowRef = useRef<DiagnosticFlow | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
@@ -281,6 +299,31 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
   const prevLen = useRef(0);
   const sendingRef = useRef(false);
   const focusInput = () => inputRef.current?.focus();
+
+  // Voice input — speak the problem instead of typing (big for low-literacy
+  // field techs). Uses the browser's speech recognition in the chosen app
+  // language; the button is hidden where the API isn't available.
+  function toggleVoice() {
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SR) return;
+    if (listening) { try { recogRef.current?.stop(); } catch { /* already stopped */ } return; }
+    const r = new SR();
+    const langMap: Record<string, string> = { en: 'en-IN', hi: 'hi-IN', bn: 'bn-IN', mr: 'mr-IN', te: 'te-IN', ta: 'ta-IN', gu: 'gu-IN', kn: 'kn-IN' };
+    r.lang = langMap[i18n.language] || 'en-IN';
+    r.interimResults = true;
+    r.continuous = false;
+    r.onresult = (e: any) => {
+      let txt = '';
+      for (let i = 0; i < e.results.length; i++) txt += e.results[i][0].transcript;
+      setInput(txt);
+    };
+    r.onend = () => setListening(false);
+    r.onerror = () => setListening(false);
+    recogRef.current = r;
+    setListening(true);
+    try { r.start(); } catch { setListening(false); }
+  }
+  useEffect(() => () => { try { recogRef.current?.stop(); } catch { /* noop */ } }, []);
   const isBusy = turns.some((tn) => tn.role === 'bot' && tn.loading);
   // Index of the most recent user message — anchored to the top on a new
   // exchange so the answer's beginning is visible (rather than scrolling past
@@ -370,6 +413,7 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
     setInput('');
     // Typing a fresh message abandons any in-progress diagnostic flow.
     setFlowRun(null);
+    flowRef.current = null;
     let activeScope = scope;
 
     // Echo the user's message + a loading placeholder IMMEDIATELY — before any
@@ -515,10 +559,39 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
   async function startFlow(flow: DiagnosticFlow, scopeLabel?: string) {
     const start = getNode(flow.definition, flow.definition.start);
     if (!start) return; // validator should prevent this; RAG path already skipped, show not-found
+    flowRef.current = flow;
     setFlowRun({ flow });
     const turn = await nodeTurn(flow, start, { first: true, scopeLabel });
     const terminal = start.kind === 'resolve' || start.kind === 'escalate';
     if (terminal) setFlowRun(null);
+    setTurns((t) => fillLoadingTurn(t, turn));
+  }
+
+  // Undo the last flow choice: drop the last choice + its node, re-activate the
+  // previous node's chips. Only works while there's an earlier node to return to.
+  function flowBack() {
+    const flow = flowRef.current;
+    if (!flow) return;
+    setTurns((t) => {
+      let lastBot = -1;
+      for (let i = t.length - 1; i >= 0; i--) if (t[i].role === 'bot' && (t[i] as any).flowNode) { lastBot = i; break; }
+      let prevBot = -1;
+      for (let i = lastBot - 1; i >= 0; i--) if (t[i].role === 'bot' && (t[i] as any).flowNode) { prevBot = i; break; }
+      if (prevBot < 0) return t; // already at the first node — nothing to undo
+      return t.slice(0, prevBot + 1);
+    });
+    setFlowRun({ flow });
+  }
+
+  // "It still didn't work" from a resolve node → jump to the flow's escalation
+  // (who to call); if the flow has none, fall back to raising a ticket.
+  async function flowStillStuck(onNoEscalate: () => void) {
+    const flow = flowRef.current;
+    const esc = flow?.definition.nodes.find((n) => n.kind === 'escalate');
+    if (!flow || !esc) { onNoEscalate(); return; }
+    setTurns((t) => [...t, { role: 'user', text: 'It still didn’t work' }, { role: 'bot', query: flow.title, loading: true }]);
+    const turn = await nodeTurn(flow, esc);
+    setFlowRun(null);
     setTurns((t) => fillLoadingTurn(t, turn));
   }
 
@@ -708,15 +781,21 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
                       <button key={idx} onClick={() => send(o)} className={CHIP_CLS}>{o}</button>
                     ))}
                   </div>
-                  <div className="text-[11px] text-slate-400">…or type what’s happening in your own words.</div>
+                  <div className="text-[11px] text-slate-400">{t('chat.ownWords')}</div>
                 </div>
               ) : turn.flowNode ? (
                 <FlowNodeCard
                   turn={turn}
                   active={i === turns.length - 1 && !!flowRun}
+                  isLast={i === turns.length - 1}
                   onChoose={advanceFlow}
                   failNext={flowRun ? failTarget(flowRun.flow.definition, turn.flowNode) : null}
                   onTicket={() => openTicket(turn)}
+                  onBack={i === turns.length - 1 && flowRef.current
+                    && turns.filter((tn) => tn.role === 'bot' && (tn as any).flowNode).length >= 2
+                    ? flowBack : undefined}
+                  onStillStuck={() => flowStillStuck(() => openTicket(turn))}
+                  hasEscalation={!!flowRef.current?.definition.nodes.some((n) => n.kind === 'escalate')}
                 />
               ) : turn.answer ? (
                 <AnswerCard
@@ -803,7 +882,7 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
         <div className="border-t border-slate-200 p-3 bg-white">
           {turns.length > 0 && (
             <div className="flex justify-end mb-2">
-              <button onClick={() => { setTurns([]); setScope(null); setFlowRun(null); }} className="inline-flex items-center gap-1 text-xs text-slate-500 hover:text-brand-700 transition">
+              <button onClick={() => { setTurns([]); setScope(null); setFlowRun(null); flowRef.current = null; }} className="inline-flex items-center gap-1 text-xs text-slate-500 hover:text-brand-700 transition">
                 <Trash2 size={12} /> {t('chat.clearConversation')}
               </button>
             </div>
@@ -819,6 +898,16 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
                 className="w-full rounded-2xl border border-slate-300 bg-slate-50 focus:bg-white pl-4 pr-3 py-3 text-sm focus:border-brand-700 focus:ring-2 focus:ring-brand-700/20 outline-none transition"
               />
             </div>
+            {voiceSupported && (
+              <button type="button" onClick={toggleVoice}
+                aria-label={listening ? t('chat.voiceStop') : t('chat.voiceStart')}
+                title={listening ? t('chat.voiceStop') : t('chat.voiceStart')}
+                className={`tap rounded-2xl w-12 h-12 flex items-center justify-center shrink-0 transition ${
+                  listening ? 'bg-red-500 text-white animate-pulse' : 'bg-slate-100 text-slate-500 hover:text-brand-700 hover:bg-slate-200'
+                }`}>
+                <Mic size={18} />
+              </button>
+            )}
             <button type="submit" disabled={!input.trim() || isBusy} aria-label="Send message"
                     className="tap rounded-2xl bg-gradient-to-br from-brand-600 to-brand-800 hover:from-brand-700 hover:to-brand-900 text-white w-12 h-12 flex items-center justify-center disabled:opacity-40 disabled:grayscale transition shadow-sm shrink-0">
               <Send size={17} />
@@ -1041,24 +1130,42 @@ function RoutedCard({ routed, onOpen }: { routed: RouteMatch; onOpen: (docId: st
 // One node of a diagnostic flow run. Question nodes show tappable option
 // chips, action nodes a step with Done / Didn't-work, resolve and escalate
 // nodes are terminal (escalate resolves the contact from the directory).
-function FlowNodeCard({ turn, active, failNext, onChoose, onTicket }: {
+function FlowNodeCard({ turn, active, isLast, failNext, onChoose, onTicket, onBack, onStillStuck, hasEscalation }: {
   turn: Extract<Turn, { role: 'bot' }>;
   active: boolean;
+  isLast: boolean;
   failNext: string | null;
   onChoose: (label: string, nextId: string | null) => void;
   onTicket: () => void;
+  onBack?: () => void;
+  onStillStuck: () => void;
+  hasEscalation: boolean;
 }) {
+  const { t } = useTranslation();
   const n = turn.flowNode!;
   const chip = CHIP_CLS;
+  const backBtn = onBack && (
+    <button onClick={onBack} className="tap inline-flex items-center gap-1 text-[11px] text-slate-400 hover:text-brand-700 transition">
+      <Undo2 size={12} /> {t('chat.stepBack')}
+    </button>
+  );
 
   if (n.kind === 'resolve') {
     return (
-      <div className="rounded-2xl rounded-tl-md border border-emerald-200 bg-emerald-50/60 shadow-sm px-3.5 py-3 space-y-1.5">
+      <div className="rounded-2xl rounded-tl-md border border-emerald-200 bg-emerald-50/60 shadow-sm px-3.5 py-3 space-y-2">
         <div className="inline-flex items-center gap-1.5 text-emerald-800 text-[11px] font-semibold uppercase tracking-wide">
-          <CheckCircle2 size={13} /> Should be fixed
+          <CheckCircle2 size={13} /> {t('chat.stepFixed')}
         </div>
         <div className="text-sm text-slate-700 leading-relaxed">{n.text}</div>
-        <div className="text-[11px] text-slate-500">Still not right? Use “Didn’t help” below to log it.</div>
+        {isLast && (
+          <div className="flex items-center gap-3 pt-0.5">
+            <button onClick={onStillStuck}
+              className="tap inline-flex items-center gap-1.5 rounded-lg border border-slate-300 text-slate-700 px-3 py-1.5 text-xs font-semibold hover:border-red-400 hover:text-red-600 transition">
+              ✗ {t('chat.stillStuck')}{hasEscalation ? ` — ${t('chat.getHelp')}` : ''}
+            </button>
+            {backBtn}
+          </div>
+        )}
       </div>
     );
   }
@@ -1070,7 +1177,7 @@ function FlowNodeCard({ turn, active, failNext, onChoose, onTicket }: {
       <div className="rounded-2xl rounded-tl-md border border-red-200 bg-white shadow-sm overflow-hidden">
         <div className="bg-gradient-to-r from-red-500 to-red-600 px-3.5 py-2 inline-flex items-center gap-1.5 w-full">
           <PhoneCall size={12} className="text-white" />
-          <span className="text-white text-[11px] font-semibold uppercase tracking-wide">Needs outside help</span>
+          <span className="text-white text-[11px] font-semibold uppercase tracking-wide">{t('chat.needHelp')}</span>
         </div>
         <div className="p-3.5 space-y-2.5">
           <div className="text-sm text-slate-700 leading-relaxed">{n.text}</div>
@@ -1081,7 +1188,11 @@ function FlowNodeCard({ turn, active, failNext, onChoose, onTicket }: {
                 <div key={c.id} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 flex items-center gap-2">
                   <div className="min-w-0 flex-1">
                     {c.person_name && <div className="text-xs text-slate-700 font-medium">{c.person_name}</div>}
-                    {c.contact && <div className="text-xs text-brand-700 font-medium">{c.contact}</div>}
+                    {c.contact && (
+                      telHref(c.contact)
+                        ? <a href={telHref(c.contact)!} className="text-xs text-brand-700 font-semibold inline-flex items-center gap-1 hover:underline"><Phone size={11} /> {c.contact}</a>
+                        : <div className="text-xs text-brand-700 font-medium">{c.contact}</div>
+                    )}
                   </div>
                   <span className={`shrink-0 text-[10px] rounded-full px-2 py-0.5 font-medium ${
                     c.make_name ? 'bg-violet-100 text-violet-700' : c.plant_name ? 'bg-sky-100 text-sky-700' : 'bg-slate-200 text-slate-600'
@@ -1102,8 +1213,9 @@ function FlowNodeCard({ turn, active, failNext, onChoose, onTicket }: {
           )}
           <button onClick={onTicket}
             className="tap w-full inline-flex items-center justify-center gap-1.5 rounded-lg bg-gradient-to-br from-brand-600 to-brand-800 text-white px-3 py-2 text-xs font-semibold hover:from-brand-700 transition">
-            Log a support ticket
+            {t('chat.logTicket')}
           </button>
+          {isLast && backBtn}
         </div>
       </div>
     );
@@ -1114,7 +1226,7 @@ function FlowNodeCard({ turn, active, failNext, onChoose, onTicket }: {
     <div className="rounded-2xl rounded-tl-md bg-white border border-slate-200 shadow-sm px-3.5 py-3 space-y-2.5">
       {turn.flowTitle && (
         <div className="inline-flex items-center gap-1.5 text-brand-700 text-[11px] font-semibold uppercase tracking-wide">
-          <GitBranch size={12} /> Diagnosing: {turn.flowTitle}
+          <GitBranch size={12} /> {t('chat.diagnosing')}: {turn.flowTitle}
         </div>
       )}
       <div className="text-sm text-slate-700 leading-relaxed">{n.text}</div>
@@ -1128,13 +1240,14 @@ function FlowNodeCard({ turn, active, failNext, onChoose, onTicket }: {
           ))}
           {n.kind === 'action' && (
             <>
-              <button onClick={() => onChoose('Done — what’s next?', n.next ?? null)} className={chip}>✓ Done — what’s next?</button>
-              <button onClick={() => onChoose('That didn’t work', failNext)} className={`${chip} hover:border-red-400 hover:text-red-600`}>✗ That didn’t work</button>
+              <button onClick={() => onChoose(t('chat.stepDone'), n.next ?? null)} className={chip}>✓ {t('chat.stepDone')}</button>
+              <button onClick={() => onChoose(t('chat.stepFailed'), failNext)} className={`${chip} hover:border-red-400 hover:text-red-600`}>✗ {t('chat.stepFailed')}</button>
             </>
           )}
+          {backBtn && <div className="pt-0.5">{backBtn}</div>}
         </div>
       ) : (
-        <div className="text-[11px] text-slate-400 italic">Answered above ↑</div>
+        <div className="text-[11px] text-slate-400 italic">{t('chat.answeredAbove')} ↑</div>
       )}
     </div>
   );
