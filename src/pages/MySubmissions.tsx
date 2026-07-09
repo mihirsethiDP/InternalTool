@@ -1,13 +1,16 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
-import { FileText } from 'lucide-react';
+import { FileText, Award, ArrowRight } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import SegmentedFilter from '../components/SegmentedFilter';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../lib/auth';
 import PageHeader from '../components/PageHeader';
 import { useUpload } from '../components/UploadModal';
 import { extractPdfText } from '../lib/pdf';
-import type { SubmissionStatus } from '../lib/types';
+import { fetchMyScore, POINTS } from '../lib/contributions';
+import { SECTION_LABEL } from '../lib/consolidated';
+import type { SubmissionStatus, SubmissionSection } from '../lib/types';
 
 function StatusBadge({ s }: { s: SubmissionStatus }) {
   if (s === 'pending')  return <span className="badge bg-amber-100 text-amber-800">Pending review</span>;
@@ -35,6 +38,32 @@ export default function MySubmissions() {
       const { data } = await q;
       return data ?? [];
     },
+  });
+
+  // Contribution score (points earned when admins approve your uploads).
+  const score = useQuery({
+    queryKey: ['my-score', userId],
+    queryFn: () => fetchMyScore(userId),
+    enabled: Boolean(userId),
+  });
+
+  // Map each of my approved submissions to the reference it became part of,
+  // so "see where it landed" can deep-link to the exact section.
+  const landed = useQuery({
+    queryKey: ['my-landed', userId],
+    queryFn: async () => {
+      if (!userId) return {} as Record<string, string>;
+      const { data: subs } = await supabase
+        .from('document_submissions').select('sensor_model_id').eq('uploaded_by', userId).eq('status', 'approved');
+      const modelIds = [...new Set((subs ?? []).map((s: any) => s.sensor_model_id).filter(Boolean))];
+      if (modelIds.length === 0) return {} as Record<string, string>;
+      const { data: docs } = await supabase
+        .from('consolidated_docs').select('id, sensor_model_id').in('sensor_model_id', modelIds).is('deleted_at', null);
+      const map: Record<string, string> = {};
+      for (const d of (docs ?? []) as any[]) map[d.sensor_model_id] = d.id;
+      return map;
+    },
+    enabled: Boolean(userId),
   });
 
   const counts = useQuery({
@@ -71,6 +100,24 @@ export default function MySubmissions() {
           </button>
         }
       />
+
+      {/* Contribution score — every approved upload earns points. */}
+      <div className="rounded-2xl border border-brand-200 bg-gradient-to-br from-brand-50 to-white px-5 py-4 flex items-center gap-4 flex-wrap">
+        <span className="w-11 h-11 rounded-xl bg-brand-700 text-white flex items-center justify-center shrink-0 shadow-sm"><Award size={20} /></span>
+        <div className="min-w-0">
+          <div className="text-sm text-slate-500">Your contribution score</div>
+          <div className="text-2xl font-bold text-brand-800 leading-tight">
+            {score.data?.points ?? 0} <span className="text-base font-semibold text-slate-500">pts</span>
+          </div>
+        </div>
+        <div className="text-sm text-slate-600 border-l border-brand-100 pl-4 hidden sm:block">
+          <b>{score.data?.approvals ?? 0}</b> approved
+          {(score.data?.bonuses ?? 0) > 0 && <> · <b>{score.data?.bonuses}</b> flow bonus</>}
+        </div>
+        <div className="ml-auto text-xs text-slate-500 max-w-[16rem]">
+          +{POINTS.approved} for every approved upload · +{POINTS.flow_bonus} when it powers a diagnostic flow.
+        </div>
+      </div>
 
       <SegmentedFilter
         value={filter}
@@ -118,6 +165,14 @@ export default function MySubmissions() {
                   <div className="mt-2 text-sm bg-emerald-50 border border-emerald-100 text-emerald-800 rounded-md px-3 py-2">
                     <span className="font-semibold">Reviewer note:</span> {s.reviewer_notes}
                   </div>
+                )}
+                {s.status === 'approved' && landed.data?.[s.sensor_model_id] && (
+                  <Link
+                    to={`/consolidated/${landed.data[s.sensor_model_id]}${s.target_section ? `?section=${s.target_section}` : ''}`}
+                    className="mt-2 inline-flex items-center gap-1 text-xs font-semibold text-brand-700 hover:text-brand-900"
+                  >
+                    See where it landed{s.target_section ? ` — ${SECTION_LABEL[s.target_section as SubmissionSection]}` : ''} <ArrowRight size={12} />
+                  </Link>
                 )}
               </div>
             </div>

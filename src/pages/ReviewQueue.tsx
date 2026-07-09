@@ -13,6 +13,7 @@ import {
 } from '../lib/consolidated';
 import { writeConsolidated } from '../lib/consolidatedWrite';
 import { classifyDoc, MISMATCH_CONFIDENCE } from '../lib/classify';
+import { awardApproval, awardFlowBonus } from '../lib/contributions';
 
 /* =========================================================
    List page — /review
@@ -370,13 +371,25 @@ function ApproveModal({ submission, editedText, onClose, onDone }: any) {
         }
       } catch (e) { console.warn('notify maker failed', e); }
 
+      // Reward the contributor for an approved upload (idempotent).
+      try { await awardApproval(submission.uploaded_by, submission.id); } catch (e) { console.warn('award failed', e); }
+
       // Auto-draft diagnostic flows from the freshly merged doc (fire-and-forget:
       // approval must never fail or slow down because generation hiccuped).
-      // Drafts land in Admin → Diagnostic flows for review.
+      // Drafts land in Admin → Diagnostic flows for review; a flow earns the
+      // uploader a bonus.
       supabase.functions.invoke('chat-answer', { body: { mode: 'generate-flow', consolidated_doc_id: cdoc.id } })
-        .then(() => qc.invalidateQueries({ queryKey: ['admin-draft-flows-count'] }))
+        .then((res) => {
+          const n = Array.isArray((res as any)?.data?.flows) ? (res as any).data.flows.length : 0;
+          if (n > 0) awardFlowBonus(submission.uploaded_by, submission.id).catch(() => {});
+          qc.invalidateQueries({ queryKey: ['admin-draft-flows-count'] });
+          qc.invalidateQueries({ queryKey: ['my-score'] });
+          qc.invalidateQueries({ queryKey: ['contribution-leaderboard'] });
+        })
         .catch((e) => console.warn('auto generate-flow failed', e));
 
+      qc.invalidateQueries({ queryKey: ['my-score'] });
+      qc.invalidateQueries({ queryKey: ['contribution-leaderboard'] });
       qc.invalidateQueries({ queryKey: ['review-queue'] });
       qc.invalidateQueries({ queryKey: ['review-queue-counts'] });
       qc.invalidateQueries({ queryKey: ['my-submissions'] });

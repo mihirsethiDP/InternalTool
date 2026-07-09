@@ -59,6 +59,11 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
   // sensor than the one selected. ackRef lets "Submit anyway" bypass the recheck.
   const [mismatch, setMismatch] = useState<{ label: string; category: string | null; reason: string; confidence: number } | null>(null);
   const ackRef = useRef(false);
+  // Extract on pick so the uploader can confirm the PDF was read (catches
+  // scanned/image-only PDFs before they waste a review round), and so submit
+  // reuses the text instead of extracting twice.
+  const [extracted, setExtracted] = useState<{ text: string; pages: number } | null>(null);
+  const [reading, setReading] = useState(false);
 
   // Only show "general" scope types in the dropdown (the sensor-tied ones):
   // Sensor Manual, Installation Guide, Troubleshooting Steps, Technical Data Sheet.
@@ -117,7 +122,16 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
     }
   }, [defaults.sensor_model_id]); // eslint-disable-line
 
-  function pickFile(f: File | null) { setFile(f); setError(null); }
+  function pickFile(f: File | null) {
+    setFile(f); setError(null); setExtracted(null);
+    if (f && (/\.pdf$/i.test(f.name) || /pdf/i.test(f.type))) {
+      setReading(true);
+      extractPdfText(f)
+        .then((pages) => setExtracted({ text: pages.map((p) => `[Page ${p.page}]\n${p.text}`).join('\n\n'), pages: pages.length }))
+        .catch((e) => { console.warn('pdf extract failed', e); setExtracted({ text: '', pages: 0 }); })
+        .finally(() => setReading(false));
+    }
+  }
   function onDrop(e: React.DragEvent) { e.preventDefault(); setDragOver(false); const f = e.dataTransfer.files?.[0]; if (f) pickFile(f); }
 
   // Resolve the sensor_model_id the submission attaches to.
@@ -125,6 +139,27 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
     ? (generalModels.data ?? []).find((g: any) => g.category_id === categoryId)?.id
     : null;
   const resolvedModelId = scope === 'general' ? generalModelId : sensorModelId;
+
+  // Duplicate hint: is there already a submission of this type for this sensor?
+  const dupHint = useQuery({
+    queryKey: ['dup-hint', resolvedModelId, typeId],
+    enabled: Boolean(resolvedModelId && typeId),
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('document_submissions')
+        .select('id, title, status')
+        .eq('sensor_model_id', resolvedModelId)
+        .eq('type_id', typeId)
+        .is('deleted_at', null)
+        .in('status', ['pending', 'approved'])
+        .limit(1);
+      return (data ?? [])[0] ?? null;
+    },
+  });
+
+  // Plain-text length of the extracted PDF (page markers stripped) — used to
+  // warn when almost nothing was read (scanned/image-only PDF).
+  const extractedChars = extracted ? extracted.text.replace(/\[Page \d+\]/g, '').replace(/\s+/g, ' ').trim().length : 0;
 
   function valid(): string | null {
     if (!file) return 'Choose a file.';
@@ -149,7 +184,10 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
     // to store on the submission for the checker.
     let extractedText = '';
     let pageCount: number | null = null;
-    if (/\.pdf$/i.test(file.name) || /pdf/i.test(file.type)) {
+    if (extracted) {
+      // Already read when the file was picked — reuse it.
+      extractedText = extracted.text; pageCount = extracted.pages || null;
+    } else if (/\.pdf$/i.test(file.name) || /pdf/i.test(file.type)) {
       try {
         setStatus('Extracting PDF text…');
         const pages = await extractPdfText(file);
@@ -267,6 +305,21 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
             )}
           </label>
 
+          {/* Extraction preview — reassure the PDF was read, warn on scans */}
+          {reading && (
+            <div className="text-xs text-slate-500 animate-pulse">Reading the document…</div>
+          )}
+          {!reading && extracted && extractedChars >= 120 && (
+            <div className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
+              ✓ Read {extractedChars.toLocaleString()} characters from {extracted.pages} page{extracted.pages === 1 ? '' : 's'} — looks good.
+            </div>
+          )}
+          {!reading && extracted && extractedChars < 120 && (
+            <div className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+              ⚠ Barely any text could be read — this looks like a <b>scanned / image-only PDF</b>. Dr. Paani reads text, not pictures; a text-based PDF gives far better answers. You can still submit it.
+            </div>
+          )}
+
           <div>
             <label className="label">Title</label>
             <input
@@ -301,6 +354,11 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
               <option value="">— Select type —</option>
               {types.data?.map((t: any) => <option key={t.id} value={t.id}>{t.label}</option>)}
             </select>
+            {dupHint.data && (
+              <div className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mt-2">
+                ⚠ A <b>{selectedType?.label ?? 'document'}</b> for this sensor already exists ({dupHint.data.status}). Make sure this isn't a duplicate — or pick a different type.
+              </div>
+            )}
           </div>
 
           <div className="rounded-2xl bg-slate-50 border border-slate-200 p-5 space-y-3">
