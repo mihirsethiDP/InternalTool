@@ -1,26 +1,25 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { FileText } from 'lucide-react';
+import { FileText, Search as SearchIcon, Check, Loader2 } from 'lucide-react';
 import SegmentedFilter from '../components/SegmentedFilter';
 import { supabase } from '../lib/supabase';
 import { useAuth, isAdmin } from '../lib/auth';
 import { softDeleteSubmission } from '../lib/recycleBin';
 import PageHeader from '../components/PageHeader';
 import type { SubmissionSection } from '../lib/types';
-import {
-  SECTION_LABEL, SECTION_ORDER, SECTION_HINT, replaceSection, appendSection,
-} from '../lib/consolidated';
-import { writeConsolidated } from '../lib/consolidatedWrite';
+import { SECTION_LABEL, SECTION_ORDER, SECTION_HINT } from '../lib/consolidated';
 import { classifyDoc, MISMATCH_CONFIDENCE } from '../lib/classify';
-import { awardApproval, awardFlowBonus } from '../lib/contributions';
+import { approveSubmission } from '../lib/approve';
 
 /* =========================================================
    List page — /review
 ========================================================= */
 export function ReviewQueueList() {
   const { profile, loading } = useAuth();
+  const qc = useQueryClient();
   const [status, setStatus] = useState<'pending' | 'changes_requested' | 'approved' | 'rejected' | 'all'>('pending');
+  const [search, setSearch] = useState('');
 
   const subs = useQuery({
     queryKey: ['review-queue', status],
@@ -54,6 +53,14 @@ export function ReviewQueueList() {
     return <div className="card text-sm">Admins only.</div>;
   }
 
+  // Client-side search across title, make, model, and type.
+  const q = search.trim().toLowerCase();
+  const rows = (subs.data ?? []).filter((s: any) => {
+    if (!q) return true;
+    const hay = `${s.title} ${s.sensor_models?.sensor_makes?.name ?? ''} ${s.sensor_models?.model_no ?? ''} ${s.document_types?.label ?? ''}`.toLowerCase();
+    return hay.includes(q);
+  });
+
   return (
     <div className="space-y-4">
       <SegmentedFilter
@@ -68,30 +75,82 @@ export function ReviewQueueList() {
         ]}
       />
 
+      <div className="relative">
+        <SearchIcon size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+        <input
+          value={search} onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search by title, make, model, or type…"
+          className="input w-full pl-9"
+        />
+      </div>
+
       <div className="space-y-3">
-        {(subs.data ?? []).map((s: any) => (
-          <Link key={s.id} to={`/review/${s.id}`} className="card-tight flex items-start gap-3 hover:border-brand-700 transition">
-            <div className="bg-brand-50 text-brand-700 rounded-md w-9 h-9 flex items-center justify-center shrink-0"><FileText size={16} strokeWidth={2} /></div>
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2 flex-wrap">
-                <div className="font-semibold text-slate-900 truncate">{s.title}</div>
-                <StatusPill s={s.status} />
-                {s.document_types?.label && <span className="badge-blue">{s.document_types.label}</span>}
+        {rows.map((s: any) => (
+          <div key={s.id} className="card-tight flex items-start gap-3 hover:border-brand-700 transition">
+            <Link to={`/review/${s.id}`} className="flex items-start gap-3 min-w-0 flex-1">
+              <div className="bg-brand-50 text-brand-700 rounded-md w-9 h-9 flex items-center justify-center shrink-0"><FileText size={16} strokeWidth={2} /></div>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <div className="font-semibold text-slate-900 truncate">{s.title}</div>
+                  <StatusPill s={s.status} />
+                  {s.document_types?.label && <span className="badge-blue">{s.document_types.label}</span>}
+                </div>
+                <div className="text-xs text-slate-500 mt-0.5">
+                  {s.sensor_models?.sensor_makes?.name && (
+                    <>{s.sensor_models.sensor_makes.name} {s.sensor_models.model_no} · </>
+                  )}
+                  {new Date(s.uploaded_at).toLocaleString()}
+                </div>
               </div>
-              <div className="text-xs text-slate-500 mt-0.5">
-                {s.sensor_models?.sensor_makes?.name && (
-                  <>{s.sensor_models.sensor_makes.name} {s.sensor_models.model_no} · </>
-                )}
-                {new Date(s.uploaded_at).toLocaleString()}
-              </div>
-            </div>
-            <div className="text-slate-300">→</div>
-          </Link>
+            </Link>
+            {/* One-click approve for pending items — same routine as the full screen. */}
+            {s.status === 'pending' && <QuickApprove submission={s} qc={qc} />}
+          </div>
         ))}
-        {!subs.isLoading && (subs.data ?? []).length === 0 && (
-          <div className="card text-sm text-slate-500 text-center">Nothing here.</div>
+        {!subs.isLoading && rows.length === 0 && (
+          <div className="card text-sm text-slate-500 text-center">{q ? 'No matches.' : 'Nothing here.'}</div>
         )}
       </div>
+    </div>
+  );
+}
+
+// Inline one-click approve for the queue: pick a section, approve. Uses the
+// exact same routine as the full review screen (via approveSubmission).
+function QuickApprove({ submission, qc }: { submission: any; qc: ReturnType<typeof useQueryClient> }) {
+  const [open, setOpen] = useState(false);
+  const [section, setSection] = useState<SubmissionSection>(submission.target_section || 'troubleshoot_repair');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function go() {
+    setBusy(true); setErr(null);
+    try {
+      await approveSubmission({ submission, editedText: submission.extracted_text || '', section, mode: 'replace', qc });
+      // list refreshes via invalidation
+    } catch (e: any) { setErr(e.message || 'Failed'); setBusy(false); }
+  }
+
+  if (!open) {
+    return (
+      <button onClick={() => setOpen(true)}
+        className="tap shrink-0 inline-flex items-center gap-1 rounded-lg border border-emerald-300 text-emerald-700 px-2.5 py-1.5 text-xs font-semibold hover:bg-emerald-50 transition">
+        <Check size={13} /> Quick approve
+      </button>
+    );
+  }
+  return (
+    <div className="shrink-0 flex items-center gap-1.5" onClick={(e) => e.preventDefault()}>
+      <select value={section} onChange={(e) => setSection(e.target.value as SubmissionSection)}
+        className="rounded-lg border border-slate-300 text-xs px-2 py-1.5 max-w-[9rem]">
+        {SECTION_ORDER.map((s) => <option key={s} value={s}>{SECTION_LABEL[s]}</option>)}
+      </select>
+      <button onClick={go} disabled={busy}
+        className="tap inline-flex items-center gap-1 rounded-lg bg-emerald-600 text-white px-2.5 py-1.5 text-xs font-semibold hover:bg-emerald-700 disabled:opacity-60">
+        {busy ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />} Approve
+      </button>
+      <button onClick={() => setOpen(false)} className="tap text-slate-400 hover:text-slate-600 text-xs px-1">✕</button>
+      {err && <span className="text-[11px] text-red-600">{err}</span>}
     </div>
   );
 }
@@ -318,81 +377,8 @@ function ApproveModal({ submission, editedText, onClose, onDone }: any) {
   async function confirm() {
     setBusy(true); setErr(null);
     try {
-      const sensorModelId = submission.sensor_model_id;
-      if (!sensorModelId) throw new Error('Submission has no sensor model.');
-
-      // 1. Get or create consolidated doc
-      let { data: cdoc } = await supabase
-        .from('consolidated_docs').select('*').eq('sensor_model_id', sensorModelId).maybeSingle();
-      if (!cdoc) {
-        const ins = await supabase.from('consolidated_docs')
-          .insert({ sensor_model_id: sensorModelId, content_markdown: '' })
-          .select('*').single();
-        if (ins.error) throw ins.error;
-        cdoc = ins.data;
-      }
-
-      // 2. Merge submission text into target section
-      const merged = mode === 'replace'
-        ? replaceSection(cdoc.content_markdown, section, editedText)
-        : appendSection(cdoc.content_markdown, section, editedText,
-            `Appended from "${submission.title}" on ${new Date().toLocaleDateString()}`);
-
-      // 3. Save markdown + rebuild chunks + record a revision snapshot
-      await writeConsolidated({
-        docId: cdoc.id,
-        sensorModelId,
-        markdown: merged,
-        changeKind: 'approval',
-        note: `Approved "${submission.title}" into ${SECTION_LABEL[section]} (${mode})${note ? ` — ${note}` : ''}`,
-      });
-
-      // 5. Mark submission approved
-      const decision = mode === 'replace' ? 'replace_section' : 'append_section';
-      const updSub = await supabase.from('document_submissions').update({
-        status: 'approved',
-        decision,
-        target_section: section,
-        reviewer_notes: note || null,
-        reviewed_at: new Date().toISOString(),
-        extracted_text: editedText, // persist any final edits
-      }).eq('id', submission.id);
-      if (updSub.error) throw updSub.error;
-
-      // Notify the maker
-      try {
-        if (submission.uploaded_by) {
-          await supabase.from('notifications').insert({
-            recipient_id: submission.uploaded_by,
-            kind: 'submission_approved',
-            submission_id: submission.id,
-            message: `Your submission "${submission.title}" was approved${note ? ` — ${note}` : ''}.`,
-          });
-        }
-      } catch (e) { console.warn('notify maker failed', e); }
-
-      // Reward the contributor for an approved upload (idempotent).
-      try { await awardApproval(submission.uploaded_by, submission.id); } catch (e) { console.warn('award failed', e); }
-
-      // Auto-draft diagnostic flows from the freshly merged doc (fire-and-forget:
-      // approval must never fail or slow down because generation hiccuped).
-      // Drafts land in Admin → Diagnostic flows for review; a flow earns the
-      // uploader a bonus.
-      supabase.functions.invoke('chat-answer', { body: { mode: 'generate-flow', consolidated_doc_id: cdoc.id } })
-        .then((res) => {
-          const n = Array.isArray((res as any)?.data?.flows) ? (res as any).data.flows.length : 0;
-          if (n > 0) awardFlowBonus(submission.uploaded_by, submission.id).catch(() => {});
-          qc.invalidateQueries({ queryKey: ['admin-draft-flows-count'] });
-          qc.invalidateQueries({ queryKey: ['my-score'] });
-          qc.invalidateQueries({ queryKey: ['contribution-leaderboard'] });
-        })
-        .catch((e) => console.warn('auto generate-flow failed', e));
-
-      qc.invalidateQueries({ queryKey: ['my-score'] });
-      qc.invalidateQueries({ queryKey: ['contribution-leaderboard'] });
-      qc.invalidateQueries({ queryKey: ['review-queue'] });
-      qc.invalidateQueries({ queryKey: ['review-queue-counts'] });
-      qc.invalidateQueries({ queryKey: ['my-submissions'] });
+      await approveSubmission({ submission, editedText, section, mode, note, qc });
+      qc.invalidateQueries({ queryKey: ['submission', submission.id] });
       onDone();
     } catch (e: any) {
       setErr(e.message || String(e));

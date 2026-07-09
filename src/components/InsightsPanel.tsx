@@ -1,9 +1,10 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { ThumbsUp, ThumbsDown, SearchX, ShieldCheck, FileWarning, ArrowRight, Globe2 } from 'lucide-react';
+import { ThumbsUp, ThumbsDown, SearchX, ShieldCheck, FileWarning, ArrowRight, Globe2, Award } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { coverageOf } from '../lib/consolidated';
+import { fetchLeaderboard } from '../lib/contributions';
 
 type Range = '30' | '90' | 'all';
 const RANGE_DAYS: Record<Range, number> = { '30': 30, '90': 90, all: 0 };
@@ -47,6 +48,11 @@ export default function InsightsPanel() {
       .from('sensor_models')
       .select('id, consolidated_docs(content_markdown)').is('consolidated_docs.deleted_at', null)
       .eq('is_general', false)).data ?? [],
+  });
+
+  const leaderboard = useQuery({
+    queryKey: ['contribution-leaderboard'],
+    queryFn: fetchLeaderboard,
   });
 
   const events = useQuery({
@@ -204,6 +210,31 @@ export default function InsightsPanel() {
             View all <ArrowRight size={14} />
           </button>
         </div>
+      </section>
+
+      {/* Top contributors — who's building the knowledge base */}
+      <section className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+        <div className="px-5 py-3 border-b border-slate-100 flex items-center gap-2">
+          <Award size={15} className="text-brand-600" />
+          <h3 className="text-sm font-semibold text-slate-900">Top contributors</h3>
+          <span className="muted text-xs ml-auto">+10 per approved upload · +5 when it powers a flow</span>
+        </div>
+        {(leaderboard.data ?? []).length === 0 ? (
+          <div className="muted text-sm p-5 text-center">No approved contributions yet.</div>
+        ) : (
+          <ul className="divide-y divide-slate-50">
+            {(leaderboard.data ?? []).slice(0, 10).map((r, i) => (
+              <li key={r.user_id} className="px-5 py-2.5 flex items-center gap-3">
+                <span className={`w-6 h-6 rounded-full text-xs font-bold flex items-center justify-center shrink-0 ${
+                  i === 0 ? 'bg-amber-100 text-amber-700' : i === 1 ? 'bg-slate-200 text-slate-600' : i === 2 ? 'bg-orange-100 text-orange-700' : 'bg-slate-100 text-slate-500'
+                }`}>{i + 1}</span>
+                <span className="text-sm text-slate-800 flex-1 truncate">{r.full_name || r.email || 'Unknown'}</span>
+                <span className="text-xs text-slate-400">{r.approvals} approved</span>
+                <span className="rounded-full bg-brand-50 text-brand-700 text-xs font-bold px-2.5 py-0.5">{r.total_points} pts</span>
+              </li>
+            ))}
+          </ul>
+        )}
       </section>
 
       <p className="text-xs text-slate-400">

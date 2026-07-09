@@ -9,6 +9,7 @@ import { ReviewQueueList } from './ReviewQueue';
 import InsightsPanel from '../components/InsightsPanel';
 import DiagnosticFlowsPanel from '../components/DiagnosticFlowsPanel';
 import RecycleBinPanel from '../components/RecycleBinPanel';
+import AdminOnboarding from '../components/AdminOnboarding';
 import { softDeleteConsolidated } from '../lib/recycleBin';
 
 type AdminTab = 'insights' | 'review' | 'flows' | 'consolidated' | 'categories' | 'users' | 'types' | 'bin';
@@ -59,6 +60,8 @@ export default function Admin() {
         title="Admin"
         subtitle="Review submissions, manage consolidated references, users, and document taxonomy."
       />
+
+      <AdminOnboarding />
 
       {/* Tabs */}
       <div className="border-b border-slate-200 flex gap-1 overflow-x-auto">
