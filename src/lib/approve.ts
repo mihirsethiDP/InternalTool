@@ -16,7 +16,7 @@ export async function approveSubmission(opts: {
   mode?: 'replace' | 'append';
   note?: string;
   qc: QueryClient;
-}): Promise<void> {
+}): Promise<{ docId: string }> {
   const { submission, editedText, section, mode = 'replace', note = '', qc } = opts;
   const sensorModelId = submission.sensor_model_id;
   if (!sensorModelId) throw new Error('Submission has no sensor model.');
@@ -80,4 +80,6 @@ export async function approveSubmission(opts: {
   ['my-score', 'contribution-leaderboard', 'review-queue', 'review-queue-counts',
    'my-submissions', 'admin-consolidated-docs', 'recent-consolidated', 'admin-coverage', 'admin-draft-flows-count']
     .forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
+
+  return { docId: cdoc.id };
 }

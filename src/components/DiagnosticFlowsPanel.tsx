@@ -123,7 +123,10 @@ export default function DiagnosticFlowsPanel() {
 
         <div className="bg-white px-4 sm:px-5 py-4 space-y-4">
           <p className="text-xs text-slate-500">
-            Step-by-step diagnostic trees Dr. Paani walks users through — drafted by AI from approved documentation (also auto-drafted whenever you approve a submission), then reviewed here. Only approved flows go live.
+            Step-by-step diagnostic trees Dr. Paani walks users through — drafted by AI from approved documentation
+            (also auto-drafted whenever you approve a submission), then reviewed here. Only approved flows go live.
+            Different from the <b>quick routing</b> shortcuts on each sensor's page, which just jump to a doc
+            section — Dr. Paani tries these flows first.
           </p>
           {genNote && <div className="text-xs rounded-lg bg-brand-50 border border-brand-200 text-brand-800 px-3 py-2">{genNote}</div>}
 

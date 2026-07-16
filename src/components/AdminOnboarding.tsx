@@ -34,9 +34,9 @@ export default function AdminOnboarding() {
   const d = state.data;
   const steps = [
     { done: d.sensors > 0, label: 'Add your sensors', hint: 'Make · model · category in the catalog.', to: '/sensors' },
-    { done: d.docs > 0, label: 'Approve a document', hint: 'Uploads land in the Review queue for approval.', to: '/admin' },
-    { done: d.flows > 0, label: 'Approve a diagnostic flow', hint: 'AI drafts them on approval — review & approve.', to: '/admin' },
-    { done: d.contacts > 0, label: 'Fill the escalation directory', hint: 'Who Dr. Paani points to when docs run out.', to: '/admin' },
+    { done: d.docs > 0, label: 'Approve a document', hint: 'Uploads land in the Review queue for approval.', to: '/admin?tab=review' },
+    { done: d.flows > 0, label: 'Approve a diagnostic flow', hint: 'AI drafts them on approval — review & approve.', to: '/admin?tab=flows' },
+    { done: d.contacts > 0, label: 'Fill the escalation directory', hint: 'Who Dr. Paani points to when docs run out.', to: '/admin?tab=flows' },
   ];
   const doneCount = steps.filter((s) => s.done).length;
   if (doneCount === steps.length) return null; // fully set up — nothing to show

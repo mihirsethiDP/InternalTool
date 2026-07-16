@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { FileText, Search as SearchIcon, Check, Loader2 } from 'lucide-react';
+import { FileText, Search as SearchIcon, Check, Loader2, CheckCircle2, GitBranch, ArrowRight, BookOpenText } from 'lucide-react';
 import SegmentedFilter from '../components/SegmentedFilter';
 import { supabase } from '../lib/supabase';
 import { useAuth, isAdmin } from '../lib/auth';
@@ -120,7 +120,16 @@ export function ReviewQueueList() {
 // exact same routine as the full review screen (via approveSubmission).
 function QuickApprove({ submission, qc }: { submission: any; qc: ReturnType<typeof useQueryClient> }) {
   const [open, setOpen] = useState(false);
-  const [section, setSection] = useState<SubmissionSection>(submission.target_section || 'troubleshoot_repair');
+  const typeDefaults = useTypeDefaults();
+  const [section, setSection] = useState<SubmissionSection>(
+    submission.target_section || typeDefaults[submission.type_id] || 'troubleshoot_repair'
+  );
+  const prefilled = useRef(false);
+  useEffect(() => {
+    if (prefilled.current || submission.target_section) return;
+    const d = typeDefaults[submission.type_id];
+    if (d) { setSection(d); prefilled.current = true; }
+  }, [typeDefaults, submission.target_section, submission.type_id]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -156,6 +165,109 @@ function QuickApprove({ submission, qc }: { submission: any; qc: ReturnType<type
   );
 }
 
+// Each document type carries a default activity section (types describe the
+// file; sections say where its content lands in the reference). Fetched as a
+// separate tolerant query so the queue still works before migration 039 adds
+// the column — pre-migration this just returns {} and nothing pre-fills.
+function useTypeDefaults(): Record<string, SubmissionSection> {
+  const q = useQuery({
+    queryKey: ['type-default-sections'],
+    queryFn: async () => {
+      const { data, error } = await supabase.from('document_types').select('id, default_section');
+      if (error) { console.warn('type defaults unavailable (run migration 039):', error.message); return {}; }
+      const map: Record<string, SubmissionSection> = {};
+      for (const t of (data ?? []) as any[]) if (t.default_section) map[t.id] = t.default_section;
+      return map;
+    },
+    staleTime: 5 * 60_000,
+  });
+  return q.data ?? {};
+}
+
+/* =========================================================
+   Post-approval guided path: upload → approval → flow decisions → finalize
+========================================================= */
+function ApprovedNextSteps({ submission, docId }: { submission: any; docId: string }) {
+  const nav = useNavigate();
+  // Live count of flow drafts — generation kicks off right after approval.
+  const drafts = useQuery({
+    queryKey: ['admin-draft-flows-count'],
+    queryFn: async () => {
+      const { count } = await supabase
+        .from('diagnostic_flows').select('id', { count: 'exact', head: true }).eq('status', 'draft');
+      return count ?? 0;
+    },
+    refetchInterval: 4000,
+  });
+  const n = drafts.data ?? 0;
+
+  const steps = [
+    { label: 'Uploaded', done: true },
+    { label: 'Approved', done: true },
+    { label: 'Flow decisions', done: false, active: true },
+    { label: 'Approve / reject drafts', done: false },
+    { label: 'Finalized', done: false },
+  ];
+
+  return (
+    <div className="space-y-5">
+      <div className="rounded-2xl border border-emerald-200 bg-emerald-50/60 px-5 py-4 flex items-center gap-3">
+        <CheckCircle2 size={22} className="text-emerald-600 shrink-0" />
+        <div className="min-w-0">
+          <div className="font-semibold text-slate-900">"{submission.title}" approved</div>
+          <div className="text-sm text-slate-600">Merged into the sensor's reference — it's now searchable and used by Dr. Paani.</div>
+        </div>
+      </div>
+
+      {/* The path — where the admin is, and what's left */}
+      <div className="card">
+        <div className="text-xs uppercase tracking-wide font-semibold text-slate-500 mb-3">What happens next</div>
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {steps.map((st, i) => (
+            <div key={st.label} className="flex items-center gap-1.5">
+              <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold ${
+                st.done ? 'bg-emerald-100 text-emerald-800'
+                : st.active ? 'bg-brand-700 text-white shadow-sm'
+                : 'bg-slate-100 text-slate-500'
+              }`}>
+                {st.done && <Check size={12} />}{st.label}
+              </span>
+              {i < steps.length - 1 && <ArrowRight size={13} className="text-slate-300" />}
+            </div>
+          ))}
+        </div>
+
+        <div className="mt-4 rounded-xl border border-brand-200 bg-brand-50/50 px-4 py-3.5">
+          <div className="flex items-center gap-2.5">
+            <GitBranch size={17} className="text-brand-700 shrink-0" />
+            <div className="min-w-0 flex-1 text-sm text-slate-700">
+              {n > 0
+                ? <><b>{n} draft diagnostic flow{n === 1 ? '' : 's'}</b> waiting for your review — approve or reject them so Dr. Paani can walk users through this content step by step.</>
+                : <>The AI is drafting diagnostic flows from this content — they usually appear here within ~15 seconds. You can also review later from Admin → Diagnostic flows.</>}
+            </div>
+            {n === 0 && <Loader2 size={15} className="animate-spin text-brand-600 shrink-0" />}
+          </div>
+        </div>
+
+        <div className="flex gap-2 flex-wrap mt-4">
+          <button onClick={() => nav('/admin?tab=flows')}
+            className="tap inline-flex items-center gap-1.5 rounded-lg bg-brand-700 text-white px-4 py-2 text-sm font-semibold hover:bg-brand-800 transition">
+            <GitBranch size={15} /> Review flow drafts{n > 0 ? ` (${n})` : ''}
+          </button>
+          <button onClick={() => nav(`/consolidated/${docId}`)}
+            className="tap inline-flex items-center gap-1.5 rounded-lg border border-slate-300 text-slate-700 px-4 py-2 text-sm font-medium hover:border-brand-700 hover:text-brand-700 transition">
+            <BookOpenText size={15} /> View updated reference
+          </button>
+          <button onClick={() => nav('/review')}
+            className="tap inline-flex items-center gap-1.5 rounded-lg text-slate-500 px-3 py-2 text-sm hover:text-brand-700 transition">
+            Back to queue
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function StatusPill({ s }: { s: string }) {
   if (s === 'pending') return <span className="badge bg-amber-100 text-amber-800">Pending</span>;
   if (s === 'approved') return <span className="badge bg-emerald-100 text-emerald-800">Approved</span>;
@@ -178,6 +290,10 @@ export function ReviewQueueDetail() {
   const [rejectOpen, setRejectOpen] = useState(false);
   const [changesOpen, setChangesOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  // Set after a successful approval — swaps the page for the "what's next"
+  // guided path (flow decisions → finalize) instead of dumping the admin
+  // back into the queue with no direction.
+  const [approvedDocId, setApprovedDocId] = useState<string | null>(null);
 
   const sub = useQuery({
     queryKey: ['submission', id],
@@ -233,6 +349,11 @@ export function ReviewQueueDetail() {
   if (!isAdmin(profile)) return <div className="card text-sm">Admins only.</div>;
   if (sub.isLoading) return <div className="muted">Loading…</div>;
   if (!s) return <div className="card text-sm">Submission not found.</div>;
+
+  // Approved → guided next steps instead of a dead end.
+  if (approvedDocId) {
+    return <ApprovedNextSteps submission={s} docId={approvedDocId} />;
+  }
 
   return (
     <div className="space-y-5">
@@ -349,7 +470,7 @@ export function ReviewQueueDetail() {
       </div>
 
       {approveOpen && (
-        <ApproveModal submission={s} editedText={editedText} onClose={() => setApproveOpen(false)} onDone={() => nav('/review')} />
+        <ApproveModal submission={s} editedText={editedText} onClose={() => setApproveOpen(false)} onDone={(docId: string) => { setApproveOpen(false); setApprovedDocId(docId); }} />
       )}
       {changesOpen && (
         <RequestChangesModal submission={s} editedText={editedText} onClose={() => setChangesOpen(false)} onDone={() => nav('/review')} />
@@ -369,7 +490,20 @@ export function ReviewQueueDetail() {
 ========================================================= */
 function ApproveModal({ submission, editedText, onClose, onDone }: any) {
   const qc = useQueryClient();
-  const [section, setSection] = useState<SubmissionSection>(submission.target_section || 'troubleshoot_repair');
+  // Pre-fill the section from the document TYPE's default (types describe the
+  // file; the default connects them to the activity section it usually feeds).
+  const typeDefaults = useTypeDefaults();
+  const [section, setSection] = useState<SubmissionSection>(
+    submission.target_section || typeDefaults[submission.type_id] || 'troubleshoot_repair'
+  );
+  // Defaults load async — apply once when they arrive, unless a section was
+  // already chosen for this submission or the admin changed it by hand.
+  const prefilled = useRef(false);
+  useEffect(() => {
+    if (prefilled.current || submission.target_section) return;
+    const d = typeDefaults[submission.type_id];
+    if (d) { setSection(d); prefilled.current = true; }
+  }, [typeDefaults, submission.target_section, submission.type_id]);
   const [mode, setMode] = useState<'replace' | 'append'>('replace');
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
@@ -378,9 +512,9 @@ function ApproveModal({ submission, editedText, onClose, onDone }: any) {
   async function confirm() {
     setBusy(true); setErr(null);
     try {
-      await approveSubmission({ submission, editedText, section, mode, note, qc });
+      const { docId } = await approveSubmission({ submission, editedText, section, mode, note, qc });
       qc.invalidateQueries({ queryKey: ['submission', submission.id] });
-      onDone();
+      onDone(docId);
     } catch (e: any) {
       setErr(e.message || String(e));
       setBusy(false);

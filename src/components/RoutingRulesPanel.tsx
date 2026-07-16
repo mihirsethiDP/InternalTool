@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Route, Sparkles, Check, X, Loader2, Trash2, RefreshCw } from 'lucide-react';
 import { supabase } from '../lib/supabase';
@@ -48,7 +49,7 @@ export default function RoutingRulesPanel({ sensorModelId }: { sensorModelId: st
       <div className="bg-gradient-to-r from-brand-700 to-brand-900 text-white px-4 sm:px-5 py-3.5 flex items-center gap-3 flex-wrap">
         <span className="bg-white/15 ring-1 ring-white/20 rounded-lg w-8 h-8 flex items-center justify-center shrink-0"><Route size={16} /></span>
         <div className="min-w-0 flex-1">
-          <div className="text-sm font-semibold tracking-tight">Diagnostic routing</div>
+          <div className="text-sm font-semibold tracking-tight">Quick routing — problem → section shortcuts</div>
           <div className="text-[11px] text-white/70">
             {approved.length} live rule{approved.length === 1 ? '' : 's'}{proposed.length ? ` · ${proposed.length} awaiting review` : ''}
           </div>
@@ -62,7 +63,10 @@ export default function RoutingRulesPanel({ sensorModelId }: { sensorModelId: st
 
       <div className="bg-white px-4 sm:px-5 py-4 space-y-3">
         <p className="text-xs text-slate-500">
-          Maps a stated problem → the procedure(s) that fix it. AI proposes from this sensor’s approved procedures; you approve what goes live for the assistant.
+          One-tap shortcuts: a stated problem → the exact doc section that fixes it. AI proposes from this sensor’s
+          approved procedures; you approve what goes live. Different from{' '}
+          <Link to="/admin?tab=flows" className="font-semibold text-brand-700 hover:underline">Diagnostic flows</Link>,
+          which walk the user through a step-by-step diagnosis — Dr. Paani tries flows first, then these shortcuts.
         </p>
 
         {rules.isLoading ? (

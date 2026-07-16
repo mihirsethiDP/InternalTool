@@ -1,9 +1,10 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { Trash2 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth, isAdmin } from '../lib/auth';
+import { SECTION_ORDER, SECTION_LABEL } from '../lib/consolidated';
 import PageHeader from '../components/PageHeader';
 import { ReviewQueueList } from './ReviewQueue';
 import InsightsPanel from '../components/InsightsPanel';
@@ -13,11 +14,17 @@ import AdminOnboarding from '../components/AdminOnboarding';
 import { softDeleteConsolidated } from '../lib/recycleBin';
 
 type AdminTab = 'insights' | 'review' | 'flows' | 'consolidated' | 'categories' | 'users' | 'types' | 'bin';
+const ADMIN_TABS: AdminTab[] = ['insights', 'review', 'flows', 'consolidated', 'categories', 'users', 'types', 'bin'];
 
 export default function Admin() {
   const { profile, loading } = useAuth();
   const qc = useQueryClient();
-  const [tab, setTab] = useState<AdminTab>('insights');
+  // Tab lives in the URL (/admin?tab=flows) so notifications, onboarding cards,
+  // and post-approval next-steps can deep-link straight to the right panel.
+  const [params, setParams] = useSearchParams();
+  const rawTab = params.get('tab') as AdminTab | null;
+  const tab: AdminTab = rawTab && ADMIN_TABS.includes(rawTab) ? rawTab : 'insights';
+  const setTab = (t: AdminTab) => setParams(t === 'insights' ? {} : { tab: t });
 
   // Pending count for the tab badge (works for admins only, RLS allows it)
   const pending = useQuery({
@@ -354,23 +361,49 @@ function TypesPanel() {
     qc.invalidateQueries({ queryKey: ['types'] });
     qc.invalidateQueries({ queryKey: ['types-general'] });
   }
+  async function setDefault(t: any, section: string) {
+    const { error } = await supabase.from('document_types').update({ default_section: section || null }).eq('id', t.id);
+    if (error) { alert('Could not save the default — make sure migration 039 has been run.'); return; }
+    qc.invalidateQueries({ queryKey: ['admin-types'] });
+    qc.invalidateQueries({ queryKey: ['type-default-sections'] });
+  }
   return (
     <div className="card">
-      <p className="text-xs text-slate-500 mb-3">These are exactly the types uploaders choose from when submitting a document.</p>
+      {/* How the two taxonomies relate — the #1 admin confusion */}
+      <div className="rounded-xl bg-brand-50/60 border border-brand-100 px-4 py-3 mb-4 text-xs text-slate-600 leading-relaxed">
+        <b className="text-slate-800">How this fits together:</b> a document <b>type</b> describes the file an uploader
+        submits (manual, datasheet…). When you <b>approve</b> it, its content is filed into an <b>activity section</b> of
+        the sensor's reference (Install, Clean, Troubleshoot &amp; Repair…) — that's what Dr. Paani and search use.
+        The <b>default section</b> below pre-fills that choice at approval; you can always override it.
+      </div>
       <form onSubmit={add} className="flex gap-2 mb-3 flex-wrap">
         <input className="input flex-1 min-w-48" placeholder='Label (e.g. "Commissioning Report")' value={label} onChange={(e) => setLabel(e.target.value)} />
         <input className="input md:w-48" placeholder="key (snake_case)" value={key} onChange={(e) => setKey(e.target.value.replace(/[^a-z0-9_]/g, ''))} />
         <button className="btn-primary">Add</button>
       </form>
-      <ul className="text-sm grid grid-cols-2 md:grid-cols-3 gap-1">
+      <div className="divide-y divide-slate-100">
+        <div className="hidden sm:grid grid-cols-[1fr_220px_32px] gap-2 pb-1.5 text-[10px] uppercase tracking-wide font-semibold text-slate-400">
+          <span>Type (what the file is)</span><span>Default section at approval</span><span />
+        </div>
         {(types.data ?? []).map((t: any) => (
-          <li key={t.id} className="py-1 flex items-center gap-1.5">
-            <span className="badge-blue">{t.label}</span>
-            <span className="text-xs text-slate-400">{t.key}</span>
-            <button onClick={() => remove(t)} aria-label={`Remove ${t.label}`} className="tap text-slate-300 hover:text-red-500 transition"><Trash2 size={12} /></button>
-          </li>
+          <div key={t.id} className="py-2 grid grid-cols-1 sm:grid-cols-[1fr_220px_32px] gap-2 items-center">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <span className="badge-blue">{t.label}</span>
+              <span className="text-xs text-slate-400 truncate">{t.key}</span>
+            </div>
+            <select
+              value={t.default_section ?? ''}
+              onChange={(e) => setDefault(t, e.target.value)}
+              className="rounded-lg border border-slate-300 text-xs px-2 py-1.5"
+              aria-label={`Default section for ${t.label}`}
+            >
+              <option value="">— admin picks at approval —</option>
+              {SECTION_ORDER.map((s) => <option key={s} value={s}>{SECTION_LABEL[s]}</option>)}
+            </select>
+            <button onClick={() => remove(t)} aria-label={`Remove ${t.label}`} className="tap text-slate-300 hover:text-red-500 transition justify-self-end"><Trash2 size={12} /></button>
+          </div>
         ))}
-      </ul>
+      </div>
     </div>
   );
 }
