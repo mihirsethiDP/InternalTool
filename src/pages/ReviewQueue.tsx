@@ -1,16 +1,16 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { FileText, Search as SearchIcon, Check, Loader2, CheckCircle2, GitBranch, ArrowRight, BookOpenText } from 'lucide-react';
+import { FileText, Search as SearchIcon, Check, Loader2, CheckCircle2, GitBranch, ArrowRight, BookOpenText, Sparkles, Scissors } from 'lucide-react';
 import SegmentedFilter from '../components/SegmentedFilter';
 import { supabase } from '../lib/supabase';
 import { useAuth, isAdmin } from '../lib/auth';
 import { softDeleteSubmission } from '../lib/recycleBin';
 import PageHeader from '../components/PageHeader';
 import type { SubmissionSection } from '../lib/types';
-import { SECTION_LABEL, SECTION_ORDER, SECTION_HINT } from '../lib/consolidated';
+import { SECTION_LABEL, SECTION_ORDER, SECTION_HINT, parseSections } from '../lib/consolidated';
 import { classifyDoc, MISMATCH_CONFIDENCE } from '../lib/classify';
-import { approveSubmission } from '../lib/approve';
+import { approveSubmission, approveSubmissionParts, type ApprovalPart } from '../lib/approve';
 
 /* =========================================================
    List page — /review
@@ -486,13 +486,17 @@ export function ReviewQueueDetail() {
 }
 
 /* =========================================================
-   Approve modal: pick section + replace/append
+   Approve modal: one section, or SPLIT across sections with AI —
+   a manual often covers install + calibrate + troubleshoot at once.
 ========================================================= */
+type SplitPart = ApprovalPart & { include: boolean };
+
 function ApproveModal({ submission, editedText, onClose, onDone }: any) {
   const qc = useQueryClient();
   // Pre-fill the section from the document TYPE's default (types describe the
   // file; the default connects them to the activity section it usually feeds).
   const typeDefaults = useTypeDefaults();
+  const [tab, setTab] = useState<'single' | 'split'>('single');
   const [section, setSection] = useState<SubmissionSection>(
     submission.target_section || typeDefaults[submission.type_id] || 'troubleshoot_repair'
   );
@@ -509,10 +513,74 @@ function ApproveModal({ submission, editedText, onClose, onDone }: any) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
+  // What already lives in each section of this sensor's reference — so
+  // "Replace" never silently overwrites content the admin didn't know about.
+  const existing = useQuery({
+    queryKey: ['section-sizes', submission.sensor_model_id],
+    enabled: Boolean(submission.sensor_model_id),
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('consolidated_docs').select('content_markdown')
+        .eq('sensor_model_id', submission.sensor_model_id).is('deleted_at', null).maybeSingle();
+      const sections = parseSections(data?.content_markdown);
+      const words: Partial<Record<SubmissionSection, number>> = {};
+      for (const s of SECTION_ORDER) {
+        const t = (sections[s] ?? '').trim();
+        if (t) words[s] = t.split(/\s+/).length;
+      }
+      return words;
+    },
+  });
+  const existingWords = existing.data ?? {};
+
+  // ---- AI split state ----
+  const [splitParts, setSplitParts] = useState<SplitPart[] | null>(null);
+  const [splitNote, setSplitNote] = useState<string | null>(null);
+  const [analyzing, setAnalyzing] = useState(false);
+
+  async function analyze() {
+    setAnalyzing(true); setErr(null); setSplitNote(null);
+    try {
+      const { data, error } = await supabase.functions.invoke('chat-answer', {
+        body: { mode: 'split-sections', submission_id: submission.id },
+      });
+      if (error || (data as any)?.error) throw new Error((data as any)?.error || error?.message || 'split failed');
+      const parts = ((data as any).parts ?? []) as { section: SubmissionSection; content: string }[];
+      if (parts.length === 0) { setSplitNote((data as any).note || 'Could not partition this document — use single-section mode.'); setAnalyzing(false); return; }
+      setSplitParts(parts.map((p) => ({
+        section: p.section,
+        text: p.content,
+        include: true,
+        // Don't clobber sections that already have content unless the admin opts in.
+        mode: (existingWords[p.section] ?? 0) > 0 ? 'append' : 'replace',
+      })));
+      const bits: string[] = [];
+      if ((data as any).coverage != null) bits.push(`${(data as any).coverage}% of the text assigned`);
+      if ((data as any).note) bits.push((data as any).note);
+      setSplitNote(bits.join(' · ') || null);
+    } catch (e: any) {
+      setSplitNote(`AI split unavailable (${e.message}). If this persists, redeploy the chat-answer function — or approve into one section.`);
+    }
+    setAnalyzing(false);
+  }
+
+  function patchPart(i: number, patch: Partial<SplitPart>) {
+    setSplitParts((ps) => ps!.map((p, idx) => (idx === i ? { ...p, ...patch } : p)));
+  }
+
+  const includedCount = (splitParts ?? []).filter((p) => p.include && p.text.trim()).length;
+
   async function confirm() {
     setBusy(true); setErr(null);
     try {
-      const { docId } = await approveSubmission({ submission, editedText, section, mode, note, qc });
+      const { docId } = tab === 'split' && splitParts
+        ? await approveSubmissionParts({
+            submission,
+            parts: splitParts.filter((p) => p.include),
+            recordText: editedText, // keep the full original text on record
+            note, qc,
+          })
+        : await approveSubmission({ submission, editedText, section, mode, note, qc });
       qc.invalidateQueries({ queryKey: ['submission', submission.id] });
       onDone(docId);
     } catch (e: any) {
@@ -521,33 +589,115 @@ function ApproveModal({ submission, editedText, onClose, onDone }: any) {
     }
   }
 
+  const wordsBadge = (s: SubmissionSection) => {
+    const w = existingWords[s];
+    return w
+      ? <span className="text-[10px] rounded-full bg-amber-100 text-amber-800 px-2 py-0.5 font-medium">has ~{w} words</span>
+      : <span className="text-[10px] rounded-full bg-slate-100 text-slate-500 px-2 py-0.5 font-medium">empty</span>;
+  };
+
   return (
     <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-4" onClick={(e) => e.stopPropagation()}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl p-6 space-y-4 max-h-[92vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <div>
           <h3 className="text-lg font-bold">Approve submission</h3>
-          <p className="text-sm text-slate-500">Choose which section of the consolidated reference receives this content.</p>
+          <p className="text-sm text-slate-500">Send this content into the sensor's consolidated reference.</p>
         </div>
-        <div>
-          <label className="label">Work-type section</label>
-          <select className="input" value={section} onChange={(e) => setSection(e.target.value as SubmissionSection)}>
-            {SECTION_ORDER.map((s) => <option key={s} value={s}>{SECTION_LABEL[s]}</option>)}
-          </select>
-          <div className="text-xs text-slate-500 mt-1.5">{SECTION_HINT[section]}</div>
+
+        {/* One section vs AI split */}
+        <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden">
+          <button onClick={() => setTab('single')} aria-pressed={tab === 'single'}
+            className={`tap px-3.5 py-2 text-xs font-semibold transition ${tab === 'single' ? 'bg-brand-700 text-white' : 'bg-white text-slate-600 hover:text-brand-700'}`}>
+            One section
+          </button>
+          <button onClick={() => setTab('split')} aria-pressed={tab === 'split'}
+            className={`tap inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold transition border-l border-slate-200 ${tab === 'split' ? 'bg-brand-700 text-white' : 'bg-white text-slate-600 hover:text-brand-700'}`}>
+            <Scissors size={13} /> Split across sections (AI)
+          </button>
         </div>
-        <div>
-          <label className="label">Merge mode</label>
-          <div className="space-y-1.5">
-            <label className="flex items-start gap-2 text-sm cursor-pointer">
-              <input type="radio" checked={mode === 'replace'} onChange={() => setMode('replace')} className="mt-0.5" />
-              <span><strong>Replace</strong> the existing {SECTION_LABEL[section]} content. <span className="muted">Recommended for new manuals / datasheet updates.</span></span>
-            </label>
-            <label className="flex items-start gap-2 text-sm cursor-pointer">
-              <input type="radio" checked={mode === 'append'} onChange={() => setMode('append')} className="mt-0.5" />
-              <span><strong>Append</strong> to the existing {SECTION_LABEL[section]} content. <span className="muted">Use for service bulletins, addenda, or genuinely new information.</span></span>
-            </label>
+
+        {tab === 'single' && (
+          <>
+            <div>
+              <label className="label">Activity section</label>
+              <div className="flex items-center gap-2">
+                <select className="input flex-1" value={section} onChange={(e) => setSection(e.target.value as SubmissionSection)}>
+                  {SECTION_ORDER.map((s) => <option key={s} value={s}>{SECTION_LABEL[s]}</option>)}
+                </select>
+                {wordsBadge(section)}
+              </div>
+              <div className="text-xs text-slate-500 mt-1.5">{SECTION_HINT[section]}</div>
+              <div className="text-[11px] text-slate-400 mt-1">Covers several activities (e.g. a full manual)? Use <b>Split across sections</b> above.</div>
+            </div>
+            <div>
+              <label className="label">Merge mode</label>
+              <div className="space-y-1.5">
+                <label className="flex items-start gap-2 text-sm cursor-pointer">
+                  <input type="radio" checked={mode === 'replace'} onChange={() => setMode('replace')} className="mt-0.5" />
+                  <span><strong>Replace</strong> the existing {SECTION_LABEL[section]} content. <span className="muted">Recommended for new manuals / datasheet updates.</span></span>
+                </label>
+                <label className="flex items-start gap-2 text-sm cursor-pointer">
+                  <input type="radio" checked={mode === 'append'} onChange={() => setMode('append')} className="mt-0.5" />
+                  <span><strong>Append</strong> to the existing {SECTION_LABEL[section]} content. <span className="muted">Use for service bulletins, addenda, or genuinely new information.</span></span>
+                </label>
+              </div>
+              {mode === 'replace' && (existingWords[section] ?? 0) > 0 && (
+                <div className="mt-2 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                  ⚠ {SECTION_LABEL[section]} already has ~{existingWords[section]} words — replacing overwrites them (recoverable via History).
+                </div>
+              )}
+            </div>
+          </>
+        )}
+
+        {tab === 'split' && (
+          <div className="space-y-3">
+            {!splitParts && (
+              <div className="rounded-xl border-2 border-dashed border-brand-200 bg-brand-50/50 p-5 text-center">
+                <Scissors size={20} className="text-brand-600 mx-auto mb-2" />
+                <div className="text-sm font-medium text-slate-800">Route each part of this document to the right section</div>
+                <div className="text-xs text-slate-500 mt-1 mb-3 max-w-md mx-auto">
+                  The AI assigns paragraphs to activity sections — nothing is rewritten, only routed. You review, edit, and untick before anything is saved.
+                </div>
+                <button onClick={analyze} disabled={analyzing}
+                  className="tap inline-flex items-center gap-1.5 rounded-lg bg-gradient-to-br from-brand-600 to-brand-800 text-white px-4 py-2 text-sm font-semibold hover:from-brand-700 transition disabled:opacity-60">
+                  {analyzing ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
+                  {analyzing ? 'Analyzing…' : 'Analyze & split'}
+                </button>
+                {splitNote && <div className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mt-3 text-left">{splitNote}</div>}
+              </div>
+            )}
+            {splitParts && (
+              <>
+                {splitNote && <div className="text-xs text-slate-500">{splitNote}</div>}
+                {splitParts.map((p, i) => (
+                  <div key={i} className={`rounded-xl border p-3 space-y-2 ${p.include ? 'border-slate-200' : 'border-slate-100 opacity-50'}`}>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <input type="checkbox" checked={p.include} onChange={(e) => patchPart(i, { include: e.target.checked })} aria-label="Include this part" />
+                      <select value={p.section} onChange={(e) => patchPart(i, { section: e.target.value as SubmissionSection })}
+                        className="rounded-lg border border-slate-300 text-xs px-2 py-1.5 font-medium">
+                        {SECTION_ORDER.map((s) => <option key={s} value={s}>{SECTION_LABEL[s]}</option>)}
+                      </select>
+                      {wordsBadge(p.section)}
+                      <select value={p.mode} onChange={(e) => patchPart(i, { mode: e.target.value as 'replace' | 'append' })}
+                        className="rounded-lg border border-slate-300 text-xs px-2 py-1.5 ml-auto">
+                        <option value="replace">Replace section</option>
+                        <option value="append">Append to section</option>
+                      </select>
+                      <span className="text-[10px] text-slate-400">{p.text.trim().split(/\s+/).length} words</span>
+                    </div>
+                    {p.include && (
+                      <textarea value={p.text} onChange={(e) => patchPart(i, { text: e.target.value })} rows={4}
+                        className="w-full text-xs rounded-lg border border-slate-200 px-2.5 py-2 font-mono focus:outline-none focus:ring-1 focus:ring-brand-400" />
+                    )}
+                  </div>
+                ))}
+                <button onClick={() => { setSplitParts(null); setSplitNote(null); }} className="text-xs text-slate-500 hover:text-brand-700">↺ Re-analyze</button>
+              </>
+            )}
           </div>
-        </div>
+        )}
+
         <div>
           <label className="label">Reviewer note (optional)</label>
           <input className="input" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Cleaned up Issue 4 wording" />
@@ -555,7 +705,9 @@ function ApproveModal({ submission, editedText, onClose, onDone }: any) {
         {err && <div className="text-sm text-red-700 bg-red-50 border border-red-100 rounded px-3 py-2">{err}</div>}
         <div className="flex justify-end gap-2">
           <button onClick={onClose} className="btn-ghost">Cancel</button>
-          <button onClick={confirm} disabled={busy} className="btn-primary">{busy ? 'Approving…' : 'Approve & merge'}</button>
+          <button onClick={confirm} disabled={busy || (tab === 'split' && includedCount === 0)} className="btn-primary">
+            {busy ? 'Approving…' : tab === 'split' ? `Approve ${includedCount} part${includedCount === 1 ? '' : 's'}` : 'Approve & merge'}
+          </button>
         </div>
       </div>
     </div>

@@ -111,6 +111,7 @@ Deno.serve(async (req) => {
     : payload.mode === 'generate-rules' ? 'generate-rules'
     : payload.mode === 'generate-flow' ? 'generate-flow'
     : payload.mode === 'invite-user' ? 'invite-user'
+    : payload.mode === 'split-sections' ? 'split-sections'
     : 'docs';
 
   const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
@@ -371,6 +372,101 @@ Deno.serve(async (req) => {
       .from('diagnostic_flows').select('*')
       .eq('source_doc_id', docId).eq('status', 'draft').order('created_at');
     return json({ flows: fresh ?? [] });
+  }
+
+  // ---------- SPLIT-SECTIONS MODE: partition one document across activity sections ----------
+  // A single upload (e.g. a full manual) often covers install + calibrate +
+  // troubleshoot at once. The AI assigns PARAGRAPH RANGES of the original text
+  // to sections; the server slices the original verbatim — content is never
+  // rewritten, only routed. Admin reviews/edits every part before approving.
+  if (mode === 'split-sections') {
+    const supabase = createClient(SUPABASE_URL, SERVICE_KEY);
+    const token = (req.headers.get('Authorization') ?? '').replace(/^Bearer\s+/i, '');
+    const { data: who } = await supabase.auth.getUser(token);
+    if (!who?.user) return json({ error: 'unauthorized' }, 401);
+    const { data: prof } = await supabase.from('profiles').select('role').eq('id', who.user.id).maybeSingle();
+    if ((prof as any)?.role !== 'admin') return json({ error: 'admin only' }, 403);
+
+    const subId = ((payload as any).submission_id ?? '').toString();
+    if (!subId) return json({ error: 'submission_id required' }, 400);
+    const { data: sub, error: sErr } = await supabase
+      .from('document_submissions').select('id, title, extracted_text').eq('id', subId).maybeSingle();
+    if (sErr || !sub) return json({ error: 'submission not found' }, 404);
+    const fullText = ((sub as any).extracted_text ?? '').trim();
+    if (fullText.length < 200) return json({ parts: [], note: 'not enough text to split' });
+
+    // Paragraphs: split on blank lines; glue fragments < 60 chars to the
+    // previous paragraph so headings stay attached to their body.
+    const rawParas = fullText.split(/\n\s*\n/).map((p: string) => p.trim()).filter(Boolean);
+    const paras: string[] = [];
+    for (const p of rawParas) {
+      if (paras.length && (p.length < 60 || paras[paras.length - 1].length < 60)) paras[paras.length - 1] += '\n\n' + p;
+      else paras.push(p);
+    }
+    // Cap what the model sees (~60k chars); everything beyond is reported as truncated.
+    let budget = 60_000, cut = paras.length;
+    for (let i = 0, used = 0; i < paras.length; i++) {
+      used += paras[i].length;
+      if (used > budget) { cut = i; break; }
+    }
+    const visible = paras.slice(0, cut);
+    const truncated = cut < paras.length;
+
+    const SECTION_DEFS = [
+      'install_commission (mounting, wiring, first start-up, commissioning)',
+      'configure (settings, parameters, menus, communication setup)',
+      'inspect (visual checks, routine inspection)',
+      'clean (cleaning the sensor/probe)',
+      'calibrate (calibration, zero/span, buffers, verification)',
+      'replace (replacing the sensor or its parts/consumables)',
+      'troubleshoot_repair (faults, error codes, symptoms and fixes, repair)',
+      'maintenance_planning (maintenance schedules, intervals, planning)',
+      'other (specs, safety notes, anything that fits nowhere else)',
+    ];
+    const SECTION_KEYS = SECTION_DEFS.map((s) => s.split(' ')[0]);
+
+    const sys = [
+      'You ROUTE paragraphs of a sensor document to activity sections. You never rewrite content.',
+      'Assign CONTIGUOUS paragraph ranges to exactly one section each. Ranges must not overlap.',
+      'Skip paragraphs that are pure noise (page headers, tables of contents, legal boilerplate) by not assigning them.',
+      'Respond with strict JSON only.',
+    ].join('\n');
+    const user = [
+      `Document title: ${(sub as any).title ?? ''}`,
+      `Sections (use ONLY these keys): ${SECTION_DEFS.join('; ')}`,
+      '',
+      'Paragraphs (indexed):',
+      visible.map((p: string, i: number) => `[${i}] ${p.slice(0, 700)}`).join('\n'),
+      '',
+      'Return strict JSON: {"assignments":[{"section":"<key>","from":<first paragraph index>,"to":<last paragraph index>}]}',
+    ].join('\n');
+
+    const raw = await groqComplete(sys, user, GROQ_API_KEY, MODEL, true);
+    let parsed: any = {};
+    try { parsed = JSON.parse(raw ?? '{}'); } catch { parsed = {}; }
+    const seen = new Set<number>();
+    const bySection = new Map<string, string[]>();
+    for (const a of (Array.isArray(parsed.assignments) ? parsed.assignments : [])) {
+      if (!SECTION_KEYS.includes(a?.section)) continue;
+      let from = Math.max(0, Math.floor(a.from ?? -1));
+      let to = Math.min(visible.length - 1, Math.floor(a.to ?? -1));
+      if (from > to) continue;
+      const chunk: string[] = [];
+      for (let i = from; i <= to; i++) { if (!seen.has(i)) { seen.add(i); chunk.push(visible[i]); } }
+      if (!chunk.length) continue;
+      if (!bySection.has(a.section)) bySection.set(a.section, []);
+      bySection.get(a.section)!.push(chunk.join('\n\n'));
+    }
+    const parts = [...bySection.entries()].map(([section, chunks]) => ({ section, content: chunks.join('\n\n') }));
+    if (parts.length === 0) return json({ parts: [], note: 'the AI could not partition this document — approve it into one section instead' });
+    const coveredChars = [...seen].reduce((n, i) => n + visible[i].length, 0);
+    const totalChars = visible.reduce((n, p) => n + p.length, 0);
+    return json({
+      parts,
+      truncated,
+      coverage: totalChars ? Math.round((coveredChars / totalChars) * 100) : 0,
+      note: truncated ? 'long document — the split covers roughly the first 60,000 characters; review the tail manually' : null,
+    });
   }
 
   // ---------- INVITE-USER MODE: admin invites a teammate by email ----------

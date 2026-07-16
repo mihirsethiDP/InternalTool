@@ -18,6 +18,30 @@ export async function approveSubmission(opts: {
   qc: QueryClient;
 }): Promise<{ docId: string }> {
   const { submission, editedText, section, mode = 'replace', note = '', qc } = opts;
+  return approveSubmissionParts({
+    submission,
+    parts: [{ section, text: editedText, mode }],
+    recordText: editedText,
+    note,
+    qc,
+  });
+}
+
+// One document, MANY sections — a manual can cover install + calibrate +
+// troubleshoot at once. Applies every part to the sensor's reference in one
+// write (one revision), marks the submission approved once, rewards once.
+export interface ApprovalPart { section: SubmissionSection; text: string; mode: 'replace' | 'append' }
+
+export async function approveSubmissionParts(opts: {
+  submission: any;
+  parts: ApprovalPart[];
+  recordText?: string; // what to persist as the submission's final text
+  note?: string;
+  qc: QueryClient;
+}): Promise<{ docId: string }> {
+  const { submission, note = '', qc } = opts;
+  const parts = opts.parts.filter((p) => p.text.trim());
+  if (parts.length === 0) throw new Error('Nothing to approve — every part is empty.');
   const sensorModelId = submission.sensor_model_id;
   if (!sensorModelId) throw new Error('Submission has no sensor model.');
 
@@ -31,24 +55,28 @@ export async function approveSubmission(opts: {
     cdoc = ins.data;
   }
 
-  // 2. Merge into the target section.
-  const merged = mode === 'replace'
-    ? replaceSection(cdoc.content_markdown, section, editedText)
-    : appendSection(cdoc.content_markdown, section, editedText,
-        `Appended from "${submission.title}" on ${new Date().toLocaleDateString()}`);
-
-  // 3. Persist markdown + rebuild chunks + revision snapshot.
+  // 2. Fold every part into the markdown, then persist ONCE (one revision).
+  let merged = cdoc.content_markdown;
+  for (const p of parts) {
+    merged = p.mode === 'replace'
+      ? replaceSection(merged, p.section, p.text)
+      : appendSection(merged, p.section, p.text,
+          `Appended from "${submission.title}" on ${new Date().toLocaleDateString()}`);
+  }
+  const sectionList = parts.map((p) => SECTION_LABEL[p.section]).join(', ');
   await writeConsolidated({
     docId: cdoc.id, sensorModelId, markdown: merged, changeKind: 'approval',
-    note: `Approved "${submission.title}" into ${SECTION_LABEL[section]} (${mode})${note ? ` — ${note}` : ''}`,
+    note: `Approved "${submission.title}" into ${sectionList}${note ? ` — ${note}` : ''}`,
   });
 
-  // 4. Mark approved.
-  const decision = mode === 'replace' ? 'replace_section' : 'append_section';
+  // 3. Mark approved. Primary section = the largest part (used for deep links).
+  const primary = [...parts].sort((a, b) => b.text.length - a.text.length)[0];
+  const decision = parts.some((p) => p.mode === 'replace') ? 'replace_section' : 'append_section';
   const upd = await supabase.from('document_submissions').update({
-    status: 'approved', decision, target_section: section,
-    reviewer_notes: note || null, reviewed_at: new Date().toISOString(),
-    extracted_text: editedText,
+    status: 'approved', decision, target_section: primary.section,
+    reviewer_notes: note || (parts.length > 1 ? `Split across: ${sectionList}` : null),
+    reviewed_at: new Date().toISOString(),
+    extracted_text: opts.recordText ?? parts.map((p) => p.text).join('\n\n'),
   }).eq('id', submission.id);
   if (upd.error) throw upd.error;
 
