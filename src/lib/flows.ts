@@ -24,11 +24,17 @@ export interface FlowNode {
   fail_next?: string; // action only, optional (where "Didn't work" goes; default: next escalate/resolve)
   source_section?: string; // action provenance — consolidated doc section key
   skill?: string; // escalate only — escalation_contacts.skill_key
+  // Classification matrix, action nodes (AI-proposed, admin-editable):
+  visit?: 'no_visit' | 'visit_required';
+  // action nodes reuse `skill` semantics differently: for actions it is
+  // 'anyone' | 'specialist' (who can perform the step).
 }
 
 export interface FlowDefinition {
   start: string;
   nodes: FlowNode[];
+  // AI's proposed flow-level 2×2 — pre-fills the admin's confirmation chips.
+  proposed_classification?: { visit_required: boolean; skill_required: 'anyone' | 'specialist' };
 }
 
 export interface DiagnosticFlow {
@@ -42,6 +48,9 @@ export interface DiagnosticFlow {
   source_doc_id: string | null;
   created_at: string;
   approved_at: string | null;
+  // Human-confirmed classification (NULL until approved — approval requires both).
+  visit_required: boolean | null;
+  skill_required: 'anyone' | 'specialist' | null;
 }
 
 export interface EscalationContact {

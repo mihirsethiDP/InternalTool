@@ -1,15 +1,19 @@
 import { useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { GitBranch, Sparkles, Check, X, Loader2, Trash2, Pencil, Archive, HelpCircle, Wrench, CheckCircle2, PhoneCall, ChevronDown, ChevronRight } from 'lucide-react';
+import { GitBranch, Sparkles, Check, X, Loader2, Trash2, Pencil, Archive, HelpCircle, Wrench, CheckCircle2, PhoneCall, ChevronDown, ChevronRight, ArrowUp, ArrowDown, Link2, Home, MapPin, GraduationCap, Eye } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../lib/auth';
 import { validateFlowDefinition, type DiagnosticFlow, type FlowDefinition, type FlowNode, type EscalationContact } from '../lib/flows';
+import { createIssue, updateIssue, deleteIssue, linkFlow, unlinkFlow, swapRanks, type Issue, type IssueFlowLink } from '../lib/issues';
 
-// Admin tab: review AI-drafted diagnostic flows and manage the escalation
-// directory. Framed as an action item (like the routing-rules panel): drafts
-// demand review; only approved flows reach Dr. Paani.
+// Admin tab: ISSUE-centric view of the diagnostic knowledge base. Issues are
+// the user-side problem statements ("Reading fluctuating"); each maps to an
+// ordered queue of flows the chat tries in turn. Drafts demand review (with
+// mandatory classification); only approved flows reach Dr. Paani.
 
 interface DocOption { id: string; label: string }
+
+export type FlowClassification = { visit_required: boolean; skill_required: 'anyone' | 'specialist' };
 
 export default function DiagnosticFlowsPanel() {
   const qc = useQueryClient();
@@ -66,13 +70,60 @@ export default function DiagnosticFlowsPanel() {
     qc.invalidateQueries({ queryKey: ['diagnostic-flows'] });
   }
 
-  async function setStatus(f: any, status: 'approved' | 'archived' | 'draft') {
+  // Issues + ordered flow links (the queue each issue walks).
+  const issues = useQuery({
+    queryKey: ['issues'],
+    queryFn: async () => (await supabase.from('issues')
+      .select('id, sensor_category_id, label, aliases, sensor_categories(name)')
+      .order('label')).data ?? [],
+  });
+  const links = useQuery({
+    queryKey: ['issue-flows'],
+    queryFn: async () => (await supabase.from('issue_flows')
+      .select('id, issue_id, flow_id, rank').order('rank')).data ?? [],
+  });
+  const cats = useQuery({
+    queryKey: ['cats'],
+    queryFn: async () => (await supabase.from('sensor_categories').select('id,name').order('name')).data ?? [],
+  });
+
+  const [suggestCat, setSuggestCat] = useState('');
+  const [suggesting, setSuggesting] = useState(false);
+  const [suggestNote, setSuggestNote] = useState<string | null>(null);
+
+  async function suggestIssues() {
+    if (!suggestCat) return;
+    setSuggesting(true); setSuggestNote(null);
+    try {
+      const { data, error } = await supabase.functions.invoke('chat-answer', {
+        body: { mode: 'suggest-issues', category_id: suggestCat },
+      });
+      if (error || (data as any)?.error) throw new Error((data as any)?.error || error?.message);
+      const n = ((data as any).created ?? []).length;
+      setSuggestNote(n > 0 ? `${n} issue${n === 1 ? '' : 's'} suggested — review and edit below.` : ((data as any).note ?? 'Nothing new proposed.'));
+    } catch (e: any) {
+      setSuggestNote(`Suggestion failed (${e.message}). Is the edge function redeployed?`);
+    }
+    setSuggesting(false);
+    qc.invalidateQueries({ queryKey: ['issues'] });
+  }
+
+  const refreshIssues = () => {
+    qc.invalidateQueries({ queryKey: ['issues'] });
+    qc.invalidateQueries({ queryKey: ['issue-flows'] });
+  };
+
+  // Approval REQUIRES the confirmed 2×2 — the supervisor's "mandatory" gate.
+  async function setStatus(f: any, status: 'approved' | 'archived' | 'draft', cls?: FlowClassification) {
     if (status === 'approved') {
       const v = validateFlowDefinition(f.definition);
       if (!v.ok) { alert('Cannot approve — the flow structure is invalid:\n' + v.errors.join('\n')); return; }
+      if (!cls) { alert('Confirm the classification (visit + skill) before approving.'); return; }
     }
     await supabase.from('diagnostic_flows').update({
       status,
+      visit_required: status === 'approved' ? cls!.visit_required : f.visit_required,
+      skill_required: status === 'approved' ? cls!.skill_required : f.skill_required,
       approved_by: status === 'approved' ? userId : null,
       approved_at: status === 'approved' ? new Date().toISOString() : null,
       updated_at: new Date().toISOString(),
@@ -142,16 +193,26 @@ export default function DiagnosticFlowsPanel() {
             <>
               {drafts.length > 0 && (
                 <div className="space-y-3">
-                  <div className="text-[11px] uppercase tracking-wide font-semibold text-amber-700">Drafts — review &amp; approve</div>
-                  {drafts.map((f) => <FlowCard key={f.id} flow={f} onApprove={() => setStatus(f, 'approved')} onDelete={() => remove(f.id)} onSave={saveEdits} />)}
+                  <div className="text-[11px] uppercase tracking-wide font-semibold text-amber-700">Drafts — review, classify &amp; approve</div>
+                  {drafts.map((f) => <FlowCard key={f.id} flow={f} onApprove={(cls) => setStatus(f, 'approved', cls)} onDelete={() => remove(f.id)} onSave={saveEdits} />)}
                 </div>
               )}
-              {approved.length > 0 && (
-                <div className="space-y-3">
-                  <div className="text-[11px] uppercase tracking-wide font-semibold text-emerald-700">Live — used by Dr. Paani</div>
-                  {approved.map((f) => <FlowCard key={f.id} flow={f} live onArchive={() => setStatus(f, 'archived')} onSave={saveEdits} />)}
-                </div>
-              )}
+
+              {/* Issues — the user vocabulary, each with its ordered flow queue */}
+              <IssuesBoard
+                issues={(issues.data ?? []) as any[]}
+                links={(links.data ?? []) as IssueFlowLink[]}
+                flows={list}
+                cats={(cats.data ?? []) as { id: string; name: string }[]}
+                onChanged={refreshIssues}
+                onArchive={(f) => setStatus(f, 'archived')}
+                onSave={saveEdits}
+                suggest={{
+                  cat: suggestCat, setCat: setSuggestCat,
+                  run: suggestIssues, busy: suggesting, note: suggestNote,
+                }}
+              />
+
               {archived.length > 0 && (
                 <details>
                   <summary className="text-xs text-slate-500 cursor-pointer">Archived ({archived.length})</summary>
@@ -170,10 +231,225 @@ export default function DiagnosticFlowsPanel() {
   );
 }
 
-// ---------- one flow: header, symptoms, tree, actions ----------
+// ---------- issues board: user vocabulary → ordered flow queues ----------
+function IssuesBoard({ issues, links, flows, cats, onChanged, onArchive, onSave, suggest }: {
+  issues: any[]; links: IssueFlowLink[]; flows: any[]; cats: { id: string; name: string }[];
+  onChanged: () => void;
+  onArchive: (f: any) => void;
+  onSave: (id: string, patch: { title: string; trigger_symptoms: string[]; definition: FlowDefinition }) => Promise<void>;
+  suggest: { cat: string; setCat: (v: string) => void; run: () => void; busy: boolean; note: string | null };
+}) {
+  const [newLabel, setNewLabel] = useState('');
+  const [newCat, setNewCat] = useState('');
+  const flowById = new Map(flows.map((f: any) => [f.id, f]));
+  const linksByIssue = new Map<string, IssueFlowLink[]>();
+  for (const l of links) {
+    if (!linksByIssue.has(l.issue_id)) linksByIssue.set(l.issue_id, []);
+    linksByIssue.get(l.issue_id)!.push(l);
+  }
+  const mappedFlowIds = new Set(links.map((l) => l.flow_id));
+  const unmapped = flows.filter((f: any) => f.status === 'approved' && !mappedFlowIds.has(f.id));
+
+  async function addIssue() {
+    const label = newLabel.trim();
+    if (!label) return;
+    await createIssue(newCat || null, label, []);
+    setNewLabel('');
+    onChanged();
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-2 flex-wrap">
+        <div className="text-[11px] uppercase tracking-wide font-semibold text-brand-700">Issues — what users report</div>
+        <div className="ml-auto flex items-center gap-1.5">
+          <select value={suggest.cat} onChange={(e) => suggest.setCat(e.target.value)} className="rounded-lg border border-slate-300 text-xs px-2 py-1.5">
+            <option value="">Suggest for category…</option>
+            {cats.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+          <button onClick={suggest.run} disabled={suggest.busy || !suggest.cat}
+            className="tap inline-flex items-center gap-1 rounded-lg border border-brand-300 text-brand-700 px-2.5 py-1.5 text-xs font-semibold hover:bg-brand-50 disabled:opacity-50">
+            {suggest.busy ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />} Suggest issues with AI
+          </button>
+        </div>
+      </div>
+      {suggest.note && <div className="text-xs rounded-lg bg-brand-50 border border-brand-200 text-brand-800 px-3 py-2">{suggest.note}</div>}
+
+      {issues.length === 0 && (
+        <div className="text-xs text-slate-500 rounded-lg border border-dashed border-slate-300 px-3 py-3">
+          No issues defined yet. Issues are the problems users report ("Reading fluctuating"). Add one below or let the AI suggest a starter set per category.
+        </div>
+      )}
+
+      {issues.map((iss) => (
+        <IssueGroup key={iss.id} issue={iss}
+          links={(linksByIssue.get(iss.id) ?? []).sort((a, b) => a.rank - b.rank)}
+          flowById={flowById} unmappedApproved={unmapped}
+          onChanged={onChanged} onArchive={onArchive} onSave={onSave} />
+      ))}
+
+      {unmapped.length > 0 && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50/40 px-3.5 py-3 space-y-2">
+          <div className="text-xs font-semibold text-amber-800">Live flows not linked to any issue ({unmapped.length}) — users can still reach them by phrasing, but they won't chain</div>
+          {unmapped.map((f: any) => (
+            <MapFlowRow key={f.id} flow={f} issues={issues} onChanged={onChanged} />
+          ))}
+        </div>
+      )}
+
+      {/* add issue */}
+      <div className="flex items-center gap-2 flex-wrap rounded-xl bg-slate-50 border border-slate-200 px-3 py-2.5">
+        <input value={newLabel} onChange={(e) => setNewLabel(e.target.value)}
+          placeholder='New issue — as a user would say it ("Reading fluctuating")' className="input text-xs flex-1 min-w-56" />
+        <select value={newCat} onChange={(e) => setNewCat(e.target.value)} className="rounded-lg border border-slate-300 text-xs px-2 py-1.5">
+          <option value="">All sensor types</option>
+          {cats.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </select>
+        <button onClick={addIssue} disabled={!newLabel.trim()}
+          className="tap rounded-lg bg-brand-700 text-white px-3 py-1.5 text-xs font-semibold hover:bg-brand-800 disabled:opacity-50">Add issue</button>
+      </div>
+    </div>
+  );
+}
+
+function IssueGroup({ issue, links, flowById, unmappedApproved, onChanged, onArchive, onSave }: {
+  issue: any; links: IssueFlowLink[]; flowById: Map<string, any>; unmappedApproved: any[];
+  onChanged: () => void; onArchive: (f: any) => void;
+  onSave: (id: string, patch: { title: string; trigger_symptoms: string[]; definition: FlowDefinition }) => Promise<void>;
+}) {
+  const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [label, setLabel] = useState(issue.label as string);
+  const [aliases, setAliases] = useState((issue.aliases ?? []).join(', '));
+  const [viewFlow, setViewFlow] = useState<string | null>(null);
+  const catName = (Array.isArray(issue.sensor_categories) ? issue.sensor_categories[0] : issue.sensor_categories)?.name;
+  const liveCount = links.filter((l) => flowById.get(l.flow_id)?.status === 'approved').length;
+
+  async function saveIssue() {
+    await updateIssue(issue.id, { label: label.trim() || issue.label, aliases: aliases.split(',').map((a: string) => a.trim()).filter(Boolean) });
+    setEditing(false);
+    onChanged();
+  }
+  async function removeIssue() {
+    if (!confirm(`Delete issue "${issue.label}"? Its flows stay — only the grouping is removed.`)) return;
+    await deleteIssue(issue.id);
+    onChanged();
+  }
+  async function move(i: number, dir: -1 | 1) {
+    const j = i + dir;
+    if (j < 0 || j >= links.length) return;
+    await swapRanks(links[i], links[j]);
+    onChanged();
+  }
+
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white">
+      <button onClick={() => setOpen((v) => !v)} className="tap w-full px-3.5 py-3 flex items-center gap-2.5 text-left hover:bg-slate-50 transition rounded-xl">
+        {open ? <ChevronDown size={15} className="text-slate-400 shrink-0" /> : <ChevronRight size={15} className="text-slate-400 shrink-0" />}
+        <div className="min-w-0 flex-1">
+          <div className="text-sm font-medium text-slate-900">{issue.label}</div>
+          <div className="text-[11px] text-slate-500 truncate">
+            {catName ?? 'All sensor types'}{(issue.aliases ?? []).length > 0 && <> · “{(issue.aliases as string[]).slice(0, 3).join('” · “')}”</>}
+          </div>
+        </div>
+        <span className={`shrink-0 text-[11px] rounded-full px-2 py-0.5 font-medium ${liveCount > 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
+          {liveCount > 0 ? `${liveCount} flow${liveCount === 1 ? '' : 's'}, ordered` : 'no live flows'}
+        </span>
+      </button>
+
+      {open && (
+        <div className="px-3.5 pb-3.5 space-y-2">
+          {editing ? (
+            <div className="space-y-1.5">
+              <input value={label} onChange={(e) => setLabel(e.target.value)} className="input w-full text-sm" />
+              <input value={aliases} onChange={(e) => setAliases(e.target.value)} className="input w-full text-xs" placeholder="Aliases, comma-separated (incl. Hinglish)" />
+              <div className="flex gap-2">
+                <button onClick={saveIssue} className="tap rounded-md bg-brand-700 text-white px-2.5 py-1 text-xs font-medium">Save</button>
+                <button onClick={() => { setEditing(false); setLabel(issue.label); setAliases((issue.aliases ?? []).join(', ')); }} className="tap text-xs text-slate-500">Cancel</button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex gap-3">
+              <button onClick={() => setEditing(true)} className="tap inline-flex items-center gap-1 text-xs text-slate-500 hover:text-brand-700"><Pencil size={11} /> Edit label / aliases</button>
+              <button onClick={removeIssue} className="tap inline-flex items-center gap-1 text-xs text-slate-500 hover:text-red-600"><Trash2 size={11} /> Delete issue</button>
+            </div>
+          )}
+
+          {links.length === 0 && <div className="text-xs text-slate-400">No flows linked yet — map one below.</div>}
+          {links.map((l, i) => {
+            const f = flowById.get(l.flow_id);
+            if (!f) return null;
+            return (
+              <div key={l.id} className="rounded-lg border border-slate-200 bg-slate-50/60">
+                <div className="px-2.5 py-2 flex items-center gap-2">
+                  <span className="text-[11px] font-mono text-slate-400 w-4 text-center shrink-0">{i + 1}</span>
+                  <span className="text-xs font-medium text-slate-800 flex-1 min-w-0 truncate">{f.title}</span>
+                  {f.status !== 'approved' && <span className="badge bg-amber-100 text-amber-800 text-[10px] shrink-0">{f.status}</span>}
+                  {f.sensor_model_id
+                    ? <span className="text-[10px] rounded-full bg-violet-100 text-violet-700 px-2 py-0.5 shrink-0">model-specific</span>
+                    : <span className="text-[10px] rounded-full bg-sky-100 text-sky-700 px-2 py-0.5 shrink-0">all makes</span>}
+                  {f.visit_required != null && (
+                    <span className="text-[10px] rounded-full border border-slate-300 text-slate-600 px-2 py-0.5 shrink-0 inline-flex items-center gap-0.5">
+                      {f.visit_required ? <MapPin size={9} /> : <Home size={9} />}{f.visit_required ? 'visit' : 'no visit'} · {f.skill_required ?? '—'}
+                    </span>
+                  )}
+                  <button onClick={() => move(i, -1)} disabled={i === 0} aria-label="Try earlier" className="tap text-slate-400 hover:text-brand-700 disabled:opacity-30"><ArrowUp size={13} /></button>
+                  <button onClick={() => move(i, 1)} disabled={i === links.length - 1} aria-label="Try later" className="tap text-slate-400 hover:text-brand-700 disabled:opacity-30"><ArrowDown size={13} /></button>
+                  <button onClick={() => setViewFlow(viewFlow === f.id ? null : f.id)} aria-label="View flow" className="tap text-slate-400 hover:text-brand-700"><Eye size={13} /></button>
+                  <button onClick={async () => { await unlinkFlow(issue.id, f.id); onChanged(); }} aria-label="Unlink from issue" className="tap text-slate-400 hover:text-red-500"><X size={13} /></button>
+                </div>
+                {viewFlow === f.id && (
+                  <div className="px-2.5 pb-2.5">
+                    <FlowCard flow={f} live={f.status === 'approved'} onArchive={() => onArchive(f)} onSave={onSave} />
+                  </div>
+                )}
+              </div>
+            );
+          })}
+
+          {unmappedApproved.length > 0 && (
+            <LinkFlowSelect issueId={issue.id} candidates={unmappedApproved} onChanged={onChanged} />
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function LinkFlowSelect({ issueId, candidates, onChanged }: { issueId: string; candidates: any[]; onChanged: () => void }) {
+  const [sel, setSel] = useState('');
+  return (
+    <div className="flex items-center gap-2">
+      <Link2 size={12} className="text-slate-400 shrink-0" />
+      <select value={sel} onChange={(e) => setSel(e.target.value)} className="rounded-lg border border-slate-300 text-xs px-2 py-1.5 flex-1 min-w-0">
+        <option value="">Link an existing flow…</option>
+        {candidates.map((f) => <option key={f.id} value={f.id}>{f.title}</option>)}
+      </select>
+      <button onClick={async () => { if (!sel) return; await linkFlow(issueId, sel); setSel(''); onChanged(); }} disabled={!sel}
+        className="tap rounded-md border border-slate-300 text-slate-600 px-2.5 py-1 text-xs hover:border-brand-300 hover:text-brand-700 disabled:opacity-40">Link</button>
+    </div>
+  );
+}
+
+function MapFlowRow({ flow, issues, onChanged }: { flow: any; issues: any[]; onChanged: () => void }) {
+  const [sel, setSel] = useState('');
+  return (
+    <div className="flex items-center gap-2 flex-wrap">
+      <span className="text-xs text-slate-700 flex-1 min-w-0 truncate">{flow.title}</span>
+      <select value={sel} onChange={(e) => setSel(e.target.value)} className="rounded-lg border border-slate-300 text-xs px-2 py-1.5">
+        <option value="">Map to issue…</option>
+        {issues.map((i) => <option key={i.id} value={i.id}>{i.label}</option>)}
+      </select>
+      <button onClick={async () => { if (!sel) return; await linkFlow(sel, flow.id); setSel(''); onChanged(); }} disabled={!sel}
+        className="tap rounded-md bg-brand-700 text-white px-2.5 py-1 text-xs font-medium hover:bg-brand-800 disabled:opacity-40">Map</button>
+    </div>
+  );
+}
+
+// ---------- one flow: header, symptoms, tree, classification, actions ----------
 function FlowCard({ flow, live, onApprove, onArchive, onDelete, onRestore, onSave }: {
   flow: any; live?: boolean;
-  onApprove?: () => void; onArchive?: () => void; onDelete?: () => void; onRestore?: () => void;
+  onApprove?: (cls: FlowClassification) => void; onArchive?: () => void; onDelete?: () => void; onRestore?: () => void;
   onSave: (id: string, patch: { title: string; trigger_symptoms: string[]; definition: FlowDefinition }) => Promise<void>;
 }) {
   const [open, setOpen] = useState(!live);
@@ -182,6 +458,11 @@ function FlowCard({ flow, live, onApprove, onArchive, onDelete, onRestore, onSav
   const [symptoms, setSymptoms] = useState((flow.trigger_symptoms ?? []).join(', '));
   const [def, setDef] = useState<FlowDefinition>(flow.definition as FlowDefinition);
   const [saving, setSaving] = useState(false);
+  // Classification confirm — pre-filled from the AI proposal (or saved values);
+  // approval is blocked until BOTH are explicitly set (the mandatory gate).
+  const proposal = (flow.definition?.proposed_classification ?? null) as FlowClassification | null;
+  const [visitCls, setVisitCls] = useState<boolean | null>(flow.visit_required ?? proposal?.visit_required ?? null);
+  const [skillCls, setSkillCls] = useState<'anyone' | 'specialist' | null>(flow.skill_required ?? proposal?.skill_required ?? null);
 
   const sm = Array.isArray(flow.sensor_models) ? flow.sensor_models[0] : flow.sensor_models;
   const mk = sm ? (Array.isArray(sm.sensor_makes) ? sm.sensor_makes[0] : sm.sensor_makes) : null;
@@ -242,6 +523,44 @@ function FlowCard({ flow, live, onApprove, onArchive, onDelete, onRestore, onSav
             </div>
           )}
 
+          {/* Classification confirm — the supervisor's 2×2, mandatory to approve.
+              Pre-selected from the AI's proposal; live flows show it read-only. */}
+          {onApprove && (
+            <div className="rounded-lg border border-slate-200 bg-white px-3 py-2.5 space-y-2">
+              <div className="text-[10px] uppercase tracking-wide font-semibold text-slate-500">Classify to approve — confirm both</div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-xs text-slate-600 w-24">Visit needed?</span>
+                <button onClick={() => setVisitCls(false)} aria-pressed={visitCls === false}
+                  className={`tap inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-medium border transition ${visitCls === false ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-slate-600 border-slate-300 hover:border-emerald-400'}`}>
+                  <Home size={11} /> No visit — plant staff can do it
+                </button>
+                <button onClick={() => setVisitCls(true)} aria-pressed={visitCls === true}
+                  className={`tap inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-medium border transition ${visitCls === true ? 'bg-red-600 text-white border-red-600' : 'bg-white text-slate-600 border-slate-300 hover:border-red-400'}`}>
+                  <MapPin size={11} /> Visit required
+                </button>
+              </div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-xs text-slate-600 w-24">Skill needed?</span>
+                <button onClick={() => setSkillCls('anyone')} aria-pressed={skillCls === 'anyone'}
+                  className={`tap inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-medium border transition ${skillCls === 'anyone' ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-slate-600 border-slate-300 hover:border-emerald-400'}`}>
+                  <Wrench size={11} /> Anyone
+                </button>
+                <button onClick={() => setSkillCls('specialist')} aria-pressed={skillCls === 'specialist'}
+                  className={`tap inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-medium border transition ${skillCls === 'specialist' ? 'bg-violet-600 text-white border-violet-600' : 'bg-white text-slate-600 border-slate-300 hover:border-violet-400'}`}>
+                  <GraduationCap size={11} /> Specialist
+                </button>
+              </div>
+              {proposal && (visitCls === null || skillCls === null) && (
+                <div className="text-[10px] text-slate-400">AI suggests: {proposal.visit_required ? 'visit required' : 'no visit'} · {proposal.skill_required}</div>
+              )}
+            </div>
+          )}
+          {live && flow.visit_required != null && (
+            <div className="text-[11px] text-slate-500 inline-flex items-center gap-1.5">
+              Classified: {flow.visit_required ? <><MapPin size={11} /> visit required</> : <><Home size={11} /> no visit</>} · {flow.skill_required}
+            </div>
+          )}
+
           <div className="flex gap-2 flex-wrap">
             {editing ? (
               <>
@@ -254,7 +573,15 @@ function FlowCard({ flow, live, onApprove, onArchive, onDelete, onRestore, onSav
               </>
             ) : (
               <>
-                {onApprove && <button onClick={onApprove} className="tap inline-flex items-center gap-1 rounded-md bg-emerald-600 text-white px-2.5 py-1 text-xs font-medium hover:bg-emerald-700"><Check size={12} /> Approve</button>}
+                {onApprove && (
+                  <button
+                    onClick={() => onApprove({ visit_required: visitCls!, skill_required: skillCls! })}
+                    disabled={visitCls === null || skillCls === null}
+                    title={visitCls === null || skillCls === null ? 'Confirm the classification first' : undefined}
+                    className="tap inline-flex items-center gap-1 rounded-md bg-emerald-600 text-white px-2.5 py-1 text-xs font-medium hover:bg-emerald-700 disabled:opacity-40">
+                    <Check size={12} /> Approve
+                  </button>
+                )}
                 <button onClick={() => setEditing(true)} className="tap inline-flex items-center gap-1 rounded-md border border-slate-300 text-slate-600 px-2.5 py-1 text-xs hover:border-brand-300 hover:text-brand-700"><Pencil size={12} /> Edit</button>
                 {onArchive && <button onClick={onArchive} className="tap inline-flex items-center gap-1 text-xs text-slate-500 hover:text-amber-700"><Archive size={12} /> Archive</button>}
                 {onRestore && <button onClick={onRestore} className="tap inline-flex items-center gap-1 text-xs text-slate-500 hover:text-brand-700">Restore to drafts</button>}
@@ -318,11 +645,16 @@ function NodeRow({ n, depth, editing, onText }: { n: FlowNode; depth: number; ed
         ) : (
           <div className="text-xs text-slate-800 bg-white/70 rounded-md border border-slate-200/70 px-2 py-1">{n.text}</div>
         )}
-        <div className="flex flex-wrap gap-1 mt-0.5">
+        <div className="flex flex-wrap gap-1 mt-0.5 items-center">
           {n.kind === 'question' && (n.options ?? []).map((o, i) => (
             <span key={i} className="text-[10px] text-slate-500">{o.label} → <span className="font-mono">{o.next}</span></span>
           ))}
           {n.kind === 'action' && n.next && <span className="text-[10px] text-slate-500">done → <span className="font-mono">{n.next}</span>{n.fail_next ? <> · didn’t work → <span className="font-mono">{n.fail_next}</span></> : null}</span>}
+          {n.kind === 'action' && (n as any).visit && (
+            <span className={`text-[9px] rounded-full px-1.5 py-0.5 font-medium ${(n as any).visit === 'visit_required' ? 'bg-red-50 text-red-600' : 'bg-emerald-50 text-emerald-700'}`}>
+              {(n as any).visit === 'visit_required' ? 'visit' : 'no visit'}{(n as any).skill ? ` · ${(n as any).skill}` : ''}
+            </span>
+          )}
           {n.kind === 'escalate' && n.skill && <span className="text-[10px] text-red-500">needs: {n.skill}</span>}
         </div>
       </div>

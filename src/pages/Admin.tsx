@@ -268,6 +268,11 @@ function UsersPanel({ onChanged }: { onChanged: () => void }) {
     await supabase.from('profiles').update({ role }).eq('email', email);
     onChanged();
   }
+  // Technical level drives how deep Dr. Paani's guided steps go for this user.
+  async function setTechLevel(email: string, technical_level: string) {
+    await supabase.from('profiles').update({ technical_level }).eq('email', email);
+    onChanged();
+  }
 
   // Group by email so one person = one row, even with multiple sign-ins.
   const rank: Record<string, number> = { viewer: 0, uploader: 1, admin: 2 };
@@ -320,6 +325,12 @@ function UsersPanel({ onChanged }: { onChanged: () => void }) {
                   {u.mixed && <span className="ml-1.5 text-[10px] text-amber-600">was inconsistent — fixed on next change</span>}
                 </td>
                 <td className="text-right space-x-1 whitespace-nowrap">
+                  <select value={u.tech} onChange={(e) => setTechLevel(u.email, e.target.value)}
+                    title="Technical level — how deep Dr. Paani goes with guided steps"
+                    className="rounded-md border border-slate-300 text-[11px] px-1.5 py-1 mr-2">
+                    <option value="non_technical">non-technical</option>
+                    <option value="technical">technical</option>
+                  </select>
                   <button className="btn-ghost text-xs" onClick={() => setRole(u.email, 'viewer')}>viewer</button>
                   <button className="btn-ghost text-xs" onClick={() => setRole(u.email, 'uploader')}>uploader</button>
                   <button className="btn-ghost text-xs" onClick={() => setRole(u.email, 'admin')}>admin</button>
