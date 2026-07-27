@@ -12,8 +12,12 @@
 // automatically by the platform.
 //
 // Deploy (Supabase dashboard → Edge Functions) and set secrets:
-//   GROQ_API_KEY  = <your gsk_… key from console.groq.com/keys>
-//   GROQ_MODEL    = llama-3.3-70b-versatile   (optional; this is the default)
+//   GROQ_API_KEY      = <your gsk_… key from console.groq.com/keys>
+//   GROQ_MODEL        = llama-3.3-70b-versatile   (optional; this is the default)
+//   ANTHROPIC_API_KEY = <your sk-ant-… key>  (optional — when set, Claude runs
+//                       the reasoning-heavy modes: generate-flow, split-sections,
+//                       suggest-issues, match-issue; Groq is the automatic fallback)
+//   ANTHROPIC_MODEL   = claude-sonnet-4-5    (optional; this is the default)
 // =============================================================
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
@@ -69,12 +73,12 @@ function json(body: unknown, status = 200) {
 }
 
 // OpenAI-compatible Groq completion. Returns the text, or null on failure.
-async function groqComplete(system: string, user: string, key: string, model: string, jsonMode = false): Promise<string | null> {
+async function groqComplete(system: string, user: string, key: string, model: string, jsonMode = false, maxTokens = 900): Promise<string | null> {
   try {
     const payload: Record<string, unknown> = {
       model,
       messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
-      temperature: jsonMode ? 0 : 0.2, max_tokens: 900, top_p: 0.9,
+      temperature: jsonMode ? 0 : 0.2, max_tokens: maxTokens, top_p: 0.9,
     };
     if (jsonMode) payload.response_format = { type: 'json_object' };
     const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
@@ -89,6 +93,57 @@ async function groqComplete(system: string, user: string, key: string, model: st
     console.error('groq fetch threw', e);
     return null;
   }
+}
+
+// Anthropic completion (Claude). Used for the REASONING-heavy modes — flow
+// generation, section splitting, issue mapping — where structural quality and
+// faithfulness matter most. Returns the text, or null on failure.
+async function anthropicComplete(system: string, user: string, key: string, model: string, maxTokens = 2000): Promise<string | null> {
+  try {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' },
+      body: JSON.stringify({
+        model,
+        max_tokens: maxTokens,
+        system,
+        messages: [{ role: 'user', content: user }],
+        temperature: 0,
+      }),
+    });
+    if (!res.ok) { console.error('anthropic error', res.status, await res.text()); return null; }
+    const body = await res.json();
+    const text = (body?.content ?? []).filter((b: any) => b.type === 'text').map((b: any) => b.text).join('');
+    return text || null;
+  } catch (e) {
+    console.error('anthropic fetch threw', e);
+    return null;
+  }
+}
+
+// Claude sometimes wraps JSON in prose or a code fence — extract the object.
+function extractJson(raw: string | null): any {
+  if (!raw) return {};
+  try { return JSON.parse(raw); } catch { /* try harder */ }
+  const m = raw.match(/\{[\s\S]*\}/);
+  if (m) { try { return JSON.parse(m[0]); } catch { /* give up */ } }
+  return {};
+}
+
+// Smart completion for generation/mapping modes: Claude when the key is set,
+// Groq otherwise — and Groq as the automatic fallback if the Claude call fails.
+async function smartComplete(system: string, user: string, opts: {
+  anthropicKey: string; anthropicModel: string;
+  groqKey: string; groqModel: string;
+  maxTokens?: number;
+}): Promise<{ raw: string | null; provider: string }> {
+  if (opts.anthropicKey) {
+    const raw = await anthropicComplete(system, user, opts.anthropicKey, opts.anthropicModel, opts.maxTokens ?? 2000);
+    if (raw) return { raw, provider: 'anthropic' };
+    console.warn('anthropic failed — falling back to groq');
+  }
+  const raw = await groqComplete(system, user, opts.groqKey, opts.groqModel, true, opts.maxTokens ?? 2000);
+  return { raw, provider: 'groq' };
 }
 
 Deno.serve(async (req) => {
@@ -112,12 +167,19 @@ Deno.serve(async (req) => {
     : payload.mode === 'generate-flow' ? 'generate-flow'
     : payload.mode === 'invite-user' ? 'invite-user'
     : payload.mode === 'split-sections' ? 'split-sections'
+    : payload.mode === 'suggest-issues' ? 'suggest-issues'
+    : payload.mode === 'match-issue' ? 'match-issue'
     : 'docs';
 
   const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
   const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
   const GROQ_API_KEY = Deno.env.get('GROQ_API_KEY');
   const MODEL = Deno.env.get('GROQ_MODEL') ?? 'llama-3.3-70b-versatile';
+  // Optional: Claude for the reasoning-heavy modes (generation, splitting,
+  // issue mapping). When unset, everything runs on Groq as before.
+  const ANTHROPIC_API_KEY = Deno.env.get('ANTHROPIC_API_KEY') ?? '';
+  const ANTHROPIC_MODEL = Deno.env.get('ANTHROPIC_MODEL') ?? 'claude-sonnet-4-5';
+  const smartOpts = { anthropicKey: ANTHROPIC_API_KEY, anthropicModel: ANTHROPIC_MODEL, groqKey: GROQ_API_KEY ?? '', groqModel: MODEL };
 
   if (!SUPABASE_URL || !SERVICE_KEY) return json({ error: 'server not configured (supabase env)' }, 500);
   if (!GROQ_API_KEY) return json({ error: 'server not configured (GROQ_API_KEY missing)' }, 500);
@@ -297,26 +359,38 @@ Deno.serve(async (req) => {
       '- Questions should be about the SYMPTOM or the result of a check ("Is the display blank?", "Did the reading stabilise?"), not about what equipment the user owns.',
       'Respond with strict JSON only.',
     ].join('\n');
+    // Existing issues for this category — the generator maps each flow to one
+    // (or proposes a new issue) so the chat's issue → flow queue stays curated.
+    const { data: existingIssues } = await supabase
+      .from('issues').select('id, label, aliases')
+      .or(`sensor_category_id.eq.${cat.id},sensor_category_id.is.null`);
+    const issueList = (existingIssues ?? []) as { id: string; label: string; aliases: string[] }[];
+    const issueStr = issueList.map((i) => `${i.id} = "${i.label}"`).join('; ') || '(none yet)';
+
     const user = [
       `Sensor: ${label}`,
       `Allowed escalation skill keys (use ONLY these): ${skillStr}`,
+      `Existing user-issue list for this sensor type: ${issueStr}`,
       '',
       `Documentation (markdown):\n${md.slice(0, 9000)}`,
       '',
       'Return strict JSON:',
       '{"flows":[{"title":"<symptom as the technician would say it>",',
       ' "trigger_symptoms":["<3 to 6 alternate phrasings, including vague ones like \'not working\' variants>"],',
+      ' "issue":{"existing_id":"<id from the issue list, or null>","new_label":"<short user-side problem statement if no existing issue fits, else null>","new_aliases":["<2 to 5 phrasings>"]},',
+      ' "visit_required":<true if ANY step needs someone to travel to the plant; false if plant staff can do everything>,',
+      ' "skill_required":"<anyone|specialist — the highest skill any step needs>",',
       ' "definition":{"start":"<node id>","nodes":[',
       '   {"id":"n1","kind":"question","text":"...","options":[{"label":"Yes","next":"n2"},{"label":"No","next":"n3"}]},',
-      '   {"id":"n2","kind":"action","text":"<one concrete step>","source_section":"<section key the step came from>","next":"n4"},',
+      '   {"id":"n2","kind":"action","text":"<one concrete step>","source_section":"<section key>","visit":"<no_visit|visit_required>","skill":"<anyone|specialist>","next":"n4"},',
       '   {"id":"n4","kind":"resolve","text":"<what should now be true>"},',
       '   {"id":"n5","kind":"escalate","skill":"<allowed skill key>","text":"<why this needs them>"}]}}]}',
+      'Tag EVERY action node with visit + skill. "visit_required" only when the step physically cannot be done by staff already at the plant.',
       'Create 1 to 3 flows for the MOST COMMON problems the documentation actually covers. 5-14 nodes per flow.',
     ].join('\n');
 
-    const raw = await groqComplete(sys, user, GROQ_API_KEY, MODEL, true);
-    let parsed: any = {};
-    try { parsed = JSON.parse(raw ?? '{}'); } catch { parsed = {}; }
+    const { raw } = await smartComplete(sys, user, { ...smartOpts, maxTokens: 4000 });
+    const parsed: any = extractJson(raw);
 
     // Server-side validation mirror: never store a definition the runner can't walk.
     function validateDef(def: any): boolean {
@@ -339,6 +413,16 @@ Deno.serve(async (req) => {
       return true;
     }
 
+    // Sanitize per-node tags — action nodes carry {visit, skill} proposals.
+    function sanitizeTags(def: any) {
+      for (const n of def.nodes ?? []) {
+        if (n.kind !== 'action') { delete n.visit; delete n.skill_tag; continue; }
+        n.visit = n.visit === 'visit_required' ? 'visit_required' : 'no_visit';
+        n.skill = ['anyone', 'specialist'].includes(n.skill) ? n.skill : 'anyone';
+      }
+      return def;
+    }
+
     const flows = (Array.isArray(parsed.flows) ? parsed.flows : [])
       .map((f: any) => ({
         title: String(f.title ?? '').slice(0, 200).trim(),
@@ -346,6 +430,13 @@ Deno.serve(async (req) => {
           ? f.trigger_symptoms.map((s: any) => String(s).slice(0, 160).trim()).filter(Boolean).slice(0, 8)
           : [],
         definition: f.definition,
+        issue: f.issue ?? null,
+        // AI PROPOSAL for the flow-level 2×2 — stored inside the definition;
+        // the confirmed values (columns) stay NULL until an admin approves.
+        proposed: {
+          visit_required: f.visit_required === true,
+          skill_required: f.skill_required === 'specialist' ? 'specialist' : 'anyone',
+        },
       }))
       .filter((f: any) => f.title && validateDef(f.definition))
       .slice(0, 3);
@@ -354,24 +445,150 @@ Deno.serve(async (req) => {
     // Insert the fresh drafts FIRST, then delete older drafts from the same
     // source doc — a failed insert never wipes existing drafts.
     const stamp = new Date().toISOString();
-    const { error: insErr } = await supabase.from('diagnostic_flows').insert(flows.map((f: any) => ({
+    const { data: inserted, error: insErr } = await supabase.from('diagnostic_flows').insert(flows.map((f: any) => ({
       sensor_category_id: cat.id,
       sensor_model_id: isGeneral ? null : (cdoc as any).sensor_model_id,
       title: f.title,
       trigger_symptoms: f.trigger_symptoms,
-      definition: f.definition,
+      definition: { ...sanitizeTags(f.definition), proposed_classification: f.proposed },
       status: 'draft',
       source_doc_id: docId,
       created_by: who.user.id,
       created_at: stamp,
-    })));
+    }))).select('id, title');
     if (insErr) { console.error('generate-flow insert error', insErr); return json({ error: 'could not save flows' }, 502); }
     await supabase.from('diagnostic_flows').delete()
       .eq('source_doc_id', docId).eq('status', 'draft').lt('created_at', stamp);
+
+    // Link each draft to its issue: an existing one when the model matched it,
+    // else create the proposed issue (idempotent per category+label). Ranked
+    // at the end of the issue's queue; admins reorder in the Issues panel.
+    for (let i = 0; i < flows.length; i++) {
+      const f = flows[i];
+      const row = (inserted ?? []).find((r: any) => r.title === f.title);
+      if (!row) continue;
+      let issueId: string | null = null;
+      const ex = f.issue?.existing_id && issueList.find((x) => x.id === f.issue.existing_id);
+      if (ex) issueId = ex.id;
+      else if (f.issue?.new_label) {
+        const label = String(f.issue.new_label).slice(0, 160).trim();
+        const aliases = Array.isArray(f.issue.new_aliases)
+          ? f.issue.new_aliases.map((a: any) => String(a).slice(0, 160).trim()).filter(Boolean).slice(0, 6)
+          : [];
+        if (label) {
+          const { data: iss } = await supabase.from('issues')
+            .upsert({ sensor_category_id: cat.id, label, aliases, created_by: who.user.id }, { onConflict: 'sensor_category_id,label', ignoreDuplicates: false })
+            .select('id').maybeSingle();
+          issueId = (iss as any)?.id ?? null;
+        }
+      }
+      if (issueId) {
+        const { count } = await supabase.from('issue_flows').select('id', { count: 'exact', head: true }).eq('issue_id', issueId);
+        await supabase.from('issue_flows')
+          .upsert({ issue_id: issueId, flow_id: row.id, rank: (count ?? 0) + 1 }, { onConflict: 'issue_id,flow_id', ignoreDuplicates: true });
+      }
+    }
+
     const { data: fresh } = await supabase
       .from('diagnostic_flows').select('*')
       .eq('source_doc_id', docId).eq('status', 'draft').order('created_at');
     return json({ flows: fresh ?? [] });
+  }
+
+  // ---------- SUGGEST-ISSUES MODE: seed the issue taxonomy with AI ----------
+  // Reads the category's approved flows + doc titles and proposes user-side
+  // problem statements ("reading fluctuating") with aliases. Inserts only NEW
+  // labels; existing issues are never modified. Admin curates in the panel.
+  if (mode === 'suggest-issues') {
+    const supabase = createClient(SUPABASE_URL, SERVICE_KEY);
+    const token = (req.headers.get('Authorization') ?? '').replace(/^Bearer\s+/i, '');
+    const { data: who } = await supabase.auth.getUser(token);
+    if (!who?.user) return json({ error: 'unauthorized' }, 401);
+    const { data: prof } = await supabase.from('profiles').select('role').eq('id', who.user.id).maybeSingle();
+    if ((prof as any)?.role !== 'admin') return json({ error: 'admin only' }, 403);
+
+    const categoryId = ((payload as any).category_id ?? '').toString();
+    if (!categoryId) return json({ error: 'category_id required' }, 400);
+    const { data: catRow } = await supabase.from('sensor_categories').select('id, name').eq('id', categoryId).maybeSingle();
+    if (!catRow) return json({ error: 'category not found' }, 404);
+
+    const { data: flowsRows } = await supabase.from('diagnostic_flows')
+      .select('title, trigger_symptoms').eq('sensor_category_id', categoryId).neq('status', 'archived').limit(40);
+    const { data: docsRows } = await supabase.from('consolidated_docs')
+      .select('content_markdown, sensor_models!inner(category_id)')
+      .eq('sensor_models.category_id', categoryId).is('deleted_at', null).limit(5);
+    const { data: existing } = await supabase.from('issues')
+      .select('label').or(`sensor_category_id.eq.${categoryId},sensor_category_id.is.null`);
+    const existingLabels = new Set(((existing ?? []) as any[]).map((i) => i.label.toLowerCase()));
+
+    const contentHints = [
+      ...((flowsRows ?? []) as any[]).map((f) => `flow: ${f.title} (${(f.trigger_symptoms ?? []).join(', ')})`),
+      ...((docsRows ?? []) as any[]).map((d) => `doc excerpt: ${(d.content_markdown ?? '').slice(0, 1200)}`),
+    ].join('\n');
+
+    const sys = [
+      'You catalogue USER-SIDE problem statements for water/wastewater sensors — the words a field operator would actually say.',
+      'Short, symptom-first labels ("Reading fluctuating", "No reading / shows zero", "Display is off"). Not procedures, not causes.',
+      'Respond with strict JSON only.',
+    ].join('\n');
+    const userMsg = [
+      `Sensor type: ${(catRow as any).name}`,
+      `Existing issue labels (do NOT repeat): ${[...existingLabels].join('; ') || '(none)'}`,
+      '',
+      `Known content:\n${contentHints.slice(0, 8000)}`,
+      '',
+      'Return strict JSON: {"issues":[{"label":"<user-side problem>","aliases":["<2 to 5 phrasings incl. vague/Hinglish>"]}]}',
+      'Propose 3 to 8 issues a field operator is LIKELY to report for this sensor type.',
+    ].join('\n');
+
+    const { raw } = await smartComplete(sys, userMsg, { ...smartOpts, maxTokens: 1500 });
+    const parsed: any = extractJson(raw);
+    const proposals = (Array.isArray(parsed.issues) ? parsed.issues : [])
+      .map((i: any) => ({
+        label: String(i.label ?? '').slice(0, 160).trim(),
+        aliases: Array.isArray(i.aliases) ? i.aliases.map((a: any) => String(a).slice(0, 160).trim()).filter(Boolean).slice(0, 6) : [],
+      }))
+      .filter((i: any) => i.label && !existingLabels.has(i.label.toLowerCase()))
+      .slice(0, 8);
+    if (proposals.length === 0) return json({ created: [], note: 'no new issues proposed' });
+
+    const { data: created, error: cErr } = await supabase.from('issues')
+      .insert(proposals.map((p: any) => ({ sensor_category_id: categoryId, label: p.label, aliases: p.aliases, created_by: who.user.id })))
+      .select('id, label');
+    if (cErr) { console.error('suggest-issues insert error', cErr); return json({ error: 'could not save issues' }, 502); }
+    return json({ created: created ?? [] });
+  }
+
+  // ---------- MATCH-ISSUE MODE: map a user's message to a curated issue ----------
+  // The chat first tries cheap client-side alias matching; this mode is the
+  // semantic backstop ("value looks weird" → "Reading fluctuating").
+  if (mode === 'match-issue') {
+    const supabase = createClient(SUPABASE_URL, SERVICE_KEY);
+    const q = ((payload as any).query ?? '').toString().slice(0, 500).trim();
+    if (!q) return json({ error: 'query required' }, 400);
+    const categoryId = ((payload as any).category_id ?? '').toString() || null;
+
+    let issQ = supabase.from('issues').select('id, label, aliases, sensor_category_id');
+    if (categoryId) issQ = issQ.or(`sensor_category_id.eq.${categoryId},sensor_category_id.is.null`);
+    const { data: iss } = await issQ.limit(60);
+    const list = (iss ?? []) as any[];
+    if (list.length === 0) return json({ issue_id: null });
+
+    const sys = 'You match a field operator\'s message to ONE issue from a list, or none. Respond with strict JSON only.';
+    const userMsg = [
+      `Operator message: "${q}"`,
+      'Issues:',
+      list.map((i) => `${i.id} = "${i.label}" (${(i.aliases ?? []).join(', ')})`).join('\n'),
+      '',
+      'Return strict JSON: {"issue_id":"<id or null>","confidence":<0 to 1>}',
+      'Pick an issue ONLY if the message plausibly describes that problem. Vague messages with no symptom → null.',
+    ].join('\n');
+    const { raw } = await smartComplete(sys, userMsg, { ...smartOpts, maxTokens: 200 });
+    const parsed: any = extractJson(raw);
+    const hit = list.find((i) => i.id === parsed.issue_id);
+    const confidence = typeof parsed.confidence === 'number' ? parsed.confidence : 0;
+    if (!hit || confidence < 0.55) return json({ issue_id: null });
+    return json({ issue_id: hit.id, label: hit.label, confidence });
   }
 
   // ---------- SPLIT-SECTIONS MODE: partition one document across activity sections ----------
@@ -441,9 +658,8 @@ Deno.serve(async (req) => {
       'Return strict JSON: {"assignments":[{"section":"<key>","from":<first paragraph index>,"to":<last paragraph index>}]}',
     ].join('\n');
 
-    const raw = await groqComplete(sys, user, GROQ_API_KEY, MODEL, true);
-    let parsed: any = {};
-    try { parsed = JSON.parse(raw ?? '{}'); } catch { parsed = {}; }
+    const { raw } = await smartComplete(sys, user, { ...smartOpts, maxTokens: 1200 });
+    const parsed: any = extractJson(raw);
     const seen = new Set<number>();
     const bySection = new Map<string, string[]>();
     for (const a of (Array.isArray(parsed.assignments) ? parsed.assignments : [])) {
