@@ -12,6 +12,7 @@ import { renderMarkdown, normalizeAnswerSteps } from '../lib/markdown';
 import { conversationalReply, isVagueQuery } from '../lib/chatIntent';
 import { matchRule, type RouteMatch } from '../lib/routing';
 import { matchFlow, getNode, failTarget, fetchContacts, contactsForSkill, type DiagnosticFlow, type FlowNode, type EscalationContact } from '../lib/flows';
+import { fetchIssues, matchIssueClient, flowQueueForIssue, type Issue } from '../lib/issues';
 import { correctSpelling } from '../lib/lexicon';
 import { useAuth } from '../lib/auth';
 import AnswerFeedback from './AnswerFeedback';
@@ -60,6 +61,7 @@ type Turn =
       flowNode?: FlowNode;
       flowTitle?: string; // set on the first node so the user sees which flow started
       flowTerminal?: boolean; // resolve/escalate — end of the run (feedback shows here)
+      queuePos?: { index: number; total: number; issueLabel: string }; // "Fix k of N" when an issue queue is running
       escalateContacts?: EscalationContact[]; // resolved directory entries (make/global/per-plant)
     };
 
@@ -292,6 +294,11 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
   // The flow persists here across terminal nodes so "Back" / "still didn't
   // work" can still reference it after the run's chips have stopped.
   const flowRef = useRef<DiagnosticFlow | null>(null);
+  // Flow QUEUE: an issue can have several fixes, tried in order. queue holds
+  // the ordered flows; queueIndex is the one currently running. When a flow
+  // ends unresolved and more remain, the chat offers "Start next fix".
+  const queueRef = useRef<{ issueLabel: string; flows: DiagnosticFlow[]; index: number } | null>(null);
+  const [queueTick, setQueueTick] = useState(0); // re-render trigger for queue chips
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
@@ -332,10 +339,26 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
   for (let i = turns.length - 1; i >= 0; i--) { if (turns[i].role === 'user') { lastUserIndex = i; break; } }
 
   function openTicket(turn: Extract<Turn, { role: 'bot' }>) {
+    // Full troubleshooting history rides along on the ticket — which fixes
+    // were attempted, every step shown, and what the user answered — so no
+    // context is lost when this reaches support (CustomerHub later).
+    const lines: string[] = [];
+    let currentFlow: string | null = null;
+    for (const t of turns) {
+      if (t.role === 'bot' && t.flowTitle) {
+        currentFlow = t.flowTitle;
+        lines.push(`\nFix attempted: ${t.flowTitle}${t.queuePos ? ` (fix ${t.queuePos.index}/${t.queuePos.total} for "${t.queuePos.issueLabel}")` : ''}`);
+      }
+      if (t.role === 'bot' && t.flowNode && currentFlow) lines.push(`  step shown: ${t.flowNode.text.slice(0, 140)}`);
+      if (t.role === 'user' && currentFlow) lines.push(`  user: ${t.text.slice(0, 100)}`);
+    }
+    const history = lines.length ? `\n\n— Troubleshooting history —${lines.join('\n')}` : '';
+    const scopeLine = scope?.label ? `Sensor: ${scope.label}\n` : '';
     const desc =
+      scopeLine +
       `Question: ${turn.query}\n\n` +
       (turn.answer ? `Assistant answer:\n${turn.answer}\n\n` : '') +
-      `This didn't resolve my issue.`;
+      `This didn't resolve my issue.` + history;
     setTicket({ query: turn.query, description: desc });
   }
 
@@ -411,9 +434,10 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
 
     sendingRef.current = true;
     setInput('');
-    // Typing a fresh message abandons any in-progress diagnostic flow.
+    // Typing a fresh message abandons any in-progress diagnostic flow + queue.
     setFlowRun(null);
     flowRef.current = null;
+    queueRef.current = null;
     let activeScope = scope;
 
     // Echo the user's message + a loading placeholder IMMEDIATELY — before any
@@ -473,16 +497,40 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
         }
       }
 
-      // ---- Priority 1+2: approved flow, and routed rule (in parallel — the
-      // rule must be checked BEFORE the vague gate, or a rule whose approved
-      // problem text is itself generic ("sensor stopped working") becomes
-      // unreachable and its probe chip would loop forever).
+      // ---- Priority 1: match the message to a curated ISSUE and run its
+      // ordered flow queue. Client alias-match is instant; the LLM match-issue
+      // mode runs in parallel with the flow/rule matchers as the semantic
+      // backstop, so it adds no latency to the fallback path.
+      const issues = await fetchIssues(activeScope?.categoryId ?? null);
+      const clientIssue = matchIssueClient(mq, issues);
+
       const candidateIds = [activeScope?.modelId, activeScope?.generalModelId].filter(Boolean) as string[];
-      const [flow, routed] = await Promise.all([
+      const [flow, routed, llmIssue] = await Promise.all([
         matchFlow(mq, { categoryId: activeScope?.categoryId ?? null, modelId: activeScope?.modelId ?? null }),
         candidateIds.length ? matchRule(mq, candidateIds) : Promise.resolve(null),
+        (!clientIssue && issues.length > 0)
+          ? supabase.functions.invoke('chat-answer', { body: { mode: 'match-issue', query: mq, category_id: activeScope?.categoryId ?? null } })
+              .then(({ data }) => {
+                const id = (data as any)?.issue_id;
+                return id ? issues.find((i) => i.id === id) ?? null : null;
+              }).catch(() => null)
+          : Promise.resolve(null),
       ]);
+
+      const issue: Issue | null = clientIssue ?? llmIssue;
+      if (issue) {
+        const queue = await flowQueueForIssue(issue.id, { modelId: activeScope?.modelId ?? null });
+        if (queue.length > 0) {
+          queueRef.current = { issueLabel: issue.label, flows: queue, index: 0 };
+          setQueueTick((t) => t + 1);
+          await startFlow(queue[0], activeScope?.label);
+          return;
+        }
+      }
+
+      // ---- Priority 2: a single approved flow matched by phrasing.
       if (flow) {
+        queueRef.current = null;
         await startFlow(flow, activeScope?.label);
         return;
       }
@@ -544,6 +592,7 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
         contacts = contactsForSkill(await fetchContacts(), node.skill, { makeId });
       } catch { contacts = []; }
     }
+    const q = queueRef.current;
     return {
       role: 'bot',
       query: flow.title,
@@ -553,6 +602,7 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
       flowTitle: opts?.first ? flow.title : undefined,
       flowTerminal: terminal,
       escalateContacts: contacts,
+      queuePos: opts?.first && q && q.flows.length > 1 ? { index: q.index + 1, total: q.flows.length, issueLabel: q.issueLabel } : undefined,
     };
   }
 
@@ -583,9 +633,34 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
     setFlowRun({ flow });
   }
 
-  // "It still didn't work" from a resolve node → jump to the flow's escalation
-  // (who to call); if the flow has none, fall back to raising a ticket.
+  // Start the next fix in the issue's queue (after the current one ended
+  // without resolving). Echoes the tap, advances the index, runs the flow.
+  async function advanceQueue() {
+    const q = queueRef.current;
+    if (!q || q.index + 1 >= q.flows.length) return;
+    q.index += 1;
+    setQueueTick((t) => t + 1);
+    const next = q.flows[q.index];
+    const label = i18n.t('chat.nextFix');
+    setTurns((prev) => [...prev, { role: 'user', text: label }, { role: 'bot', query: next.title, loading: true }]);
+    flowRef.current = next;
+    setFlowRun({ flow: next });
+    const start = getNode(next.definition, next.definition.start);
+    if (!start) { setFlowRun(null); return; }
+    const turn = await nodeTurn(next, start, { first: true });
+    if (start.kind === 'resolve' || start.kind === 'escalate') setFlowRun(null);
+    setTurns((t) => fillLoadingTurn(t, turn));
+  }
+
+  const queueHasNext = () => {
+    const q = queueRef.current;
+    return !!q && q.index + 1 < q.flows.length;
+  };
+
+  // "It still didn't work" from a resolve node → next fix in the queue if one
+  // remains; else the flow's escalation (who to call); else raise a ticket.
   async function flowStillStuck(onNoEscalate: () => void) {
+    if (queueHasNext()) { await advanceQueue(); return; }
     const flow = flowRef.current;
     // Only auto-route to a contact when the flow has ONE escalation — with
     // multiple branches we can't know which applies, so raise a ticket instead
@@ -800,6 +875,8 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
                     ? flowBack : undefined}
                   onStillStuck={() => flowStillStuck(() => openTicket(turn))}
                   hasEscalation={(flowRef.current?.definition.nodes.filter((n) => n.kind === 'escalate').length ?? 0) === 1}
+                  hasNextFix={queueHasNext()}
+                  onNextFix={queueHasNext() ? advanceQueue : undefined}
                 />
               ) : turn.answer ? (
                 <AnswerCard
@@ -886,7 +963,7 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
         <div className="border-t border-slate-200 p-3 bg-white">
           {turns.length > 0 && (
             <div className="flex justify-end mb-2">
-              <button onClick={() => { setTurns([]); setScope(null); setFlowRun(null); flowRef.current = null; }} className="inline-flex items-center gap-1 text-xs text-slate-500 hover:text-brand-700 transition">
+              <button onClick={() => { setTurns([]); setScope(null); setFlowRun(null); flowRef.current = null; queueRef.current = null; }} className="inline-flex items-center gap-1 text-xs text-slate-500 hover:text-brand-700 transition">
                 <Trash2 size={12} /> {t('chat.clearConversation')}
               </button>
             </div>
@@ -1134,7 +1211,7 @@ function RoutedCard({ routed, onOpen }: { routed: RouteMatch; onOpen: (docId: st
 // One node of a diagnostic flow run. Question nodes show tappable option
 // chips, action nodes a step with Done / Didn't-work, resolve and escalate
 // nodes are terminal (escalate resolves the contact from the directory).
-function FlowNodeCard({ turn, active, isLast, failNext, onChoose, onTicket, onBack, onStillStuck, hasEscalation }: {
+function FlowNodeCard({ turn, active, isLast, failNext, onChoose, onTicket, onBack, onStillStuck, hasEscalation, hasNextFix, onNextFix }: {
   turn: Extract<Turn, { role: 'bot' }>;
   active: boolean;
   isLast: boolean;
@@ -1144,6 +1221,8 @@ function FlowNodeCard({ turn, active, isLast, failNext, onChoose, onTicket, onBa
   onBack?: () => void;
   onStillStuck: () => void;
   hasEscalation: boolean;
+  hasNextFix: boolean;
+  onNextFix?: () => void;
 }) {
   const { t } = useTranslation();
   const n = turn.flowNode!;
@@ -1165,7 +1244,7 @@ function FlowNodeCard({ turn, active, isLast, failNext, onChoose, onTicket, onBa
           <div className="flex items-center gap-3 pt-0.5">
             <button onClick={onStillStuck}
               className="tap inline-flex items-center gap-1.5 rounded-lg border border-slate-300 text-slate-700 px-3 py-1.5 text-xs font-semibold hover:border-red-400 hover:text-red-600 transition">
-              ✗ {t('chat.stillStuck')}{hasEscalation ? ` — ${t('chat.getHelp')}` : ''}
+              ✗ {t('chat.stillStuck')}{hasNextFix ? ` — ${t('chat.nextFix')}` : hasEscalation ? ` — ${t('chat.getHelp')}` : ''}
             </button>
             {backBtn}
           </div>
@@ -1215,6 +1294,12 @@ function FlowNodeCard({ turn, active, isLast, failNext, onChoose, onTicket, onBa
               No contact on file yet — an admin can add one in the escalation directory.
             </div>
           )}
+          {isLast && onNextFix && (
+            <button onClick={onNextFix}
+              className="tap w-full inline-flex items-center justify-center gap-1.5 rounded-lg border border-brand-300 text-brand-700 px-3 py-2 text-xs font-semibold hover:bg-brand-50 transition">
+              {t('chat.tryNextFix')} →
+            </button>
+          )}
           <button onClick={onTicket}
             className="tap w-full inline-flex items-center justify-center gap-1.5 rounded-lg bg-gradient-to-br from-brand-600 to-brand-800 text-white px-3 py-2 text-xs font-semibold hover:from-brand-700 transition">
             {t('chat.logTicket')}
@@ -1230,7 +1315,9 @@ function FlowNodeCard({ turn, active, isLast, failNext, onChoose, onTicket, onBa
     <div className="rounded-2xl rounded-tl-md bg-white border border-slate-200 shadow-sm px-3.5 py-3 space-y-2.5">
       {turn.flowTitle && (
         <div className="inline-flex items-center gap-1.5 text-brand-700 text-[11px] font-semibold uppercase tracking-wide">
-          <GitBranch size={12} /> {t('chat.diagnosing')}: {turn.flowTitle}
+          <GitBranch size={12} />
+          {turn.queuePos && <span className="rounded-full bg-brand-100 text-brand-800 px-1.5 py-px normal-case">{t('chat.fixOf', { n: turn.queuePos.index, total: turn.queuePos.total })}</span>}
+          {t('chat.diagnosing')}: {turn.flowTitle}
         </div>
       )}
       <div className="text-sm text-slate-700 leading-relaxed">{n.text}</div>

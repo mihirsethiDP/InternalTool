@@ -276,11 +276,12 @@ function UsersPanel({ onChanged }: { onChanged: () => void }) {
 
   // Group by email so one person = one row, even with multiple sign-ins.
   const rank: Record<string, number> = { viewer: 0, uploader: 1, admin: 2 };
-  const byEmail = new Map<string, { email: string; roles: Set<string>; count: number }>();
+  const byEmail = new Map<string, { email: string; roles: Set<string>; count: number; tech: string }>();
   for (const u of (users.data ?? []) as any[]) {
     const key = (u.email ?? '').toLowerCase();
-    const e = byEmail.get(key) ?? { email: u.email, roles: new Set<string>(), count: 0 };
+    const e = byEmail.get(key) ?? { email: u.email, roles: new Set<string>(), count: 0, tech: 'non_technical' };
     e.roles.add(u.role); e.count += 1;
+    if (u.technical_level === 'technical') e.tech = 'technical';
     byEmail.set(key, e);
   }
   const rows = [...byEmail.values()].map((e) => {
