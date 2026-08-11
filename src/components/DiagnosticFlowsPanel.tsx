@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { GitBranch, Sparkles, Check, X, Loader2, Trash2, Pencil, Archive, HelpCircle, Wrench, CheckCircle2, PhoneCall, ChevronDown, ChevronRight, ArrowUp, ArrowDown, Link2, Home, MapPin, GraduationCap, Eye } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../lib/auth';
-import { validateFlowDefinition, type DiagnosticFlow, type FlowDefinition, type FlowNode, type EscalationContact } from '../lib/flows';
+import { validateFlowDefinition, vagueSteps, type DiagnosticFlow, type FlowDefinition, type FlowNode, type EscalationContact } from '../lib/flows';
 import { createIssue, updateIssue, deleteIssue, linkFlow, unlinkFlow, swapRanks, type Issue, type IssueFlowLink } from '../lib/issues';
 
 // Admin tab: ISSUE-centric view of the diagnostic knowledge base. Issues are
@@ -452,6 +452,7 @@ function FlowCard({ flow, live, onApprove, onArchive, onDelete, onRestore, onSav
   onApprove?: (cls: FlowClassification) => void; onArchive?: () => void; onDelete?: () => void; onRestore?: () => void;
   onSave: (id: string, patch: { title: string; trigger_symptoms: string[]; definition: FlowDefinition }) => Promise<void>;
 }) {
+  const qcCard = useQueryClient();
   const [open, setOpen] = useState(!live);
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(flow.title as string);
@@ -472,6 +473,26 @@ function FlowCard({ flow, live, onApprove, onArchive, onDelete, onRestore, onSav
     : `All ${cat?.name ?? '?'} sensors`;
 
   const validation = useMemo(() => validateFlowDefinition(def), [def]);
+  // Steps a technician couldn't follow without the manual in hand.
+  const vague = useMemo(() => vagueSteps(flow.definition as FlowDefinition), [flow.definition]);
+  const [improving, setImproving] = useState(false);
+  const [improveNote, setImproveNote] = useState<string | null>(null);
+
+  async function improveSteps() {
+    setImproving(true); setImproveNote(null);
+    try {
+      const { data, error } = await supabase.functions.invoke('chat-answer', { body: { mode: 'improve-flow', flow_id: flow.id } });
+      if (error || (data as any)?.error) throw new Error((data as any)?.error || error?.message);
+      const { changed, total } = data as any;
+      setImproveNote(changed > 0 ? `Rewrote ${changed} of ${total} steps — review them below.` : 'No changes needed.');
+      // The edge function already saved the new definition — refetch it.
+      // (Never re-save `flow.definition` here: it's the stale pre-rewrite copy.)
+      qcCard.invalidateQueries({ queryKey: ['diagnostic-flows'] });
+    } catch (e: any) {
+      setImproveNote(`Couldn't rewrite (${e.message}). Is the edge function redeployed?`);
+    }
+    setImproving(false);
+  }
 
   function setNodeText(id: string, text: string) {
     setDef((d) => ({ ...d, nodes: d.nodes.map((n) => (n.id === id ? { ...n, text } : n)) }));
@@ -522,6 +543,27 @@ function FlowCard({ flow, live, onApprove, onArchive, onDelete, onRestore, onSav
               {validation.errors.slice(0, 3).join(' · ')}
             </div>
           )}
+
+          {/* Field-readability lint — steps a technician couldn't follow with
+              only the chat in front of them. */}
+          {vague.length > 0 && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 space-y-1.5">
+              <div className="text-[11px] font-semibold text-amber-900">
+                {vague.length} step{vague.length === 1 ? '' : 's'} may be hard to follow in the field
+              </div>
+              {vague.slice(0, 3).map((v) => (
+                <div key={v.id} className="text-[11px] text-amber-800">
+                  <span className="font-mono text-amber-600">{v.id}</span> “{v.text.slice(0, 60)}{v.text.length > 60 ? '…' : ''}” — {v.reason}
+                </div>
+              ))}
+              <button onClick={improveSteps} disabled={improving}
+                className="tap inline-flex items-center gap-1 rounded-md bg-amber-600 text-white px-2.5 py-1 text-[11px] font-semibold hover:bg-amber-700 disabled:opacity-60">
+                {improving ? <Loader2 size={11} className="animate-spin" /> : <Sparkles size={11} />}
+                {improving ? 'Rewriting…' : 'Rewrite steps with AI'}
+              </button>
+            </div>
+          )}
+          {improveNote && <div className="text-[11px] text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5">{improveNote}</div>}
 
           {/* Classification confirm — the supervisor's 2×2, mandatory to approve.
               Pre-selected from the AI's proposal; live flows show it read-only. */}

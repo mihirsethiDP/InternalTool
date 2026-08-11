@@ -169,6 +169,7 @@ Deno.serve(async (req) => {
     : payload.mode === 'split-sections' ? 'split-sections'
     : payload.mode === 'suggest-issues' ? 'suggest-issues'
     : payload.mode === 'match-issue' ? 'match-issue'
+    : payload.mode === 'improve-flow' ? 'improve-flow'
     : 'docs';
 
   const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
@@ -351,7 +352,14 @@ Deno.serve(async (req) => {
       'You design DIAGNOSTIC DECISION TREES for water/wastewater sensor technicians, strictly from the provided documentation.',
       'Rules:',
       '- Base every check and action ONLY on the documentation. Do NOT invent steps, values, part names, or wiring details.',
-      '- Technicians may be low-literacy: one short instruction per node, simple words, no jargon beyond what the doc uses.',
+      '- Technicians may be low-literacy: one short instruction per node, simple words.',
+      'SELF-CONTAINED STEPS (critical — the technician has ONLY your text, not the manual):',
+      '- Every action must be performable from your words alone. Never point at another document ("as per the manual", "refer to section 4", "follow the cleaning procedure").',
+      '- NEVER use an interface word or abbreviation without saying what and where it is. Bad: "Initiate manual cleaning from the UI." Good: "On the transmitter display, press MENU, choose Maintenance, then choose Manual Clean."',
+      '- Expand abbreviations the first time: UI/HMI → "the display screen on the transmitter"; PLC/SCADA/DCS → "the control room computer". Same for any acronym the doc uses.',
+      '- If the documentation NAMES a procedure (cleaning cycle, calibration, zeroing), do not just name it — break its documented sub-steps into their own action nodes, in order.',
+      '- If the documentation names a procedure but does NOT give its sub-steps, say plainly what is needed and route that branch to an "escalate" node instead of leaving a vague instruction.',
+      '- Each action says WHERE (which part / which screen) and WHAT to do. Prefer 5-15 words of concrete instruction over a 3-word label.',
       '- When the documentation does not cover a branch, end it with an "escalate" node instead of guessing.',
       '- Every question node needs 2+ options. Every path must end in a "resolve" or "escalate" node.',
       '- The assistant ALREADY establishes which sensor the user has before a flow starts. NEVER ask whether the sensor is a particular model ("Is it a VizSens pH?").',
@@ -493,6 +501,83 @@ Deno.serve(async (req) => {
       .from('diagnostic_flows').select('*')
       .eq('source_doc_id', docId).eq('status', 'draft').order('created_at');
     return json({ flows: fresh ?? [] });
+  }
+
+  // ---------- IMPROVE-FLOW MODE: make an existing flow's steps self-contained ----------
+  // Rewrites only the TEXT of each node ("Initiate manual cleaning from the UI"
+  // → "On the transmitter display, press MENU → Maintenance → Manual Clean").
+  // Structure is immutable: we map rewritten text back onto the original nodes
+  // by id, so ids, kinds, options and edges can never be broken by the model.
+  if (mode === 'improve-flow') {
+    const supabase = createClient(SUPABASE_URL, SERVICE_KEY);
+    const token = (req.headers.get('Authorization') ?? '').replace(/^Bearer\s+/i, '');
+    const { data: who } = await supabase.auth.getUser(token);
+    if (!who?.user) return json({ error: 'unauthorized' }, 401);
+    const { data: prof } = await supabase.from('profiles').select('role').eq('id', who.user.id).maybeSingle();
+    if ((prof as any)?.role !== 'admin') return json({ error: 'admin only' }, 403);
+
+    const flowId = ((payload as any).flow_id ?? '').toString();
+    if (!flowId) return json({ error: 'flow_id required' }, 400);
+    const { data: flow } = await supabase.from('diagnostic_flows')
+      .select('id, title, definition, source_doc_id').eq('id', flowId).maybeSingle();
+    if (!flow) return json({ error: 'flow not found' }, 404);
+
+    // Source documentation grounds the rewrite (so we add real detail, not invented detail).
+    let md = '';
+    if ((flow as any).source_doc_id) {
+      const { data: doc } = await supabase.from('consolidated_docs')
+        .select('content_markdown').eq('id', (flow as any).source_doc_id).maybeSingle();
+      md = ((doc as any)?.content_markdown ?? '').slice(0, 9000);
+    }
+    const nodes = ((flow as any).definition?.nodes ?? []) as any[];
+    if (nodes.length === 0) return json({ error: 'flow has no steps' }, 400);
+
+    const sys = [
+      'You rewrite diagnostic step text so a low-literacy field technician can follow it with NOTHING but your words.',
+      'Rules:',
+      '- Keep the meaning and the order. Do NOT invent facts, values or part names beyond the documentation.',
+      '- Never point at another document ("as per the manual", "refer to section 4").',
+      '- Never use an abbreviation or interface term without saying what and where it is. "UI"/"HMI" → "the display screen on the transmitter"; "PLC"/"SCADA" → "the control room computer".',
+      '- Where the documentation gives the sub-steps of a named procedure, fold them into the instruction ("press MENU → Maintenance → Manual Clean").',
+      '- If the documentation does not say HOW, keep it honest and general rather than inventing a menu path.',
+      '- 5-25 words per step. Say WHERE and WHAT.',
+      'Respond with strict JSON only.',
+    ].join('\n');
+    const userMsg = [
+      `Flow: ${(flow as any).title}`,
+      md ? `Documentation (markdown):\n${md}` : '(no source documentation available — improve wording only)',
+      '',
+      'Steps to rewrite:',
+      nodes.map((n) => `${n.id} [${n.kind}]: ${n.text}`).join('\n'),
+      '',
+      'Return strict JSON: {"steps":[{"id":"<same id>","text":"<rewritten>"}]}',
+      'Include EVERY id exactly once. Do not add, remove or reorder ids.',
+    ].join('\n');
+
+    const { raw } = await smartComplete(sys, userMsg, { ...smartOpts, maxTokens: 2500 });
+    const parsed: any = extractJson(raw);
+    const byId = new Map<string, string>();
+    for (const s of (Array.isArray(parsed.steps) ? parsed.steps : [])) {
+      const id = String(s?.id ?? '');
+      const text = String(s?.text ?? '').trim().slice(0, 400);
+      if (id && text) byId.set(id, text);
+    }
+    if (byId.size === 0) return json({ error: 'could not improve this flow' }, 502);
+
+    // Structure-preserving merge: only `text` can change, and only on ids that
+    // already exist. Everything else (kind, options, next, skill, tags) is kept.
+    let changed = 0;
+    const newNodes = nodes.map((n) => {
+      const t = byId.get(n.id);
+      if (!t || t === n.text) return n;
+      changed++;
+      return { ...n, text: t };
+    });
+    const newDef = { ...(flow as any).definition, nodes: newNodes };
+    const { error: upErr } = await supabase.from('diagnostic_flows')
+      .update({ definition: newDef, updated_at: new Date().toISOString() }).eq('id', flowId);
+    if (upErr) { console.error('improve-flow save error', upErr); return json({ error: 'could not save' }, 502); }
+    return json({ changed, total: nodes.length });
   }
 
   // ---------- SUGGEST-ISSUES MODE: seed the issue taxonomy with AI ----------

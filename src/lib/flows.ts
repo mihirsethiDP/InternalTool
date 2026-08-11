@@ -53,6 +53,26 @@ export interface DiagnosticFlow {
   skill_required: 'anyone' | 'specialist' | null;
 }
 
+// Steps must be followable with NOTHING but the chat text — a technician in
+// the field has no manual open. Flags the three ways a generated step fails
+// that test, so the admin sees them before approving (live example that
+// prompted this: "Initiate manual cleaning cycle from the UI").
+const JARGON = /\b(UI|HMI|PLC|SCADA|DCS|GUI)\b/;
+const POINTS_ELSEWHERE = /\b(as per the manual|refer to|see section|see chapter|per the datasheet|follow the .{0,30}procedure|as described in)\b/i;
+
+export function vagueSteps(def: FlowDefinition | null | undefined): { id: string; text: string; reason: string }[] {
+  const out: { id: string; text: string; reason: string }[] = [];
+  for (const n of def?.nodes ?? []) {
+    if (n.kind !== 'action') continue;
+    const text = (n.text ?? '').trim();
+    const jargon = text.match(JARGON)?.[0];
+    if (jargon) out.push({ id: n.id, text, reason: `“${jargon}” won't mean anything in the field — say which screen or device` });
+    else if (POINTS_ELSEWHERE.test(text)) out.push({ id: n.id, text, reason: 'points at another document instead of giving the steps' });
+    else if (text.length < 20) out.push({ id: n.id, text, reason: 'too short to act on — say where and what' });
+  }
+  return out;
+}
+
 export interface EscalationContact {
   id: string;
   skill_key: string;

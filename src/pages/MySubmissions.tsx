@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState, useMemo } from 'react';
-import { FileText, Award, ArrowRight } from 'lucide-react';
+import { FileText, Award, ArrowRight, CheckCircle2, X } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import SegmentedFilter from '../components/SegmentedFilter';
 import { supabase } from '../lib/supabase';
@@ -24,6 +24,9 @@ export default function MySubmissions() {
   const upload = useUpload();
   const [filter, setFilter] = useState<'all' | SubmissionStatus>('all');
   const [reviseId, setReviseId] = useState<any | null>(null);
+  // Confirmation after a successful resubmit — the uploader needs to SEE that
+  // their revision went back for review (it silently did nothing before).
+  const [resubmitted, setResubmitted] = useState<string | null>(null);
 
   const submissions = useQuery({
     queryKey: ['my-submissions', userId, filter],
@@ -100,6 +103,16 @@ export default function MySubmissions() {
           </button>
         }
       />
+
+      {resubmitted && (
+        <div role="status" className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 flex items-start gap-3">
+          <CheckCircle2 size={18} className="text-emerald-600 shrink-0 mt-0.5" />
+          <div className="min-w-0 flex-1 text-sm text-emerald-900">
+            <b>Resubmitted for review.</b> “{resubmitted}” is back with the review team — it now shows as <b>Pending</b> below.
+          </div>
+          <button onClick={() => setResubmitted(null)} aria-label="Dismiss" className="tap text-emerald-700 hover:text-emerald-900 shrink-0"><X size={16} /></button>
+        </div>
+      )}
 
       {/* Contribution score — every approved upload earns points. */}
       <div className="rounded-2xl border border-brand-200 bg-gradient-to-br from-brand-50 to-white px-5 py-4 flex items-center gap-4 flex-wrap">
@@ -186,13 +199,19 @@ export default function MySubmissions() {
         )}
       </div>
 
-      {reviseId && <ReviseModal submission={reviseId} onClose={() => setReviseId(null)} />}
+      {reviseId && (
+        <ReviseModal
+          submission={reviseId}
+          onClose={() => setReviseId(null)}
+          onDone={(title: string) => { setReviseId(null); setResubmitted(title); }}
+        />
+      )}
     </div>
   );
 }
 
 /* Revise & resubmit — edit title, optionally replace the file, send back to review */
-function ReviseModal({ submission, onClose }: { submission: any; onClose: () => void }) {
+function ReviseModal({ submission, onClose, onDone }: { submission: any; onClose: () => void; onDone: (title: string) => void }) {
   const qc = useQueryClient();
   const [title, setTitle] = useState(submission.title ?? '');
   const [file, setFile] = useState<File | null>(null);
@@ -236,8 +255,15 @@ function ReviseModal({ submission, onClose }: { submission: any; onClose: () => 
       }
 
       setStatus('Resubmitting…');
-      const { error } = await supabase.from('document_submissions').update(update).eq('id', submission.id);
+      // Verify the row actually changed: RLS filters rows out rather than
+      // erroring, so a blocked UPDATE returns no error and zero rows. Without
+      // this check the modal would report success while nothing happened.
+      const { data: updated, error } = await supabase
+        .from('document_submissions').update(update).eq('id', submission.id).select('id');
       if (error) throw error;
+      if (!updated || updated.length === 0) {
+        throw new Error("Couldn't resubmit — your account may not have permission. Ask an admin to check that migration 042 has been applied.");
+      }
 
       // Notify admins of the resubmission
       try {
@@ -258,7 +284,7 @@ function ReviseModal({ submission, onClose }: { submission: any; onClose: () => 
       qc.invalidateQueries({ queryKey: ['my-submissions-counts'] });
       qc.invalidateQueries({ queryKey: ['review-queue'] });
       qc.invalidateQueries({ queryKey: ['review-queue-counts'] });
-      onClose();
+      onDone(title.trim());
     } catch (e: any) {
       setErr(e.message || String(e));
       setBusy(false);

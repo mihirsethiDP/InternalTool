@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { validateFlowDefinition, getNode, failTarget, scoreFlow, contactsForSkill, type FlowDefinition, type EscalationContact } from '../flows';
+import { validateFlowDefinition, getNode, failTarget, scoreFlow, contactsForSkill, vagueSteps, type FlowDefinition, type EscalationContact } from '../flows';
 
 const GOOD: FlowDefinition = {
   start: 'n1',
@@ -89,5 +89,43 @@ describe('scoreFlow', () => {
   });
   it('ignores unrelated queries', () => {
     expect(scoreFlow('how do I calibrate the pH probe', flow)).toBeLessThan(0.34);
+  });
+});
+
+describe('vagueSteps', () => {
+  const def = (text: string): FlowDefinition => ({
+    start: 'a',
+    nodes: [{ id: 'a', kind: 'action', text, next: 'b' }, { id: 'b', kind: 'resolve', text: 'done' }],
+  });
+
+  it('flags bare interface jargon (the live field failure)', () => {
+    // Real example a field tester hit: "Initiate manual cleaning cycle from the UI."
+    const w = vagueSteps(def('Initiate manual cleaning cycle from the UI.'));
+    expect(w).toHaveLength(1);
+    expect(w[0].reason).toMatch(/UI/);
+  });
+
+  it('flags steps that point at another document', () => {
+    expect(vagueSteps(def('Clean the electrode as per the manual.'))).toHaveLength(1);
+    expect(vagueSteps(def('Refer to section 4 for the wiring detail.'))).toHaveLength(1);
+  });
+
+  it('flags steps too short to act on', () => {
+    expect(vagueSteps(def('Clean it.'))).toHaveLength(1);
+  });
+
+  it('passes a self-contained step', () => {
+    expect(vagueSteps(def('On the transmitter display, press MENU, choose Maintenance, then Manual Clean.'))).toHaveLength(0);
+  });
+
+  it('only checks action nodes', () => {
+    const d: FlowDefinition = {
+      start: 'a',
+      nodes: [
+        { id: 'a', kind: 'question', text: 'PLC ok?', options: [{ label: 'Y', next: 'b' }, { label: 'N', next: 'b' }] },
+        { id: 'b', kind: 'resolve', text: 'ok' },
+      ],
+    };
+    expect(vagueSteps(d)).toHaveLength(0);
   });
 });
