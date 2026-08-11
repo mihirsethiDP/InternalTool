@@ -627,7 +627,15 @@ function ApproveModal({ submission, editedText, onClose, onDone }: any) {
                 {wordsBadge(section)}
               </div>
               <div className="text-xs text-slate-500 mt-1.5">{SECTION_HINT[section]}</div>
-              <div className="text-[11px] text-slate-400 mt-1">Covers several activities (e.g. a full manual)? Use <b>Split across sections</b> above.</div>
+              {(submission.detected_sections ?? []).length > 1 ? (
+                <div className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mt-2">
+                  At upload this document was detected as covering{' '}
+                  <b>{(submission.detected_sections as string[]).map((s) => SECTION_LABEL[s as SubmissionSection] ?? s).join(', ')}</b>.
+                  Approving into one section files all of it there — use <b>Split across sections</b> above to route each part.
+                </div>
+              ) : (
+                <div className="text-[11px] text-slate-400 mt-1">Covers several activities (e.g. a full manual)? Use <b>Split across sections</b> above.</div>
+              )}
             </div>
             <div>
               <label className="label">Merge mode</label>

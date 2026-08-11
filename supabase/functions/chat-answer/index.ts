@@ -170,6 +170,7 @@ Deno.serve(async (req) => {
     : payload.mode === 'suggest-issues' ? 'suggest-issues'
     : payload.mode === 'match-issue' ? 'match-issue'
     : payload.mode === 'improve-flow' ? 'improve-flow'
+    : payload.mode === 'analyze-upload' ? 'analyze-upload'
     : 'docs';
 
   const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
@@ -501,6 +502,71 @@ Deno.serve(async (req) => {
       .from('diagnostic_flows').select('*')
       .eq('source_doc_id', docId).eq('status', 'draft').order('created_at');
     return json({ flows: fresh ?? [] });
+  }
+
+  // ---------- ANALYZE-UPLOAD MODE: pre-fill the upload form from the file ----------
+  // One call at file-pick time: which activity types the document covers (a
+  // manual usually covers several) and which catalogued sensor it belongs to.
+  // Returns catalog IDs so the form can select them directly. Everything it
+  // returns is a SUGGESTION — the uploader can override every field.
+  if (mode === 'analyze-upload') {
+    const supabase = createClient(SUPABASE_URL, SERVICE_KEY);
+    const token = (req.headers.get('Authorization') ?? '').replace(/^Bearer\s+/i, '');
+    const { data: who } = await supabase.auth.getUser(token);
+    if (!who?.user) return json({ error: 'unauthorized' }, 401);
+
+    const text = ((payload as any).text ?? '').toString().slice(0, 12000).trim();
+    const title = ((payload as any).title ?? '').toString().slice(0, 300).trim();
+    if (text.length < 100 && !title) return json({ sections: [], make: null, model: null, note: 'not enough text to analyze' });
+
+    // Catalogue the model can choose from (ids come back so the form can select).
+    const [{ data: types }, { data: models }] = await Promise.all([
+      supabase.from('document_types').select('key, label').eq('scope', 'general').order('sort_order'),
+      supabase.from('sensor_models')
+        .select('id, model_no, name, is_general, category_id, sensor_makes(id, name), sensor_categories(name)')
+        .eq('is_general', false).limit(300),
+    ]);
+    const typeList = (types ?? []) as { key: string; label: string }[];
+    const modelList = ((models ?? []) as any[]).map((m) => {
+      const mk = Array.isArray(m.sensor_makes) ? m.sensor_makes[0] : m.sensor_makes;
+      const ct = Array.isArray(m.sensor_categories) ? m.sensor_categories[0] : m.sensor_categories;
+      return { id: m.id, make_id: mk?.id ?? null, label: `${mk?.name ?? ''} ${m.model_no || m.name}`.trim(), category: ct?.name ?? '' };
+    });
+
+    const sys = [
+      'You classify water/wastewater sensor documents for a maintenance library.',
+      'Return (a) EVERY activity type the document genuinely covers, most prominent first, and (b) which catalogued sensor it is about.',
+      'Only list an activity if the document actually contains instructions for it — do not guess from the title alone.',
+      'Only name a sensor from the provided catalogue, and only when the document clearly identifies it. Otherwise return null.',
+      'Respond with strict JSON only.',
+    ].join('\n');
+    const userMsg = [
+      `Document title: ${title || '(none)'}`,
+      `Activity types (use ONLY these keys): ${typeList.map((t) => `${t.key} (${t.label})`).join('; ')}`,
+      `Sensor catalogue (use ONLY these ids): ${modelList.map((m) => `${m.id} = ${m.label}${m.category ? ` [${m.category}]` : ''}`).join('; ') || '(catalogue empty)'}`,
+      '',
+      `Document text:\n${text}`,
+      '',
+      'Return strict JSON:',
+      '{"sections":[{"key":"<type key>","confidence":<0 to 1>}],',
+      ' "model_id":"<catalogue id or null>","model_confidence":<0 to 1>}',
+    ].join('\n');
+
+    const { raw } = await smartComplete(sys, userMsg, { ...smartOpts, maxTokens: 700 });
+    const parsed: any = extractJson(raw);
+    const validKeys = new Set(typeList.map((t) => t.key));
+    const sections = (Array.isArray(parsed.sections) ? parsed.sections : [])
+      .filter((s: any) => validKeys.has(s?.key))
+      .map((s: any) => ({ key: s.key, confidence: typeof s.confidence === 'number' ? s.confidence : 0 }))
+      .filter((s: any) => s.confidence >= 0.35)
+      .sort((a: any, b: any) => b.confidence - a.confidence)
+      .slice(0, 5);
+    const hit = modelList.find((m) => m.id === parsed.model_id);
+    const modelConfidence = typeof parsed.model_confidence === 'number' ? parsed.model_confidence : 0;
+    return json({
+      sections,
+      model: hit && modelConfidence >= 0.5 ? { id: hit.id, make_id: hit.make_id, label: hit.label, confidence: modelConfidence } : null,
+    });
   }
 
   // ---------- IMPROVE-FLOW MODE: make an existing flow's steps self-contained ----------

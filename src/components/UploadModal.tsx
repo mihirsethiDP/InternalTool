@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useMemo, useRef, useState, ReactN
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import { extractPdfText, chunkPage } from '../lib/pdf';
+import { analyzeUpload, AUTOFILL_CONFIDENCE, type UploadAnalysis } from '../lib/analyzeUpload';
 import { classifyDoc, MISMATCH_CONFIDENCE } from '../lib/classify';
 import AddSensorModal from './AddSensorModal';
 
@@ -64,6 +65,12 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
   // reuses the text instead of extracting twice.
   const [extracted, setExtracted] = useState<{ text: string; pages: number } | null>(null);
   const [reading, setReading] = useState(false);
+  // AI pre-fill: detected activity types + sensor. Suggestions only — the
+  // *Touched flags make sure a manual choice is never overwritten.
+  const [analysis, setAnalysis] = useState<UploadAnalysis | null>(null);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [typeTouched, setTypeTouched] = useState(false);
+  const [sensorTouched, setSensorTouched] = useState(false);
 
   // Only show "general" scope types in the dropdown (the sensor-tied ones):
   // Sensor Manual, Installation Guide, Troubleshooting Steps, Technical Data Sheet.
@@ -123,16 +130,41 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
   }, [defaults.sensor_model_id]); // eslint-disable-line
 
   function pickFile(f: File | null) {
-    setFile(f); setError(null); setExtracted(null);
+    setFile(f); setError(null); setExtracted(null); setAnalysis(null);
     if (f && (/\.pdf$/i.test(f.name) || /pdf/i.test(f.type))) {
       setReading(true);
       extractPdfText(f)
-        .then((pages) => setExtracted({ text: pages.map((p) => `[Page ${p.page}]\n${p.text}`).join('\n\n'), pages: pages.length }))
+        .then((pages) => {
+          const text = pages.map((p) => `[Page ${p.page}]\n${p.text}`).join('\n\n');
+          setExtracted({ text, pages: pages.length });
+          runAnalysis(text, f.name.replace(/\.[^.]+$/, ''));
+        })
         // On a hard failure leave `extracted` null so submit() retries fresh —
         // never store empty text from a transient parse error.
         .catch((e) => { console.warn('pdf extract failed', e); setExtracted(null); })
         .finally(() => setReading(false));
     }
+  }
+
+  // Read the document and pre-fill the form: which activities it covers and
+  // which sensor it's about. Never overrides a field the uploader already set.
+  async function runAnalysis(text: string, fallbackTitle: string) {
+    setAnalyzing(true);
+    const a = await analyzeUpload(text, title || fallbackTitle);
+    setAnalysis(a);
+    if (a) {
+      const top = a.sections[0];
+      if (top && top.confidence >= AUTOFILL_CONFIDENCE && !typeTouched) {
+        const t = (types.data ?? []).find((x: any) => x.key === top.key);
+        if (t) setTypeId(t.id);
+      }
+      if (a.model && a.model.confidence >= AUTOFILL_CONFIDENCE && !sensorTouched) {
+        setScope('model');
+        if (a.model.make_id) setMakeId(a.model.make_id);
+        setSensorModelId(a.model.id);
+      }
+    }
+    setAnalyzing(false);
   }
   function onDrop(e: React.DragEvent) { e.preventDefault(); setDragOver(false); const f = e.dataTransfer.files?.[0]; if (f) pickFile(f); }
 
@@ -235,6 +267,9 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
       page_count: pageCount,
       extracted_text: extractedText || null,
       target_section: null,
+      // Everything the AI saw in this document — the approve screen uses it to
+      // pre-select the split when the content spans several activities.
+      detected_sections: analysis?.sections.length ? analysis.sections.map((s) => s.key) : null,
     }).select('id').single();
     if (insert.error || !insert.data) {
       setBusy(false);
@@ -344,7 +379,7 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
                   if (!t) return null;
                   const active = typeId === tid;
                   return (
-                    <button type="button" key={tid} onClick={() => setTypeId(tid)}
+                    <button type="button" key={tid} onClick={() => { setTypeId(tid); setTypeTouched(true); }}
                       className={`rounded-full px-3 py-1 text-xs font-medium border transition ${active ? 'bg-brand-700 text-white border-brand-700' : 'bg-white text-slate-700 border-slate-200 hover:border-brand-700 hover:text-brand-700'}`}>
                       {t.label}
                     </button>
@@ -352,10 +387,36 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
                 })}
               </div>
             )}
-            <select className="input" value={typeId} onChange={(e) => setTypeId(e.target.value)} required>
+            <select className="input" value={typeId} onChange={(e) => { setTypeId(e.target.value); setTypeTouched(true); }} required>
               <option value="">— Select type —</option>
               {types.data?.map((t: any) => <option key={t.id} value={t.id}>{t.label}</option>)}
             </select>
+            {/* What the AI read out of the document — a suggestion, always overridable */}
+            {analyzing && <div className="text-xs text-slate-500 animate-pulse mt-1.5">Detecting document type…</div>}
+            {!analyzing && analysis && analysis.sections.length > 0 && (
+              <div className="text-xs text-slate-600 mt-1.5 space-y-1">
+                {!typeTouched && analysis.sections[0].confidence >= AUTOFILL_CONFIDENCE && (
+                  <div className="text-emerald-700">✓ Detected from the document — change it above if that's wrong.</div>
+                )}
+                {analysis.sections.length > 1 && (
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="text-slate-500">Also covers:</span>
+                    {analysis.sections.slice(1).map((s) => {
+                      const t = (types.data ?? []).find((x: any) => x.key === s.key);
+                      if (!t) return null;
+                      return (
+                        <button key={s.key} type="button" onClick={() => { setTypeId(t.id); setTypeTouched(true); }}
+                          title="Use this type instead"
+                          className="tap rounded-full border border-slate-300 px-2 py-0.5 text-[11px] hover:border-brand-400 hover:text-brand-700">
+                          {t.label}
+                        </button>
+                      );
+                    })}
+                    <span className="text-[11px] text-slate-400">— the reviewer can split it across all of these.</span>
+                  </div>
+                )}
+              </div>
+            )}
             {dupHint.data && (
               <div className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mt-2">
                 ⚠ A <b>{selectedType?.label ?? 'document'}</b> for this sensor already exists ({dupHint.data.status}). Make sure this isn't a duplicate — or pick a different type.
@@ -415,19 +476,26 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   <div>
                     <label className="label">Make <span className="text-red-500">*</span></label>
-                    <select className="input" value={makeId} onChange={(e) => { setMakeId(e.target.value); setSensorModelId(''); }}>
+                    <select className="input" value={makeId} onChange={(e) => { setMakeId(e.target.value); setSensorModelId(''); setSensorTouched(true); }}>
                       <option value="">— Select make —</option>
                       {makes.data?.map((m: any) => <option key={m.id} value={m.id}>{m.name}</option>)}
                     </select>
                   </div>
                   <div>
                     <label className="label">Model <span className="text-red-500">*</span></label>
-                    <select className="input" value={sensorModelId} onChange={(e) => setSensorModelId(e.target.value)} disabled={!makeId}>
+                    <select className="input" value={sensorModelId} onChange={(e) => { setSensorModelId(e.target.value); setSensorTouched(true); }} disabled={!makeId}>
                       <option value="">{makeId ? '— Select model —' : 'Pick a make first'}</option>
                       {models.data?.map((m: any) => <option key={m.id} value={m.id}>{m.model_no || m.name}</option>)}
                     </select>
                   </div>
                 </div>
+                {analyzing && <div className="text-xs text-slate-500 animate-pulse">Detecting the sensor…</div>}
+                {!analyzing && analysis?.model && !sensorTouched && analysis.model.confidence >= AUTOFILL_CONFIDENCE && (
+                  <div className="text-xs text-emerald-700">✓ Detected <b>{analysis.model.label}</b> from the document — change it above if that's wrong.</div>
+                )}
+                {!analyzing && analysis && !analysis.model && extracted && (
+                  <div className="text-xs text-slate-500">Couldn't tell which sensor this is from the text — please pick it.</div>
+                )}
               </>
             )}
 
