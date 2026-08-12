@@ -11,6 +11,19 @@ interface UploadDefaults {
   sensor_model_id?: string;
   type_key?: string;
 }
+
+// One row of a multi-file batch. Extraction/detection and submission run per
+// row, so one bad PDF never blocks the rest of the batch.
+interface BatchItem {
+  file: File;
+  title: string;
+  typeId: string;
+  extracted: { text: string; pages: number } | null;
+  analysis: UploadAnalysis | null;
+  reading: boolean;
+  state: 'idle' | 'uploading' | 'done' | 'error';
+  error?: string;
+}
 interface Ctx { open: (defaults?: UploadDefaults) => void; }
 const UploadCtx = createContext<Ctx | null>(null);
 
@@ -72,6 +85,19 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
   const [analyzing, setAnalyzing] = useState(false);
   const [typeTouched, setTypeTouched] = useState(false);
   const [sensorTouched, setSensorTouched] = useState(false);
+  // Batch mode: several files picked at once → one submission per file.
+  // The sensor scope is shared (a batch is "this sensor's manuals"); title and
+  // type are per file, auto-detected per file, always editable.
+  const [batch, setBatch] = useState<BatchItem[] | null>(null);
+  const batchRef = useRef<BatchItem[] | null>(null);
+  const patchItem = (idx: number, patch: Partial<BatchItem>) => {
+    setBatch((prev) => {
+      if (!prev) return prev;
+      const next = prev.map((it, i) => (i === idx ? { ...it, ...patch } : it));
+      batchRef.current = next;
+      return next;
+    });
+  };
 
   // Only show "general" scope types in the dropdown (the sensor-tied ones):
   // Sensor Manual, Installation Guide, Troubleshooting Steps, Technical Data Sheet.
@@ -147,6 +173,52 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
     }
   }
 
+  // Entry point for the file input / drop zone. One file keeps the classic
+  // single-document form; several switch to (or extend) batch mode.
+  function pickFiles(list: File[]) {
+    if (list.length === 0) return;
+    const existing = batchRef.current;
+    if (list.length === 1 && !existing) { pickFile(list[0]); return; }
+    setFile(null); setExtracted(null); setAnalysis(null); setError(null);
+    const startIdx = existing?.length ?? 0;
+    const fresh: BatchItem[] = list.map((f) => ({
+      file: f, title: f.name.replace(/\.[^.]+$/, ''), typeId: '',
+      extracted: null, analysis: null, reading: true, state: 'idle',
+    }));
+    const next = [...(existing ?? []), ...fresh];
+    batchRef.current = next;
+    setBatch(next);
+    fresh.forEach((item, i) => processBatchItem(startIdx + i, item.file));
+  }
+
+  // Per-row extraction + detection. Auto-fills the row's type and — from the
+  // first confident hit — the shared sensor fields, unless already chosen.
+  async function processBatchItem(idx: number, f: File) {
+    let text = '';
+    if (/\.pdf$/i.test(f.name) || /pdf/i.test(f.type)) {
+      try {
+        const pages = await extractPdfText(f);
+        text = pages.map((p) => `[Page ${p.page}]\n${p.text}`).join('\n\n');
+        patchItem(idx, { extracted: { text, pages: pages.length } });
+      } catch (e) { console.warn('batch pdf extract failed', e); }
+    }
+    if (text) {
+      const a = await analyzeUpload(text, f.name.replace(/\.[^.]+$/, ''));
+      if (a) {
+        const top = a.sections[0];
+        const t = top && top.confidence >= AUTOFILL_CONFIDENCE
+          ? (types.data ?? []).find((x: any) => x.key === top.key) : null;
+        patchItem(idx, { analysis: a, ...(t ? { typeId: t.id } : {}) });
+        if (a.model && a.model.confidence >= AUTOFILL_CONFIDENCE && !sensorTouched && !sensorModelId) {
+          setScope('model');
+          if (a.model.make_id) setMakeId(a.model.make_id);
+          setSensorModelId(a.model.id);
+        }
+      }
+    }
+    patchItem(idx, { reading: false });
+  }
+
   // Read the document and pre-fill the form: which activities it covers and
   // which sensor it's about. Never overrides a field the uploader already set.
   async function runAnalysis(text: string, fallbackTitle: string) {
@@ -167,7 +239,7 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
     }
     setAnalyzing(false);
   }
-  function onDrop(e: React.DragEvent) { e.preventDefault(); setDragOver(false); const f = e.dataTransfer.files?.[0]; if (f) pickFile(f); }
+  function onDrop(e: React.DragEvent) { e.preventDefault(); setDragOver(false); pickFiles([...(e.dataTransfer.files ?? [])]); }
 
   // Resolve the sensor_model_id the submission attaches to.
   const generalModelId = scope === 'general'
@@ -196,9 +268,7 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
   // warn when almost nothing was read (scanned/image-only PDF).
   const extractedChars = extracted ? extracted.text.replace(/\[Page \d+\]/g, '').replace(/\s+/g, ' ').trim().length : 0;
 
-  function valid(): string | null {
-    if (!file) return 'Choose a file.';
-    if (!typeId) return 'Pick a document type.';
+  function validScope(): string | null {
     if (scope === 'general') {
       if (!categoryId) return 'Pick the sensor category this general guidance applies to.';
       if (!generalModelId) return 'No general entry exists for that category yet — run migration 022.';
@@ -208,10 +278,105 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
     return null;
   }
 
+  function valid(): string | null {
+    if (batch) {
+      if (batch.length === 0) return 'Choose at least one file.';
+      const missing = batch.filter((b) => b.state !== 'done' && (!b.title.trim() || !b.typeId));
+      if (missing.length) return `Every document needs a title and a type — ${missing.length} still missing.`;
+      return validScope();
+    }
+    if (!file) return 'Choose a file.';
+    if (!typeId) return 'Pick a document type.';
+    return validScope();
+  }
+
+  // Upload + insert ONE submission; shared by both modes. Throws on failure.
+  async function submitOne(f: File, meta: {
+    title: string; typeId: string; extractedText: string; pageCount: number | null; detected: string[] | null;
+  }): Promise<string> {
+    const safeName = f.name.replace(/[^a-zA-Z0-9._-]+/g, '_');
+    const storagePath = `${Date.now()}_${safeName}`;
+    const up = await supabase.storage.from('documents').upload(storagePath, f, {
+      contentType: f.type || 'application/octet-stream',
+      upsert: false,
+    });
+    if (up.error) throw new Error('Upload failed: ' + up.error.message);
+    const insert = await supabase.from('document_submissions').insert({
+      title: meta.title,
+      type_id: meta.typeId,
+      sensor_model_id: resolvedModelId,
+      storage_path: storagePath,
+      vendor_url: vendorUrl || null,
+      size_bytes: f.size,
+      page_count: meta.pageCount,
+      extracted_text: sanitizeText(meta.extractedText) || null,
+      target_section: null,
+      detected_sections: meta.detected,
+    }).select('id').single();
+    if (insert.error || !insert.data) throw new Error('Submission failed: ' + (insert.error?.message ?? '?'));
+    return insert.data.id as string;
+  }
+
+  // Batch submit: rows run sequentially; a failed row is marked and skipped so
+  // the rest still land. Submit again retries only the failed/idle rows.
+  async function submitBatch() {
+    const items = batchRef.current ?? [];
+    setBusy(true); setError(null);
+    let doneCount = items.filter((b) => b.state === 'done').length;
+    let firstId: string | null = null;
+    for (let i = 0; i < items.length; i++) {
+      const it = batchRef.current![i];
+      if (it.state === 'done') continue;
+      patchItem(i, { state: 'uploading', error: undefined });
+      setStatus(`Submitting ${doneCount + 1} of ${items.length}…`);
+      try {
+        const id = await submitOne(it.file, {
+          title: it.title.trim(), typeId: it.typeId,
+          extractedText: it.extracted?.text ?? '', pageCount: it.extracted?.pages ?? null,
+          detected: it.analysis?.sections.length ? it.analysis.sections.map((s) => s.key) : null,
+        });
+        firstId = firstId ?? id;
+        doneCount++;
+        patchItem(i, { state: 'done' });
+        setProgress(Math.round((doneCount / items.length) * 100));
+      } catch (e: any) {
+        patchItem(i, { state: 'error', error: e.message || String(e) });
+      }
+    }
+    // One summary notification per admin — not one per file.
+    const submitted = (batchRef.current ?? []).filter((b) => b.state === 'done').length;
+    if (firstId) {
+      try {
+        const { data: admins } = await supabase.from('profiles').select('id').eq('role', 'admin');
+        if (admins?.length) {
+          await supabase.from('notifications').insert(
+            admins.map((a: any) => ({
+              recipient_id: a.id, kind: 'submission_created', submission_id: firstId,
+              message: `${submitted} new submission${submitted === 1 ? '' : 's'} awaiting review.`,
+            }))
+          );
+        }
+      } catch (e) { console.warn('notify admins failed', e); }
+    }
+    qc.invalidateQueries({ queryKey: ['my-submissions'] });
+    qc.invalidateQueries({ queryKey: ['my-submissions-counts'] });
+    qc.invalidateQueries({ queryKey: ['pending-submissions'] });
+    setBusy(false);
+    const failed = (batchRef.current ?? []).filter((b) => b.state === 'error').length;
+    if (failed === 0) {
+      setStatus(`✅ ${submitted} document${submitted === 1 ? '' : 's'} submitted for review.`);
+      setTimeout(onClose, 1400);
+    } else {
+      setStatus(null);
+      setError(`${failed} document${failed === 1 ? '' : 's'} failed — fix or remove them and submit again (the ${submitted} that succeeded won't be re-sent).`);
+    }
+  }
+
   async function submit(e?: React.FormEvent) {
     e?.preventDefault();
     const err = valid();
     if (err) { setError(err); return; }
+    if (batch) { await submitBatch(); return; }
     if (!file) return;
     setError(null); setMismatch(null); setBusy(true);
 
@@ -295,6 +460,7 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
     setProgress(100);
     setStatus('✅ Submitted for review. You\'ll be notified when an admin approves or rejects it.');
     qc.invalidateQueries({ queryKey: ['my-submissions'] });
+    qc.invalidateQueries({ queryKey: ['my-submissions-counts'] });
     qc.invalidateQueries({ queryKey: ['pending-submissions'] });
     setBusy(false);
     setTimeout(onClose, 1200);
@@ -325,10 +491,16 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
               dragOver ? 'border-brand-700 bg-brand-50' : file ? 'border-emerald-300 bg-emerald-50/40' : 'border-slate-300 bg-slate-50 hover:bg-slate-100'
             }`}
           >
-            <input type="file"
+            <input type="file" multiple
               accept=".pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg,.gif,.webp"
-              className="hidden" onChange={(e) => pickFile(e.target.files?.[0] ?? null)} />
-            {file ? (
+              className="hidden" onChange={(e) => { pickFiles([...(e.target.files ?? [])]); e.target.value = ''; }} />
+            {batch ? (
+              <div>
+                <div className="text-4xl mb-2">🗂️</div>
+                <div className="font-semibold text-slate-900">{batch.length} documents selected</div>
+                <div className="text-xs text-slate-500 mt-1">One submission per file · Click to add more</div>
+              </div>
+            ) : file ? (
               <div>
                 <div className="text-4xl mb-2">{fileIcon(file.name)}</div>
                 <div className="font-semibold text-slate-900 break-all">{file.name}</div>
@@ -343,9 +515,56 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
             )}
           </label>
 
+          {/* Batch rows: one submission per file — per-file title/type with
+              auto-detection, shared sensor scope below. */}
+          {batch && (
+            <div className="space-y-2">
+              {batch.some((b) => b.reading) && (
+                <div role="status" className="rounded-xl border border-brand-200 bg-gradient-to-r from-brand-50 via-white to-brand-50 px-4 py-2.5 flex items-center gap-2.5">
+                  <Loader2 size={16} className="animate-spin text-brand-700 shrink-0" />
+                  <span className="text-sm text-brand-900 font-medium">Reading and detecting {batch.filter((b) => b.reading).length} document{batch.filter((b) => b.reading).length === 1 ? '' : 's'}…</span>
+                </div>
+              )}
+              {batch.map((b, i) => (
+                <div key={b.file.name + i} className={`rounded-xl border p-3 space-y-2 ${b.state === 'done' ? 'border-emerald-200 bg-emerald-50/50' : b.state === 'error' ? 'border-red-200 bg-red-50/50' : 'border-slate-200 bg-white'}`}>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-lg shrink-0">{fileIcon(b.file.name)}</span>
+                    <span className="text-xs text-slate-500 truncate flex-1 min-w-24">{b.file.name} · {(b.file.size / 1024).toFixed(0)} KB</span>
+                    {b.reading && <Loader2 size={13} className="animate-spin text-brand-600 shrink-0" />}
+                    {b.state === 'done' && <span className="shrink-0 text-[11px] font-semibold text-emerald-700">✓ submitted</span>}
+                    {b.state === 'uploading' && <span className="shrink-0 text-[11px] font-semibold text-brand-700 animate-pulse">uploading…</span>}
+                    {b.state === 'idle' && !b.reading && (
+                      <button type="button" aria-label={`Remove ${b.file.name}`}
+                        onClick={() => { const next = batch.filter((_, j) => j !== i); batchRef.current = next.length ? next : null; setBatch(next.length ? next : null); }}
+                        className="tap shrink-0 text-slate-300 hover:text-red-500 text-lg leading-none">×</button>
+                    )}
+                  </div>
+                  {b.state !== 'done' && (
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <input value={b.title} onChange={(e) => patchItem(i, { title: e.target.value })}
+                        placeholder="Title" className="input text-sm flex-1 min-w-40" disabled={busy} />
+                      <select value={b.typeId} onChange={(e) => patchItem(i, { typeId: e.target.value })}
+                        className="input text-sm w-48" disabled={busy}>
+                        <option value="">— Type —</option>
+                        {types.data?.map((t: any) => <option key={t.id} value={t.id}>{t.label}</option>)}
+                      </select>
+                      {b.analysis?.sections?.[0] && b.typeId && (
+                        <span className="text-[11px] text-emerald-700 shrink-0">✓ detected</span>
+                      )}
+                    </div>
+                  )}
+                  {b.state === 'error' && <div className="text-xs text-red-700">{b.error}</div>}
+                  {!b.reading && b.extracted && b.extracted.text.replace(/\[Page \d+\]/g, '').trim().length < 120 && b.state !== 'done' && (
+                    <div className="text-[11px] text-amber-800">⚠ Barely any text could be read — looks like a scanned PDF.</div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
           {/* Detection status — deliberately prominent so uploaders SEE the
               tool working for them (gray hint text went unnoticed in the field). */}
-          {(reading || analyzing) && (
+          {!batch && (reading || analyzing) && (
             <div role="status" className="rounded-xl border border-brand-200 bg-gradient-to-r from-brand-50 via-white to-brand-50 px-4 py-3 flex items-center gap-3">
               <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-brand-100">
                 <Loader2 size={18} className="animate-spin text-brand-700" />
@@ -358,7 +577,7 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
               </div>
             </div>
           )}
-          {!reading && !analyzing && extracted && extractedChars >= 120 && (
+          {!batch && !reading && !analyzing && extracted && extractedChars >= 120 && (
             <div role="status" className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 flex items-start gap-3">
               <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-700"><Sparkles size={17} /></span>
               <div className="min-w-0 text-sm text-emerald-900">
@@ -376,12 +595,16 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
               </div>
             </div>
           )}
-          {!reading && extracted && extractedChars < 120 && (
+          {!batch && !reading && extracted && extractedChars < 120 && (
             <div className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
               ⚠ Barely any text could be read — this looks like a <b>scanned / image-only PDF</b>. Dr. Paani reads text, not pictures; a text-based PDF gives far better answers. You can still submit it.
             </div>
           )}
 
+          {/* Shared Title/Type only make sense for a single document — batch
+              rows carry their own (and unmounting avoids hidden `required`
+              fields blocking the batch submit). */}
+          {!batch && (
           <div>
             <label className="label">Title</label>
             <input
@@ -393,7 +616,9 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
             />
             {file && !titleTouched && <div className="text-xs text-slate-500 mt-1.5">Auto-filled from the file name — feel free to edit.</div>}
           </div>
+          )}
 
+          {!batch && (
           <div>
             <label className="label">Document type</label>
             {recentTypeIds.length > 0 && (
@@ -447,6 +672,7 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
               </div>
             )}
           </div>
+          )}
 
           <div className="rounded-2xl bg-slate-50 border border-slate-200 p-5 space-y-3">
             <div className="flex items-center justify-between flex-wrap gap-2">
@@ -550,10 +776,10 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
             <button type="button" onClick={onClose} className="btn-ghost">Cancel</button>
             <button
               type="submit"
-              disabled={busy || reading}
+              disabled={busy || reading || (batch?.some((b) => b.reading) ?? false)}
               className="group relative inline-flex items-center gap-2 rounded-xl bg-gradient-to-br from-brand-700 to-brand-900 text-white px-5 py-2.5 text-sm font-semibold shadow-sm hover:shadow-md hover:from-brand-600 transition disabled:opacity-60"
             >
-              {busy ? (<><span className="animate-spin">⟳</span> Submitting…</>) : reading ? (<>Reading document…</>) : (<>⬆ Submit for review</>)}
+              {busy ? (<><span className="animate-spin">⟳</span> Submitting…</>) : (reading || batch?.some((b) => b.reading)) ? (<>Reading document{batch ? 's' : ''}…</>) : batch ? (<>⬆ Submit {batch.filter((b) => b.state !== 'done').length} document{batch.filter((b) => b.state !== 'done').length === 1 ? '' : 's'}</>) : (<>⬆ Submit for review</>)}
             </button>
           </div>
 

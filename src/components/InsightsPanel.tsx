@@ -1,10 +1,72 @@
 import { useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { ThumbsUp, ThumbsDown, SearchX, ShieldCheck, FileWarning, ArrowRight, Globe2, Award } from 'lucide-react';
+import { ThumbsUp, ThumbsDown, SearchX, ShieldCheck, FileWarning, ArrowRight, Globe2, Award, PhoneOff, Plus, Check, Loader2 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { coverageOf } from '../lib/consolidated';
 import { fetchLeaderboard } from '../lib/contributions';
+import { createIssue } from '../lib/issues';
+
+// One "Most requested, not found" row — the loop-closer: a real gap becomes a
+// curated issue in two clicks, with the users' own phrasing kept as an alias
+// so the exact wording that failed today matches instantly tomorrow.
+function GapRow({ gap, cats, onMapFlows }: {
+  gap: { query: string; count: number; sources: Set<string> };
+  cats: { id: string; name: string }[];
+  onMapFlows: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [label, setLabel] = useState(() => gap.query.charAt(0).toUpperCase() + gap.query.slice(1));
+  const [catId, setCatId] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(false);
+
+  async function create() {
+    if (!label.trim()) return;
+    setBusy(true);
+    const id = await createIssue(catId || null, label.trim(), [gap.query]);
+    setBusy(false);
+    if (id) { setDone(true); setOpen(false); }
+  }
+
+  return (
+    <li className="px-5 py-2.5">
+      <div className="flex items-center gap-3">
+        <span className="text-sm text-slate-800 flex-1 truncate">{gap.query}</span>
+        <span className="text-[10px] text-slate-400 uppercase tracking-wide">{[...gap.sources].join(', ')}</span>
+        <span className="rounded-full bg-amber-100 text-amber-800 text-xs font-semibold px-2 py-0.5 min-w-[28px] text-center">{gap.count}</span>
+        {done ? (
+          <button onClick={onMapFlows}
+            className="tap shrink-0 inline-flex items-center gap-1 rounded-md bg-emerald-50 border border-emerald-200 text-emerald-700 px-2 py-1 text-[11px] font-medium hover:bg-emerald-100 transition">
+            <Check size={11} /> Issue created — map flows
+          </button>
+        ) : (
+          <button onClick={() => setOpen((v) => !v)}
+            className="tap shrink-0 inline-flex items-center gap-1 rounded-md border border-slate-200 text-slate-600 px-2 py-1 text-[11px] font-medium hover:border-brand-700 hover:text-brand-700 transition">
+            <Plus size={11} /> Create issue
+          </button>
+        )}
+      </div>
+      {open && !done && (
+        <div className="mt-2 flex items-center gap-2 flex-wrap rounded-lg bg-slate-50 border border-slate-200 p-2">
+          <input value={label} onChange={(e) => setLabel(e.target.value)} className="input text-xs flex-1 min-w-40"
+            placeholder="Issue label (what users would call it)" />
+          <select value={catId} onChange={(e) => setCatId(e.target.value)} className="input text-xs w-40">
+            <option value="">All categories</option>
+            {cats.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+          <button onClick={create} disabled={busy || !label.trim()}
+            className="tap rounded-md bg-brand-700 text-white px-2.5 py-1.5 text-xs font-medium hover:bg-brand-800 disabled:opacity-50 inline-flex items-center gap-1">
+            {busy ? <Loader2 size={11} className="animate-spin" /> : <Plus size={11} />} Create
+          </button>
+          <div className="w-full text-[11px] text-slate-500">
+            “{gap.query}” is kept as an alias, so this exact phrasing matches immediately. Next: map flows to the issue.
+          </div>
+        </div>
+      )}
+    </li>
+  );
+}
 
 type Range = '30' | '90' | 'all';
 const RANGE_DAYS: Record<Range, number> = { '30': 30, '90': 90, all: 0 };
@@ -53,6 +115,32 @@ export default function InsightsPanel() {
   const leaderboard = useQuery({
     queryKey: ['contribution-leaderboard'],
     queryFn: fetchLeaderboard,
+  });
+
+  // Escalation readiness: a flow that ends in "call the electrical engineer"
+  // dead-ends if no one is on file for that skill. Surface it HERE, on the
+  // landing tab, because the directory itself only shows the gap once you've
+  // already navigated into it.
+  const escalation = useQuery({
+    queryKey: ['insights-escalation'],
+    queryFn: async () => (await supabase
+      .from('escalation_contacts')
+      .select('skill_key, label, person_name, contact, active')).data ?? [],
+  });
+  const missingSkills = useMemo(() => {
+    const bySkill = new Map<string, { label: string; reachable: boolean }>();
+    for (const c of (escalation.data ?? []) as any[]) {
+      const cur = bySkill.get(c.skill_key) ?? { label: c.label, reachable: false };
+      if (c.active && (c.person_name || c.contact)) cur.reachable = true;
+      bySkill.set(c.skill_key, cur);
+    }
+    return [...bySkill.values()].filter((s) => !s.reachable).map((s) => s.label);
+  }, [escalation.data]);
+
+  // Issues that exist — so "create issue" can warn about near-duplicates.
+  const cats = useQuery({
+    queryKey: ['cats'],
+    queryFn: async () => (await supabase.from('sensor_categories').select('id,name').order('name')).data ?? [],
   });
 
   const events = useQuery({
@@ -113,6 +201,24 @@ export default function InsightsPanel() {
 
   return (
     <div className="space-y-5">
+      {/* Escalation readiness — a flow that ends in "call X" dead-ends when
+          no one is on file. This is the launch-blocking kind of gap, so it
+          lives at the very top of the landing tab until it's fixed. */}
+      {!escalation.isLoading && missingSkills.length > 0 && (
+        <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 flex items-start gap-3">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-amber-100 text-amber-700"><PhoneOff size={17} /></span>
+          <div className="min-w-0 flex-1 text-sm text-amber-900">
+            <b>{missingSkills.length} escalation skill{missingSkills.length === 1 ? ' has' : 's have'} no contact on file</b>
+            {' '}— when a diagnosis needs outside help, Dr. Paani will have no one to point to.
+            <span className="block text-xs text-amber-800/80 mt-0.5">{missingSkills.join(' · ')}</span>
+          </div>
+          <button onClick={() => nav('/admin?tab=flows')}
+            className="tap shrink-0 rounded-lg bg-amber-600 text-white px-3 py-1.5 text-xs font-semibold hover:bg-amber-700 transition inline-flex items-center gap-1">
+            Fill the directory <ArrowRight size={12} />
+          </button>
+        </div>
+      )}
+
       {/* Range toggle */}
       <div className="inline-flex items-center bg-slate-100 rounded-lg p-1 gap-0.5">
         {(['30', '90', 'all'] as Range[]).map((r) => (
@@ -150,11 +256,8 @@ export default function InsightsPanel() {
         ) : (
           <ul className="divide-y divide-slate-50">
             {topMissing.map((m, i) => (
-              <li key={i} className="px-5 py-2.5 flex items-center gap-3">
-                <span className="text-sm text-slate-800 flex-1 truncate">{m.query}</span>
-                <span className="text-[10px] text-slate-400 uppercase tracking-wide">{[...m.sources].join(', ')}</span>
-                <span className="rounded-full bg-amber-100 text-amber-800 text-xs font-semibold px-2 py-0.5 min-w-[28px] text-center">{m.count}</span>
-              </li>
+              <GapRow key={m.query} gap={m} cats={(cats.data ?? []) as { id: string; name: string }[]}
+                onMapFlows={() => nav('/admin?tab=flows')} />
             ))}
           </ul>
         )}
