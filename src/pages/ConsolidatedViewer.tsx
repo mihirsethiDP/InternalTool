@@ -15,7 +15,6 @@ import { SECTION_LABEL, SECTION_ORDER, parseSections, CHECKLIST_SECTIONS } from 
 import { renderMarkdown, normalizeAnswerSteps } from '../lib/markdown';
 import RevisionHistory from '../components/RevisionHistory';
 import AnswerFeedback from '../components/AnswerFeedback';
-import RoutingRulesPanel from '../components/RoutingRulesPanel';
 import type { SubmissionSection } from '../lib/types';
 
 export const SECTION_ICON: Record<SubmissionSection, React.ReactNode> = {
@@ -361,10 +360,9 @@ export default function ConsolidatedViewer() {
         />
       )}
 
-      {/* Router layer (admins): manage problem→procedure rules for this sensor */}
-      {isAdmin(profile) && cdoc.data.sensor_model_id && (
-        <RoutingRulesPanel sensorModelId={cdoc.data.sensor_model_id} />
-      )}
+      {/* Quick-routing rules still run silently in chat (how-to shortcuts,
+          auto-generated at approval) but are no longer an admin-facing
+          concept — admins curate ONE thing: Issues → Flows. */}
 
       {/* Sticky toolbar */}
       <div className="sticky top-0 z-30 -mx-4 px-4 sm:-mx-5 sm:px-5 py-2.5 bg-white/90 backdrop-blur-md border-b border-slate-200 space-y-2">

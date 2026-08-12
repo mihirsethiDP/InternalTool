@@ -5,6 +5,7 @@ import { extractPdfText, chunkPage, sanitizeText } from '../lib/pdf';
 import { analyzeUpload, AUTOFILL_CONFIDENCE, type UploadAnalysis } from '../lib/analyzeUpload';
 import { classifyDoc, MISMATCH_CONFIDENCE } from '../lib/classify';
 import AddSensorModal from './AddSensorModal';
+import { Loader2, Sparkles } from 'lucide-react';
 
 interface UploadDefaults {
   sensor_model_id?: string;
@@ -342,13 +343,37 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
             )}
           </label>
 
-          {/* Extraction preview — reassure the PDF was read, warn on scans */}
-          {reading && (
-            <div className="text-xs text-slate-500 animate-pulse">Reading the document…</div>
+          {/* Detection status — deliberately prominent so uploaders SEE the
+              tool working for them (gray hint text went unnoticed in the field). */}
+          {(reading || analyzing) && (
+            <div role="status" className="rounded-xl border border-brand-200 bg-gradient-to-r from-brand-50 via-white to-brand-50 px-4 py-3 flex items-center gap-3">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-brand-100">
+                <Loader2 size={18} className="animate-spin text-brand-700" />
+              </span>
+              <div className="min-w-0">
+                <div className="text-sm font-semibold text-brand-900">
+                  {reading ? 'Reading your document…' : 'Detecting document type and sensor…'}
+                </div>
+                <div className="text-xs text-slate-500">Dr. Paani is pre-filling the form for you — you can keep editing meanwhile.</div>
+              </div>
+            </div>
           )}
-          {!reading && extracted && extractedChars >= 120 && (
-            <div className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
-              ✓ Read {extractedChars.toLocaleString()} characters from {extracted.pages} page{extracted.pages === 1 ? '' : 's'} — looks good.
+          {!reading && !analyzing && extracted && extractedChars >= 120 && (
+            <div role="status" className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 flex items-start gap-3">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-700"><Sparkles size={17} /></span>
+              <div className="min-w-0 text-sm text-emerald-900">
+                <b>Read {extractedChars.toLocaleString()} characters from {extracted.pages} page{extracted.pages === 1 ? '' : 's'}.</b>{' '}
+                {analysis && (analysis.sections.length > 0 || analysis.model) ? (
+                  <>
+                    Detected{' '}
+                    {analysis.sections[0] && <b>{(types.data ?? []).find((x: any) => x.key === analysis.sections[0].key)?.label ?? ''}</b>}
+                    {analysis.model && <> · <b>{analysis.model.label}</b></>}
+                    {' '}— the form below is pre-filled; change anything that's wrong.
+                  </>
+                ) : (
+                  <>Couldn't auto-detect the details — please fill in the form below.</>
+                )}
+              </div>
             </div>
           )}
           {!reading && extracted && extractedChars < 120 && (
@@ -392,7 +417,6 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
               {types.data?.map((t: any) => <option key={t.id} value={t.id}>{t.label}</option>)}
             </select>
             {/* What the AI read out of the document — a suggestion, always overridable */}
-            {analyzing && <div className="text-xs text-slate-500 animate-pulse mt-1.5">Detecting document type…</div>}
             {!analyzing && analysis && analysis.sections.length > 0 && (
               <div className="text-xs text-slate-600 mt-1.5 space-y-1">
                 {!typeTouched && analysis.sections[0].confidence >= AUTOFILL_CONFIDENCE && (
@@ -489,7 +513,6 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
                     </select>
                   </div>
                 </div>
-                {analyzing && <div className="text-xs text-slate-500 animate-pulse">Detecting the sensor…</div>}
                 {!analyzing && analysis?.model && !sensorTouched && analysis.model.confidence >= AUTOFILL_CONFIDENCE && (
                   <div className="text-xs text-emerald-700">✓ Detected <b>{analysis.model.label}</b> from the document — change it above if that's wrong.</div>
                 )}

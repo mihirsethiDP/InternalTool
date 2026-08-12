@@ -47,6 +47,48 @@ export function matchIssueClient(corrected: string, issues: Issue[]): Issue | nu
 // The ordered, APPROVED flows for an issue — the queue the chat walks.
 // Model-scoped: keeps generic flows (sensor_model_id null) plus the ones for
 // the user's model; drops flows for OTHER models.
+// Everything the chat needs to decide HOW to start an issue's queue: the full
+// ordered flow list plus which sensor models those flows are written for.
+// If every flow is model-agnostic, make/model is optional and the bot skips
+// asking; if flows are model-specific, the bot must elicit the model first —
+// otherwise an operator could be walked through another sensor's fix.
+export interface IssueQueueInfo {
+  flows: DiagnosticFlow[]; // ordered by rank, approved only, ALL models
+  models: { id: string; label: string }[]; // distinct models among model-specific flows
+  hasGeneral: boolean; // at least one model-agnostic flow exists
+}
+
+export async function issueQueueInfo(issueId: string): Promise<IssueQueueInfo> {
+  const { data, error } = await supabase
+    .from('issue_flows')
+    .select('rank, diagnostic_flows(*, sensor_models(model_no, name, sensor_makes(name)))')
+    .eq('issue_id', issueId)
+    .order('rank');
+  if (error) { console.warn('issueQueueInfo failed', error.message); return { flows: [], models: [], hasGeneral: false }; }
+  const flows = ((data ?? []) as any[])
+    .map((r) => (Array.isArray(r.diagnostic_flows) ? r.diagnostic_flows[0] : r.diagnostic_flows))
+    .filter((f) => f && f.status === 'approved');
+  const byModel = new Map<string, string>();
+  let hasGeneral = false;
+  for (const f of flows) {
+    if (!f.sensor_model_id) { hasGeneral = true; continue; }
+    const sm = Array.isArray(f.sensor_models) ? f.sensor_models[0] : f.sensor_models;
+    const mk = sm ? (Array.isArray(sm.sensor_makes) ? sm.sensor_makes[0] : sm.sensor_makes) : null;
+    byModel.set(f.sensor_model_id, `${mk?.name ?? ''} ${sm?.model_no || sm?.name || ''}`.trim() || 'Unknown model');
+  }
+  return {
+    flows: flows as DiagnosticFlow[],
+    models: [...byModel.entries()].map(([id, label]) => ({ id, label })),
+    hasGeneral,
+  };
+}
+
+// The queue actually run for a given model choice. modelId null = only the
+// model-agnostic flows (never another model's fix).
+export function filterQueueForModel(flows: DiagnosticFlow[], modelId: string | null): DiagnosticFlow[] {
+  return flows.filter((f) => !f.sensor_model_id || (modelId != null && f.sensor_model_id === modelId));
+}
+
 export async function flowQueueForIssue(issueId: string, opts?: { modelId?: string | null }): Promise<DiagnosticFlow[]> {
   const { data, error } = await supabase
     .from('issue_flows')

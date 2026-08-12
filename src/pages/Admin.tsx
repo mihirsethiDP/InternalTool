@@ -16,6 +16,34 @@ import { softDeleteConsolidated } from '../lib/recycleBin';
 type AdminTab = 'insights' | 'review' | 'flows' | 'consolidated' | 'categories' | 'users' | 'types' | 'bin';
 const ADMIN_TABS: AdminTab[] = ['insights', 'review', 'flows', 'consolidated', 'categories', 'users', 'types', 'bin'];
 
+// Grouped navigation — 8 flat tabs stopped being scannable. Groups carry the
+// sub-tabs; the URL still stores the LEAF tab, so every existing deep link
+// (?tab=flows from notifications, onboarding cards, post-approval steps)
+// lands exactly where it used to.
+const GROUPS: { key: string; label: string; tabs: { key: AdminTab; label: string }[] }[] = [
+  { key: 'insights', label: 'Insights', tabs: [{ key: 'insights', label: 'Insights' }] },
+  { key: 'review', label: 'Review queue', tabs: [{ key: 'review', label: 'Review queue' }] },
+  {
+    key: 'knowledge', label: 'Knowledge', tabs: [
+      { key: 'consolidated', label: 'Consolidated references' },
+      { key: 'flows', label: 'Diagnostic flows & issues' },
+    ],
+  },
+  {
+    key: 'catalog', label: 'Catalog', tabs: [
+      { key: 'categories', label: 'Categories' },
+      { key: 'types', label: 'Document types' },
+    ],
+  },
+  {
+    key: 'system', label: 'System', tabs: [
+      { key: 'users', label: 'Users' },
+      { key: 'bin', label: 'Recycle bin' },
+    ],
+  },
+];
+const groupOf = (t: AdminTab) => GROUPS.find((g) => g.tabs.some((x) => x.key === t)) ?? GROUPS[0];
+
 export default function Admin() {
   const { profile, loading } = useAuth();
   const qc = useQueryClient();
@@ -70,17 +98,34 @@ export default function Admin() {
 
       <AdminOnboarding />
 
-      {/* Tabs */}
+      {/* Grouped tabs: group row + sub-tab pills when the group has several */}
       <div className="border-b border-slate-200 flex gap-1 overflow-x-auto">
-        <Tab name="insights" active={tab} onClick={setTab}>Insights</Tab>
-        <Tab name="review" active={tab} onClick={setTab} badge={pending.data ?? 0}>Review queue</Tab>
-        <Tab name="flows" active={tab} onClick={setTab} badge={draftFlows.data ?? 0}>Diagnostic flows</Tab>
-        <Tab name="consolidated" active={tab} onClick={setTab}>Consolidated references</Tab>
-        <Tab name="categories" active={tab} onClick={setTab}>Categories</Tab>
-        <Tab name="users" active={tab} onClick={setTab}>Users</Tab>
-        <Tab name="types" active={tab} onClick={setTab}>Document types</Tab>
-        <Tab name="bin" active={tab} onClick={setTab}>Recycle bin</Tab>
+        {GROUPS.map((g) => {
+          const badge = g.key === 'review' ? (pending.data ?? 0) : g.key === 'knowledge' ? (draftFlows.data ?? 0) : 0;
+          return (
+            <Tab key={g.key} name={g.tabs[0].key} isActive={groupOf(tab).key === g.key} onClick={setTab} badge={badge}>
+              {g.label}
+            </Tab>
+          );
+        })}
       </div>
+      {groupOf(tab).tabs.length > 1 && (
+        <div className="flex flex-wrap gap-1.5 -mt-2">
+          {groupOf(tab).tabs.map((st) => (
+            <button key={st.key} onClick={() => setTab(st.key)}
+              className={`tap rounded-full px-3.5 py-1.5 text-xs font-medium border transition ${
+                tab === st.key ? 'bg-brand-700 text-white border-brand-700' : 'bg-white text-slate-600 border-slate-200 hover:border-brand-700 hover:text-brand-700'
+              }`}>
+              {st.label}
+              {st.key === 'flows' && (draftFlows.data ?? 0) > 0 && (
+                <span className={`ml-1.5 rounded-full text-[10px] font-bold px-1.5 ${tab === st.key ? 'bg-white/20' : 'bg-amber-100 text-amber-800'}`}>
+                  {draftFlows.data}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+      )}
 
       {tab === 'insights' && <InsightsPanel />}
       {tab === 'review' && <ReviewQueueList />}
@@ -94,8 +139,7 @@ export default function Admin() {
   );
 }
 
-function Tab({ name, active, onClick, badge, children }: { name: AdminTab; active: AdminTab; onClick: (n: AdminTab) => void; badge?: number; children: React.ReactNode; }) {
-  const isActive = active === name;
+function Tab({ name, isActive, onClick, badge, children }: { name: AdminTab; isActive: boolean; onClick: (n: AdminTab) => void; badge?: number; children: React.ReactNode; }) {
   return (
     <button
       onClick={() => onClick(name)}
@@ -276,12 +320,13 @@ function UsersPanel({ onChanged }: { onChanged: () => void }) {
 
   // Group by email so one person = one row, even with multiple sign-ins.
   const rank: Record<string, number> = { viewer: 0, uploader: 1, admin: 2 };
-  const byEmail = new Map<string, { email: string; roles: Set<string>; count: number; tech: string }>();
+  const byEmail = new Map<string, { email: string; roles: Set<string>; count: number; tech: string; isSuper: boolean }>();
   for (const u of (users.data ?? []) as any[]) {
     const key = (u.email ?? '').toLowerCase();
-    const e = byEmail.get(key) ?? { email: u.email, roles: new Set<string>(), count: 0, tech: 'non_technical' };
+    const e = byEmail.get(key) ?? { email: u.email, roles: new Set<string>(), count: 0, tech: 'non_technical', isSuper: false };
     e.roles.add(u.role); e.count += 1;
     if (u.technical_level === 'technical') e.tech = 'technical';
+    if (u.is_super) e.isSuper = true;
     byEmail.set(key, e);
   }
   const rows = [...byEmail.values()].map((e) => {
@@ -319,6 +364,11 @@ function UsersPanel({ onChanged }: { onChanged: () => void }) {
               <tr key={u.email} className="border-t border-slate-100">
                 <td className="py-2 pr-2">
                   {u.email}
+                  {u.isSuper && (
+                    <span className="ml-2 text-[10px] font-semibold rounded-full bg-brand-100 text-brand-800 px-1.5 py-0.5" title="Protected account — only the superadmin can change it">
+                      ★ superadmin
+                    </span>
+                  )}
                   {u.count > 1 && <span className="ml-2 text-[10px] text-slate-400">{u.count} sign-ins</span>}
                 </td>
                 <td className="pr-2">
@@ -326,15 +376,24 @@ function UsersPanel({ onChanged }: { onChanged: () => void }) {
                   {u.mixed && <span className="ml-1.5 text-[10px] text-amber-600">was inconsistent — fixed on next change</span>}
                 </td>
                 <td className="text-right space-x-1 whitespace-nowrap">
-                  <select value={u.tech} onChange={(e) => setTechLevel(u.email, e.target.value)}
-                    title="Technical level — how deep Dr. Paani goes with guided steps"
-                    className="rounded-md border border-slate-300 text-[11px] px-1.5 py-1 mr-2">
-                    <option value="non_technical">non-technical</option>
-                    <option value="technical">technical</option>
-                  </select>
-                  <button className="btn-ghost text-xs" onClick={() => setRole(u.email, 'viewer')}>viewer</button>
-                  <button className="btn-ghost text-xs" onClick={() => setRole(u.email, 'uploader')}>uploader</button>
-                  <button className="btn-ghost text-xs" onClick={() => setRole(u.email, 'admin')}>admin</button>
+                  {/* The superadmin's row is read-only for other admins —
+                      RLS + trigger enforce it; hiding the controls makes that
+                      visible instead of failing silently. */}
+                  {u.isSuper ? (
+                    <span className="text-[11px] text-slate-400">protected</span>
+                  ) : (
+                    <>
+                      <select value={u.tech} onChange={(e) => setTechLevel(u.email, e.target.value)}
+                        title="Technical level — how deep Dr. Paani goes with guided steps"
+                        className="rounded-md border border-slate-300 text-[11px] px-1.5 py-1 mr-2">
+                        <option value="non_technical">non-technical</option>
+                        <option value="technical">technical</option>
+                      </select>
+                      <button className="btn-ghost text-xs" onClick={() => setRole(u.email, 'viewer')}>viewer</button>
+                      <button className="btn-ghost text-xs" onClick={() => setRole(u.email, 'uploader')}>uploader</button>
+                      <button className="btn-ghost text-xs" onClick={() => setRole(u.email, 'admin')}>admin</button>
+                    </>
+                  )}
                 </td>
               </tr>
             ))}

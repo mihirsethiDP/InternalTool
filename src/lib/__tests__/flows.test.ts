@@ -58,7 +58,7 @@ describe('walk helpers', () => {
 describe('contactsForSkill', () => {
   const mk = (over: Partial<EscalationContact>): EscalationContact => ({
     id: Math.random().toString(36).slice(2), skill_key: 'electrical_engineer', label: 'Electrical engineer',
-    person_name: 'X', contact: '99', notes: null, active: true, plant_id: null, make_id: null, ...over,
+    person_name: 'X', contact: '99', notes: null, active: true, plant_id: null, make_id: null, sensor_model_id: null, ...over,
   });
   const contacts = [
     mk({ id: 'global' }),
@@ -66,15 +66,26 @@ describe('contactsForSkill', () => {
     mk({ id: 'plantA', plant_id: 'pA', plant_name: 'A Plant' }),
     mk({ id: 'makeX', make_id: 'mX', make_name: 'MakeX' }),
     mk({ id: 'makeY', make_id: 'mY', make_name: 'MakeY' }),
+    mk({ id: 'modelM1', sensor_model_id: 'sm1', model_label: 'MAG-110' }),
+    mk({ id: 'modelM2', sensor_model_id: 'sm2', model_label: 'OCEMS' }),
     mk({ id: 'otherSkill', skill_key: 'supervisor' }),
   ];
+  it('orders: matching MODEL → matching make → global → plants; drops other models/makes', () => {
+    const r = contactsForSkill(contacts, 'electrical_engineer', { makeId: 'mX', modelId: 'sm1' });
+    expect(r.map((c) => c.id)).toEqual(['modelM1', 'makeX', 'global', 'plantA', 'plantB']);
+  });
   it('orders: matching make → global → plants (alphabetical); drops other makes', () => {
     const r = contactsForSkill(contacts, 'electrical_engineer', { makeId: 'mX' });
     expect(r.map((c) => c.id)).toEqual(['makeX', 'global', 'plantA', 'plantB']);
   });
-  it('without a make in scope, drops all make-scoped rows', () => {
+  it('without a make/model in scope, drops all scoped rows', () => {
     const r = contactsForSkill(contacts, 'electrical_engineer', {});
     expect(r.map((c) => c.id)).toEqual(['global', 'plantA', 'plantB']);
+  });
+  it('a model contact never leaks to a different model', () => {
+    const r = contactsForSkill(contacts, 'electrical_engineer', { makeId: 'mY', modelId: 'sm2' });
+    expect(r.map((c) => c.id)).toEqual(['modelM2', 'makeY', 'global', 'plantA', 'plantB']);
+    expect(r.some((c) => c.id === 'modelM1')).toBe(false);
   });
   it('filters by skill', () => {
     expect(contactsForSkill(contacts, 'supervisor', {}).map((c) => c.id)).toEqual(['otherSkill']);

@@ -288,7 +288,9 @@ export function ReviewQueueDetail() {
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [approveOpen, setApproveOpen] = useState(false);
   const [rejectOpen, setRejectOpen] = useState(false);
-  const [changesOpen, setChangesOpen] = useState(false);
+  // false = closed; true = open; string = open with a prefilled note (the
+  // duplicates panel uses this to hand the admin a ready-made message).
+  const [changesOpen, setChangesOpen] = useState<boolean | string>(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   // Set after a successful approval — swaps the page for the "what's next"
   // guided path (flow decisions → finalize) instead of dumping the admin
@@ -315,6 +317,20 @@ export function ReviewQueueDetail() {
     },
     enabled: Boolean(sub.data?.extracted_text),
   });
+
+  // The sensor's reference — so the duplicates panel can link straight to the
+  // overlapping section instead of leaving the admin to hunt for it.
+  const dupCdoc = useQuery({
+    queryKey: ['dup-cdoc', sub.data?.sensor_model_id],
+    enabled: Boolean(sub.data?.sensor_model_id) && (dupes.data ?? []).length > 0,
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('consolidated_docs').select('id')
+        .eq('sensor_model_id', sub.data!.sensor_model_id).is('deleted_at', null).maybeSingle();
+      return (data as any)?.id ?? null;
+    },
+  });
+  const dupCdocId = dupCdoc.data ?? null;
 
   // AI association check: does the document content match the sensor it's filed
   // under? Advisory — surfaced as a banner; the checker still decides.
@@ -423,22 +439,39 @@ export function ReviewQueueDetail() {
         )
       )}
 
-      {/* Duplicates */}
+      {/* Duplicates — with a verdict and actions, not just a warning. */}
       {(dupes.data ?? []).length > 0 && (
         <div className="card border-amber-200 bg-amber-50/60">
-          <div className="text-xs uppercase font-semibold text-amber-800 mb-2">
-            ⚠ Possible duplicates ({dupes.data!.length})
+          <div className="text-xs uppercase font-semibold text-amber-800 mb-1">
+            ⚠ Overlaps existing content ({dupes.data!.length})
           </div>
+          <p className="text-xs text-amber-900/80 mb-2 leading-relaxed">
+            Parts of this document look very similar to what's already in this sensor's reference.
+            If it's the <b>same content</b>, send it back so review time isn't spent twice. If it's a
+            <b> newer revision</b>, approve with <b>Replace</b> so the old text is superseded, not duplicated.
+          </p>
           <div className="space-y-2 text-sm">
             {(dupes.data ?? []).map((d: any) => (
               <div key={d.chunk_id} className="bg-white/60 border border-amber-200 rounded p-2">
-                <div className="text-xs text-amber-900 mb-1">
-                  <strong>{Math.round(d.similarity * 100)}%</strong> similar to {SECTION_LABEL[d.section as SubmissionSection]}
+                <div className="text-xs text-amber-900 mb-1 flex items-center gap-2 flex-wrap">
+                  <span><strong>{Math.round(d.similarity * 100)}%</strong> similar to <strong>{SECTION_LABEL[d.section as SubmissionSection]}</strong></span>
+                  {dupCdocId && (
+                    <Link to={`/consolidated/${dupCdocId}`} target="_blank" className="text-brand-700 hover:underline font-medium">
+                      View the existing section ↗
+                    </Link>
+                  )}
                 </div>
                 <div className="text-slate-700 text-xs italic">{d.chunk_preview}…</div>
               </div>
             ))}
           </div>
+          <button
+            onClick={() => setChangesOpen(
+              `This looks like a duplicate of content already in the ${[...new Set((dupes.data ?? []).map((d: any) => SECTION_LABEL[d.section as SubmissionSection]))].join(', ')} section(s) of this sensor's reference. If you meant to upload a newer revision, please mention what changed; otherwise no need to resubmit.`,
+            )}
+            className="mt-2 tap rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-xs font-medium text-amber-900 hover:bg-amber-100 transition">
+            Send back as duplicate…
+          </button>
         </div>
       )}
 
@@ -473,7 +506,7 @@ export function ReviewQueueDetail() {
         <ApproveModal submission={s} editedText={editedText} onClose={() => setApproveOpen(false)} onDone={(docId: string) => { setApproveOpen(false); setApprovedDocId(docId); }} />
       )}
       {changesOpen && (
-        <RequestChangesModal submission={s} editedText={editedText} onClose={() => setChangesOpen(false)} onDone={() => nav('/review')} />
+        <RequestChangesModal submission={s} editedText={editedText} initialNote={typeof changesOpen === 'string' ? changesOpen : ''} onClose={() => setChangesOpen(false)} onDone={() => nav('/review')} />
       )}
       {rejectOpen && (
         <RejectModal submission={s} onClose={() => setRejectOpen(false)} onDone={() => nav('/review')} />
@@ -725,9 +758,9 @@ function ApproveModal({ submission, editedText, onClose, onDone }: any) {
 /* =========================================================
    Request changes modal — sends back to the maker; keeps the file
 ========================================================= */
-function RequestChangesModal({ submission, editedText, onClose, onDone }: any) {
+function RequestChangesModal({ submission, editedText, initialNote, onClose, onDone }: any) {
   const qc = useQueryClient();
-  const [note, setNote] = useState('');
+  const [note, setNote] = useState(initialNote ?? '');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 

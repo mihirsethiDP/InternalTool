@@ -140,7 +140,17 @@ export default function DiagnosticFlowsPanel() {
     qc.invalidateQueries({ queryKey: ['diagnostic-flows'] });
   }
 
-  const list = (flows.data ?? []) as any[];
+  // Category filter — flows and issues both carry a sensor category, and once
+  // several categories have content the mixed list stops being scannable.
+  const [catFilter, setCatFilter] = useState('');
+  const allList = (flows.data ?? []) as any[];
+  const list = catFilter ? allList.filter((f) => f.sensor_category_id === catFilter) : allList;
+  const issueList = ((issues.data ?? []) as any[]).filter((i) => !catFilter || i.sensor_category_id === catFilter);
+  // Only offer categories that actually have flows or issues.
+  const catsWithContent = useMemo(() => {
+    const ids = new Set([...allList.map((f) => f.sensor_category_id), ...((issues.data ?? []) as any[]).map((i) => i.sensor_category_id)]);
+    return ((cats.data ?? []) as { id: string; name: string }[]).filter((c) => ids.has(c.id));
+  }, [allList, issues.data, cats.data]);
   const drafts = list.filter((f) => f.status === 'draft');
   const approved = list.filter((f) => f.status === 'approved');
   const archived = list.filter((f) => f.status === 'archived');
@@ -176,9 +186,23 @@ export default function DiagnosticFlowsPanel() {
           <p className="text-xs text-slate-500">
             Step-by-step diagnostic trees Dr. Paani walks users through — drafted by AI from approved documentation
             (also auto-drafted whenever you approve a submission), then reviewed here. Only approved flows go live.
-            Different from the <b>quick routing</b> shortcuts on each sensor's page, which just jump to a doc
-            section — Dr. Paani tries these flows first.
           </p>
+
+          {catsWithContent.length > 1 && (
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-xs text-slate-500 mr-1">Category:</span>
+              <button type="button" onClick={() => setCatFilter('')}
+                className={`tap rounded-full px-3 py-1 text-xs font-medium border transition ${!catFilter ? 'bg-brand-700 text-white border-brand-700' : 'bg-white text-slate-700 border-slate-200 hover:border-brand-700 hover:text-brand-700'}`}>
+                All
+              </button>
+              {catsWithContent.map((c) => (
+                <button type="button" key={c.id} onClick={() => setCatFilter(c.id === catFilter ? '' : c.id)}
+                  className={`tap rounded-full px-3 py-1 text-xs font-medium border transition ${catFilter === c.id ? 'bg-brand-700 text-white border-brand-700' : 'bg-white text-slate-700 border-slate-200 hover:border-brand-700 hover:text-brand-700'}`}>
+                  {c.name}
+                </button>
+              ))}
+            </div>
+          )}
           {genNote && <div className="text-xs rounded-lg bg-brand-50 border border-brand-200 text-brand-800 px-3 py-2">{genNote}</div>}
 
           {flows.isLoading ? (
@@ -200,7 +224,7 @@ export default function DiagnosticFlowsPanel() {
 
               {/* Issues — the user vocabulary, each with its ordered flow queue */}
               <IssuesBoard
-                issues={(issues.data ?? []) as any[]}
+                issues={issueList}
                 links={(links.data ?? []) as IssueFlowLink[]}
                 flows={list}
                 cats={(cats.data ?? []) as { id: string; name: string }[]}
@@ -715,11 +739,12 @@ function EscalationContactsCard() {
     queryKey: ['escalation-contacts'],
     queryFn: async () => (await supabase
       .from('escalation_contacts')
-      .select('*, plants(name), sensor_makes(name)')
+      .select('*, plants(name), sensor_makes(name), sensor_models(model_no, name)')
       .order('sort_order')).data ?? [],
   });
   const plants = useQuery({ queryKey: ['plant-options'], queryFn: async () => (await supabase.from('plants').select('id,name').order('name')).data ?? [] });
   const makes = useQuery({ queryKey: ['makes'], queryFn: async () => (await supabase.from('sensor_makes').select('id,name').order('name')).data ?? [] });
+  const models = useQuery({ queryKey: ['contact-model-options'], queryFn: async () => (await supabase.from('sensor_models').select('id, model_no, name, sensor_makes(name)').eq('is_general', false).order('model_no')).data ?? [] });
 
   const refresh = () => qc.invalidateQueries({ queryKey: ['escalation-contacts'] });
   async function patch(id: string, fields: Partial<EscalationContact>) {
@@ -749,6 +774,7 @@ function EscalationContactsCard() {
         {[...groups.entries()].map(([skill, rows]) => (
           <SkillGroup key={skill} skill={skill} rows={rows}
             plants={(plants.data ?? []) as any[]} makes={(makes.data ?? []) as any[]}
+            models={(models.data ?? []) as any[]}
             onPatch={patch} onRemove={remove} onAdded={refresh} />
         ))}
         {!contacts.isLoading && list.length === 0 && (
@@ -758,6 +784,7 @@ function EscalationContactsCard() {
           skills={[]}
           plants={(plants.data ?? []) as any[]}
           makes={(makes.data ?? []) as any[]}
+          models={(models.data ?? []) as any[]}
           onAdded={refresh}
         />
       </div>
@@ -767,8 +794,9 @@ function EscalationContactsCard() {
 
 // One collapsed row per skill: name + whether anyone is reachable. Expanding
 // reveals the entries and a scoped add form for THAT skill.
-function SkillGroup({ skill, rows, plants, makes, onPatch, onRemove, onAdded }: {
+function SkillGroup({ skill, rows, plants, makes, models, onPatch, onRemove, onAdded }: {
   skill: string; rows: any[]; plants: { id: string; name: string }[]; makes: { id: string; name: string }[];
+  models: any[];
   onPatch: (id: string, f: Partial<EscalationContact>) => Promise<void>;
   onRemove: (id: string) => Promise<void>;
   onAdded: () => void;
@@ -793,8 +821,8 @@ function SkillGroup({ skill, rows, plants, makes, onPatch, onRemove, onAdded }: 
           {/* The everywhere-default lives in the row above; this form only adds
               extra scoped contacts once a default already exists. */}
           <AddContactRow skills={[{ key: skill, label: rows[0]?.label ?? skill }]}
-            plants={plants} makes={makes} onAdded={onAdded} fixedSkill={skill}
-            hasDefault={rows.some((c) => !c.plant_id && !c.make_id)} />
+            plants={plants} makes={makes} models={models} onAdded={onAdded} fixedSkill={skill}
+            hasDefault={rows.some((c) => !c.plant_id && !c.make_id && !c.sensor_model_id)} />
         </div>
       )}
     </div>
@@ -807,12 +835,14 @@ function ContactRow({ c, onPatch, onRemove }: { c: any; onPatch: (id: string, f:
   const dirty = name !== (c.person_name ?? '') || contact !== (c.contact ?? '');
   const plantName = (Array.isArray(c.plants) ? c.plants[0] : c.plants)?.name;
   const makeName = (Array.isArray(c.sensor_makes) ? c.sensor_makes[0] : c.sensor_makes)?.name;
+  const modelRow = Array.isArray(c.sensor_models) ? c.sensor_models[0] : c.sensor_models;
+  const modelLabel = c.sensor_model_id ? (modelRow?.model_no || modelRow?.name) : null;
   return (
     <div className="flex items-center gap-2 flex-wrap">
       <span className={`shrink-0 text-[10px] rounded-full px-2 py-0.5 font-medium ${
-        makeName ? 'bg-violet-100 text-violet-700' : plantName ? 'bg-sky-100 text-sky-700' : 'bg-slate-100 text-slate-500'
+        modelLabel ? 'bg-indigo-100 text-indigo-700' : makeName ? 'bg-violet-100 text-violet-700' : plantName ? 'bg-sky-100 text-sky-700' : 'bg-slate-100 text-slate-500'
       }`}>
-        {makeName ?? plantName ?? 'Default'}
+        {modelLabel ? `${makeName ? makeName + ' ' : ''}${modelLabel}` : makeName ?? plantName ?? 'Default'}
       </span>
       <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Person" className="input text-xs w-32" />
       <input value={contact} onChange={(e) => setContact(e.target.value)} placeholder="Phone / how to reach" className="input text-xs w-44" />
@@ -833,10 +863,11 @@ function ContactRow({ c, onPatch, onRemove }: { c: any; onPatch: (id: string, f:
 // true the skill already has an everywhere-default (the row above), so this
 // form drops "Everywhere (default)" and requires a plant/vendor scope — you
 // can't create a duplicate default from here.
-function AddContactRow({ skills, plants, makes, onAdded, fixedSkill, hasDefault }: {
+function AddContactRow({ skills, plants, makes, models, onAdded, fixedSkill, hasDefault }: {
   skills: { key: string; label: string }[];
   plants: { id: string; name: string }[];
   makes: { id: string; name: string }[];
+  models: any[];
   onAdded: () => void;
   fixedSkill?: string;
   hasDefault?: boolean;
@@ -861,6 +892,7 @@ function AddContactRow({ skills, plants, makes, onAdded, fixedSkill, hasDefault 
       contact: contact.trim() || null,
       plant_id: scope.startsWith('plant:') ? scope.slice(6) : null,
       make_id: scope.startsWith('make:') ? scope.slice(5) : null,
+      sensor_model_id: scope.startsWith('model:') ? scope.slice(6) : null,
       sort_order: 100,
     });
     setBusy(false);
@@ -892,6 +924,12 @@ function AddContactRow({ skills, plants, makes, onAdded, fixedSkill, hasDefault 
             </optgroup>}
             {makes.length > 0 && <optgroup label="Only for make (vendor)">
               {makes.map((m) => <option key={m.id} value={`make:${m.id}`}>{m.name}</option>)}
+            </optgroup>}
+            {models.length > 0 && <optgroup label="Only for one model (vendor support line)">
+              {models.map((m: any) => {
+                const mk = Array.isArray(m.sensor_makes) ? m.sensor_makes[0] : m.sensor_makes;
+                return <option key={m.id} value={`model:${m.id}`}>{`${mk?.name ?? ''} ${m.model_no || m.name}`.trim()}</option>;
+              })}
             </optgroup>}
           </select>
           <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Person" className="input text-xs w-32" />

@@ -3,7 +3,8 @@ import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import i18n from '../i18n';
-import { X, Send, ArrowRight, ExternalLink, ChevronDown, Sparkles, Bot, Trash2, Wrench, Cpu, Globe, Compass, CheckCircle2, PhoneCall, GitBranch, Phone, Mic, Undo2 } from 'lucide-react';
+import { X, Send, ArrowRight, ExternalLink, ChevronDown, Sparkles, Bot, Trash2, Wrench, Cpu, Globe, Compass, CheckCircle2, PhoneCall, GitBranch, Phone, Mic, Undo2, Volume2, VolumeX } from 'lucide-react';
+import { speak, stopSpeaking, ttsSupported } from '../lib/tts';
 import { supabase } from '../lib/supabase';
 import { runSearch } from '../lib/search';
 import { logUnanswered, logEvent } from '../lib/telemetry';
@@ -12,7 +13,7 @@ import { renderMarkdown, normalizeAnswerSteps } from '../lib/markdown';
 import { conversationalReply, isVagueQuery } from '../lib/chatIntent';
 import { matchRule, type RouteMatch } from '../lib/routing';
 import { matchFlow, getNode, failTarget, fetchContacts, contactsForSkill, type DiagnosticFlow, type FlowNode, type EscalationContact } from '../lib/flows';
-import { fetchIssues, matchIssueClient, flowQueueForIssue, type Issue } from '../lib/issues';
+import { fetchIssues, matchIssueClient, issueQueueInfo, filterQueueForModel, type Issue, type IssueQueueInfo } from '../lib/issues';
 import { correctSpelling } from '../lib/lexicon';
 import { useAuth } from '../lib/auth';
 import AnswerFeedback from './AnswerFeedback';
@@ -57,6 +58,10 @@ type Turn =
       // so ask what it's doing instead of dumping a generic answer. Options are
       // tappable symptom chips sourced from approved flows/rules in scope.
       probe?: { text: string; options: string[] };
+      // Elicitation before a flow queue starts: confirm the matched issue with
+      // the user, or ask which make/model when the fix genuinely depends on it
+      // (model-specific flows exist). The bot never jumps straight into a flow.
+      elicit?: { text: string; chips: { label: string; act: 'start' | 'reject' | 'model' | 'unsure'; modelId?: string }[] };
       // Diagnostic flow runner: this turn shows one node of an approved flow.
       flowNode?: FlowNode;
       flowTitle?: string; // set on the first node so the user sees which flow started
@@ -298,6 +303,14 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
   // the ordered flows; queueIndex is the one currently running. When a flow
   // ends unresolved and more remain, the chat offers "Start next fix".
   const queueRef = useRef<{ issueLabel: string; flows: DiagnosticFlow[]; index: number } | null>(null);
+  // Issue matched but not yet started — waiting on the user to confirm it (or
+  // to tell us the make/model when the fix depends on it).
+  const pendingRef = useRef<{ issue: Issue; info: IssueQueueInfo; origQuery: string } | null>(null);
+  // Voice replies: which turn is being read aloud, whether the current message
+  // came in by voice (→ speak the answer back without an extra tap).
+  const [speakingIdx, setSpeakingIdx] = useState<number | null>(null);
+  const voiceAskedRef = useRef(false);
+  const autoSpeakRef = useRef(false);
   const [queueTick, setQueueTick] = useState(0); // re-render trigger for queue chips
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -323,6 +336,7 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
       let txt = '';
       for (let i = 0; i < e.results.length; i++) txt += e.results[i][0].transcript;
       setInput(txt);
+      voiceAskedRef.current = true; // spoke the question → speak the answer back
     };
     r.onend = () => setListening(false);
     r.onerror = () => setListening(false);
@@ -330,7 +344,27 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
     setListening(true);
     try { r.start(); } catch { setListening(false); }
   }
-  useEffect(() => () => { try { recogRef.current?.stop(); } catch { /* noop */ } }, []);
+  useEffect(() => () => { try { recogRef.current?.stop(); } catch { /* noop */ } stopSpeaking(); }, []);
+
+  // The text a bot turn would read aloud — mirrors what's rendered.
+  function speakableTurnText(turn: Extract<Turn, { role: 'bot' }>): string | null {
+    const s = turn.note || turn.probe?.text || turn.elicit?.text || turn.flowNode?.text || turn.answer || turn.webAnswer?.answer || '';
+    return s ? s : null;
+  }
+
+  // Auto-speak: when the question came in by voice, read the finished answer
+  // aloud without an extra tap (hands-free loop for field techs).
+  useEffect(() => {
+    if (!autoSpeakRef.current || !ttsSupported) return;
+    const i = turns.length - 1;
+    const turn = turns[i];
+    if (!turn || turn.role !== 'bot' || turn.loading) return;
+    const text = speakableTurnText(turn);
+    if (!text) return;
+    autoSpeakRef.current = false;
+    setSpeakingIdx(i);
+    speak(text, i18n.language, () => setSpeakingIdx(null));
+  }, [turns]); // eslint-disable-line react-hooks/exhaustive-deps
   const isBusy = turns.some((tn) => tn.role === 'bot' && tn.loading);
   // Index of the most recent user message — anchored to the top on a new
   // exchange so the answer's beginning is visible (rather than scrolling past
@@ -434,10 +468,14 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
 
     sendingRef.current = true;
     setInput('');
+    // Question asked by voice → answer comes back by voice too.
+    if (voiceAskedRef.current) { autoSpeakRef.current = true; voiceAskedRef.current = false; }
+    stopSpeaking();
     // Typing a fresh message abandons any in-progress diagnostic flow + queue.
     setFlowRun(null);
     flowRef.current = null;
     queueRef.current = null;
+    pendingRef.current = null;
     let activeScope = scope;
 
     // Echo the user's message + a loading placeholder IMMEDIATELY — before any
@@ -519,12 +557,19 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
 
       const issue: Issue | null = clientIssue ?? llmIssue;
       if (issue) {
-        const queue = await flowQueueForIssue(issue.id, { modelId: activeScope?.modelId ?? null });
-        if (queue.length > 0) {
-          queueRef.current = { issueLabel: issue.label, flows: queue, index: 0 };
-          setQueueTick((t) => t + 1);
-          await startFlow(queue[0], activeScope?.label);
-          return;
+        // Never jump straight into a flow. Confirm the issue first — and when
+        // the linked fixes are model-specific, elicit the make/model before
+        // starting (the wrong model's fix is worse than no fix). When every
+        // flow is model-agnostic, skip the model question entirely.
+        const info = await issueQueueInfo(issue.id);
+        if (info.flows.length > 0) {
+          pendingRef.current = { issue, info, origQuery: q };
+          const elicit = buildElicit(issue, info, activeScope);
+          if (elicit) {
+            setTurns((t) => fillLoadingTurn(t, { role: 'bot', query: q, loading: false, narrowedLabel: activeScope?.label, elicit }));
+            return;
+          }
+          pendingRef.current = null; // no runnable queue for this scope — fall through
         }
       }
 
@@ -573,6 +618,109 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
     }
   }
 
+  // ---------- Pre-flow elicitation ----------
+  // Compose the question asked BEFORE a matched issue's queue starts. Returns
+  // null when nothing is runnable for the current scope (e.g. scoped to model
+  // X but every linked flow is written for other models).
+  function buildElicit(
+    issue: Issue,
+    info: IssueQueueInfo,
+    sc: { modelId?: string | null; label?: string } | null,
+  ): NonNullable<Extract<Turn, { role: 'bot' }>['elicit']> | null {
+    // Already scoped to a model → just confirm the issue.
+    if (sc?.modelId) {
+      if (filterQueueForModel(info.flows, sc.modelId).length === 0) return null;
+      return {
+        text: t('chat.issueConfirmScoped', { issue: issue.label, label: sc.label }),
+        chips: [
+          { label: t('chat.startFix'), act: 'start' },
+          { label: t('chat.notThis'), act: 'reject' },
+        ],
+      };
+    }
+    // Every flow is model-agnostic → make/model is OPTIONAL, don't ask.
+    if (info.models.length === 0) {
+      return {
+        text: t('chat.issueConfirm', { issue: issue.label }),
+        chips: [
+          { label: t('chat.startFix'), act: 'start' },
+          { label: t('chat.notThis'), act: 'reject' },
+        ],
+      };
+    }
+    // Exactly one model covered → confirm it's theirs instead of asking open-ended.
+    if (info.models.length === 1 && !info.hasGeneral) {
+      return {
+        text: t('chat.issueForModel', { issue: issue.label, label: info.models[0].label }),
+        chips: [
+          { label: t('chat.yesStart'), act: 'model', modelId: info.models[0].id },
+          { label: t('chat.notThis'), act: 'reject' },
+        ],
+      };
+    }
+    // Fixes differ by model → the model is NECESSARY, ask before starting.
+    return {
+      text: t('chat.whichModel', { issue: issue.label }),
+      chips: [
+        ...info.models.map((m) => ({ label: m.label, act: 'model' as const, modelId: m.id })),
+        ...(info.hasGeneral
+          ? [{ label: t('chat.modelUnsure'), act: 'unsure' as const }]
+          : [{ label: t('chat.notThis'), act: 'reject' as const }]),
+      ],
+    };
+  }
+
+  async function handleElicit(chip: { label: string; act: 'start' | 'reject' | 'model' | 'unsure'; modelId?: string }) {
+    const p = pendingRef.current;
+    if (!p || sendingRef.current) return;
+    sendingRef.current = true;
+    try {
+      if (chip.act === 'reject') {
+        // Wrong guess — fall back to the symptom probe so they can tell us
+        // what it's actually doing, and log the miss for the admins.
+        pendingRef.current = null;
+        logUnanswered({ query: p.origQuery, source: 'chat', sensorModelId: scope?.modelId ?? null });
+        setTurns((t) => [...t, { role: 'user', text: chip.label }, { role: 'bot', query: p.origQuery, loading: true }]);
+        const options = await symptomOptions(scope);
+        setTurns((t) => fillLoadingTurn(t, { role: 'bot', query: p.origQuery, loading: false, narrowedLabel: scope?.label, probe: { text: probeText(scope?.label), options } }));
+        return;
+      }
+      let runScope = scope;
+      let queue: DiagnosticFlow[];
+      if (chip.act === 'model' && chip.modelId) {
+        // Their answer scopes the whole conversation, not just this queue.
+        const { data: m } = await supabase
+          .from('sensor_models')
+          .select('id, model_no, name, category_id, sensor_makes(name)')
+          .eq('id', chip.modelId).maybeSingle();
+        if (m) {
+          const mk = Array.isArray((m as any).sensor_makes) ? (m as any).sensor_makes[0] : (m as any).sensor_makes;
+          const { data: gm } = await supabase.from('sensor_models').select('id').eq('is_general', true).eq('category_id', (m as any).category_id).maybeSingle();
+          runScope = {
+            modelId: (m as any).id,
+            generalModelId: (gm as any)?.id ?? null,
+            categoryId: (m as any).category_id,
+            label: `${mk?.name ?? ''} ${(m as any).model_no || (m as any).name}`.trim(),
+          };
+          setScope(runScope);
+        }
+        queue = filterQueueForModel(p.info.flows, chip.modelId);
+      } else if (chip.act === 'unsure') {
+        queue = filterQueueForModel(p.info.flows, null); // general fixes only — never another model's
+      } else {
+        queue = filterQueueForModel(p.info.flows, runScope?.modelId ?? null);
+      }
+      pendingRef.current = null;
+      if (queue.length === 0) return;
+      queueRef.current = { issueLabel: p.issue.label, flows: queue, index: 0 };
+      setQueueTick((t) => t + 1);
+      setTurns((t) => [...t, { role: 'user', text: chip.label }, { role: 'bot', query: p.origQuery, loading: true }]);
+      await startFlow(queue[0], runScope?.label);
+    } finally {
+      sendingRef.current = false;
+    }
+  }
+
   // ---------- Diagnostic flow runner ----------
   // Present one node per bot turn; option chips (or Done / Didn't work) drive
   // the walk. Terminal nodes (resolve/escalate) end the run and show feedback.
@@ -582,14 +730,15 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
     let contacts: EscalationContact[] = [];
     if (node.kind === 'escalate' && node.skill) {
       try {
-        // The right person differs by plant and (for vendor support) by make —
-        // resolve against the scoped sensor's make; plant rows are all shown.
+        // The right person differs by plant and (for vendor support) by make
+        // and even model — resolve model → make → global; plant rows all show.
         let makeId: string | null = null;
-        if (scope?.modelId) {
-          const { data: m } = await supabase.from('sensor_models').select('make_id').eq('id', scope.modelId).maybeSingle();
+        const modelId = flow.sensor_model_id ?? scope?.modelId ?? null;
+        if (modelId) {
+          const { data: m } = await supabase.from('sensor_models').select('make_id').eq('id', modelId).maybeSingle();
           makeId = (m as any)?.make_id ?? null;
         }
-        contacts = contactsForSkill(await fetchContacts(), node.skill, { makeId });
+        contacts = contactsForSkill(await fetchContacts(), node.skill, { makeId, modelId });
       } catch { contacts = []; }
     }
     const q = queueRef.current;
@@ -862,6 +1011,18 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
                   </div>
                   <div className="text-[11px] text-slate-400">{t('chat.ownWords')}</div>
                 </div>
+              ) : turn.elicit ? (
+                <div className="rounded-2xl rounded-tl-md bg-white border border-slate-200 shadow-sm px-3.5 py-3 space-y-2.5">
+                  <div className="text-sm text-slate-700 leading-relaxed">{turn.elicit.text}</div>
+                  <div className="flex flex-col gap-1.5">
+                    {turn.elicit.chips.map((c, idx) => (
+                      <button key={idx} onClick={() => handleElicit(c)} disabled={i !== turns.length - 1}
+                        className={`${CHIP_CLS} disabled:opacity-50 disabled:pointer-events-none`}>
+                        {c.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               ) : turn.flowNode ? (
                 <FlowNodeCard
                   turn={turn}
@@ -925,11 +1086,25 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
                 </div>
               )}
 
+              {/* Listen — read this reply aloud (hands-free / low-literacy use). */}
+              {ttsSupported && !turn.loading && speakableTurnText(turn) && (
+                <button
+                  onClick={() => {
+                    if (speakingIdx === i) { stopSpeaking(); setSpeakingIdx(null); }
+                    else { setSpeakingIdx(i); speak(speakableTurnText(turn)!, i18n.language, () => setSpeakingIdx(null)); }
+                  }}
+                  className={`tap inline-flex items-center gap-1.5 text-[11px] font-medium transition ${speakingIdx === i ? 'text-brand-700' : 'text-slate-400 hover:text-brand-700'}`}
+                  aria-label={speakingIdx === i ? t('chat.stopListen') : t('chat.listen')}
+                >
+                  {speakingIdx === i ? <><VolumeX size={13} /> {t('chat.stopListen')}</> : <><Volume2 size={13} /> {t('chat.listen')}</>}
+                </button>
+              )}
+
               {/* Did this help? — feedback + continue + log-a-ticket (tracked).
                   Shown on every real attempt, including no-result (they may have
                   resolved it via the web / a ticket). Mid-flow nodes skip it —
                   feedback belongs at the end of a diagnostic run. */}
-              {!turn.loading && !turn.note && !turn.probe && (!turn.flowNode || turn.flowTerminal) && (
+              {!turn.loading && !turn.note && !turn.probe && !turn.elicit && (!turn.flowNode || turn.flowTerminal) && (
                 <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5">
                   <AnswerFeedback
                     key={`${turn.narrowedLabel ?? ''}|${turn.answer ? turn.answer.slice(0, 24) : (turn.hits?.[0]?.document_id ?? '')}`}
@@ -973,7 +1148,7 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
               <input
                 ref={inputRef}
                 value={input}
-                onChange={(e) => setInput(e.target.value)}
+                onChange={(e) => { setInput(e.target.value); voiceAskedRef.current = false; }}
                 placeholder={t('chat.placeholder')}
                 aria-label={t('chat.placeholder')}
                 className="w-full rounded-2xl border border-slate-300 bg-slate-50 focus:bg-white pl-4 pr-3 py-3 text-sm focus:border-brand-700 focus:ring-2 focus:ring-brand-700/20 outline-none transition"

@@ -81,12 +81,15 @@ export interface EscalationContact {
   contact: string | null;
   notes: string | null;
   active: boolean;
-  // Scope: both null = global default; plant_id = that plant's person;
-  // make_id = that manufacturer's support contact.
+  // Scope: all null = global default; plant_id = that plant's person;
+  // make_id = that manufacturer's support line; sensor_model_id = the support
+  // contact for one specific model (vendor numbers differ per model).
   plant_id: string | null;
   make_id: string | null;
+  sensor_model_id: string | null;
   plant_name?: string | null; // joined for display
   make_name?: string | null;
+  model_label?: string | null;
 }
 
 export const MAX_NODES = 24;
@@ -202,31 +205,37 @@ export async function matchFlow(
 export async function fetchContacts(): Promise<EscalationContact[]> {
   const { data } = await supabase
     .from('escalation_contacts')
-    .select('*, plants(name), sensor_makes(name)')
+    .select('*, plants(name), sensor_makes(name), sensor_models(model_no, name)')
     .eq('active', true)
     .order('sort_order');
-  return ((data ?? []) as any[]).map((c) => ({
-    ...c,
-    plant_name: (Array.isArray(c.plants) ? c.plants[0] : c.plants)?.name ?? null,
-    make_name: (Array.isArray(c.sensor_makes) ? c.sensor_makes[0] : c.sensor_makes)?.name ?? null,
-  })) as EscalationContact[];
+  return ((data ?? []) as any[]).map((c) => {
+    const sm = Array.isArray(c.sensor_models) ? c.sensor_models[0] : c.sensor_models;
+    return {
+      ...c,
+      plant_name: (Array.isArray(c.plants) ? c.plants[0] : c.plants)?.name ?? null,
+      make_name: (Array.isArray(c.sensor_makes) ? c.sensor_makes[0] : c.sensor_makes)?.name ?? null,
+      model_label: sm ? (sm.model_no || sm.name) : null,
+    };
+  }) as EscalationContact[];
 }
 
 // Resolve who to show for a skill, given what we know about the situation.
-// Order: the scoped sensor's MAKE contact first (vendor relevance), then the
-// GLOBAL default, then per-PLANT people (the technician spots their plant).
-// Make-contacts for OTHER makes are dropped; plant rows are always shown
-// because we don't know which plant the user is standing in.
+// Order: the exact MODEL's support contact first (vendor numbers differ per
+// model), then the MAKE's line, then the GLOBAL default, then per-PLANT
+// people (the technician spots their plant). Contacts scoped to OTHER
+// models/makes are dropped; plant rows are always shown because we don't
+// know which plant the user is standing in.
 export function contactsForSkill(
   contacts: EscalationContact[],
   skill: string,
-  opts?: { makeId?: string | null },
+  opts?: { makeId?: string | null; modelId?: string | null },
 ): EscalationContact[] {
   const pool = contacts.filter((c) => c.skill_key === skill && c.active !== false);
   const rank = (c: EscalationContact) => {
-    if (c.make_id) return c.make_id === opts?.makeId ? 0 : 99; // other makes: drop
-    if (!c.plant_id) return 1; // global default
-    return 2; // plant-specific
+    if (c.sensor_model_id) return c.sensor_model_id === opts?.modelId ? 0 : 99; // other models: drop
+    if (c.make_id) return c.make_id === opts?.makeId ? 1 : 99; // other makes: drop
+    if (!c.plant_id) return 2; // global default
+    return 3; // plant-specific
   };
   return pool
     .filter((c) => rank(c) < 99)

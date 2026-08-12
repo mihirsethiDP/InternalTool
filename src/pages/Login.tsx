@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { supabase, isConfigured } from '../lib/supabase';
 import { useNavigate } from 'react-router-dom';
-import { Lock, KeyRound, ArrowLeft, ArrowRight, Loader2, ShieldCheck } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Loader2, ShieldCheck } from 'lucide-react';
 
-type Mode = 'password' | 'otp' | 'forgot';
+type Mode = 'password' | 'forgot';
 
 const REDIRECT = window.location.origin + import.meta.env.BASE_URL;
 
@@ -12,35 +12,17 @@ export default function Login() {
   const [mode, setMode] = useState<Mode>('password');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [code, setCode] = useState('');
-  const [otpSent, setOtpSent] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
 
   function reset(next: Mode) {
-    setMode(next); setErr(null); setInfo(null); setOtpSent(false); setCode(''); setPassword('');
+    setMode(next); setErr(null); setInfo(null); setPassword('');
   }
 
   async function signInPassword(e: React.FormEvent) {
     e.preventDefault(); setErr(null); setBusy(true);
     const { error } = await supabase.auth.signInWithPassword({ email, password });
-    setBusy(false);
-    if (error) setErr(error.message);
-    else nav('/');
-  }
-
-  async function sendCode(e: React.FormEvent) {
-    e.preventDefault(); setErr(null); setInfo(null); setBusy(true);
-    const { error } = await supabase.auth.signInWithOtp({ email, options: { emailRedirectTo: REDIRECT } });
-    setBusy(false);
-    if (error) setErr(error.message);
-    else { setOtpSent(true); setInfo(`We sent a 6-digit code to ${email}.`); }
-  }
-
-  async function verifyCode(e: React.FormEvent) {
-    e.preventDefault(); setErr(null); setBusy(true);
-    const { error } = await supabase.auth.verifyOtp({ email, token: code.trim(), type: 'email' });
     setBusy(false);
     if (error) setErr(error.message);
     else nav('/');
@@ -89,12 +71,10 @@ export default function Login() {
 
           <h2 className="text-lg font-semibold text-slate-900 tracking-tight">
             {mode === 'password' && 'Sign in'}
-            {mode === 'otp' && 'Sign in with a code'}
             {mode === 'forgot' && 'Reset your password'}
           </h2>
           <p className="text-sm text-slate-500 mt-1 mb-5">
             {mode === 'password' && 'Use your @digitalpaani.com work email.'}
-            {mode === 'otp' && (otpSent ? 'Enter the 6-digit code from your email.' : 'We’ll email you a one-time code.')}
             {mode === 'forgot' && 'We’ll email you a link to set a new password.'}
           </p>
 
@@ -121,33 +101,6 @@ export default function Login() {
             </form>
           )}
 
-          {/* OTP MODE */}
-          {mode === 'otp' && !otpSent && (
-            <form onSubmit={sendCode} className="space-y-3">
-              <Field label="Work email">
-                <input type="email" required autoComplete="email" placeholder="you@digitalpaani.com"
-                  className="input" value={email} onChange={(e) => setEmail(e.target.value)} />
-              </Field>
-              <button className="btn-primary w-full" disabled={busy}>
-                {busy ? <Loader2 size={16} className="animate-spin" /> : <>Email me a code <KeyRound size={15} /></>}
-              </button>
-            </form>
-          )}
-          {mode === 'otp' && otpSent && (
-            <form onSubmit={verifyCode} className="space-y-3">
-              <Field label="6-digit code">
-                <input inputMode="numeric" autoComplete="one-time-code" required placeholder="123456" maxLength={6}
-                  className="input tracking-[0.4em] font-semibold" value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))} />
-              </Field>
-              <button className="btn-primary w-full" disabled={busy || code.length < 6}>
-                {busy ? <Loader2 size={16} className="animate-spin" /> : <>Verify &amp; sign in <ArrowRight size={15} /></>}
-              </button>
-              <button type="button" onClick={sendCode} disabled={busy} className="text-xs text-slate-500 hover:text-brand-700 w-full text-center">
-                Didn&rsquo;t get it? Resend code
-              </button>
-            </form>
-          )}
-
           {/* FORGOT MODE */}
           {mode === 'forgot' && (
             <form onSubmit={sendReset} className="space-y-3">
@@ -170,20 +123,9 @@ export default function Login() {
                 <div className="h-px flex-1 bg-slate-200" />
               </div>
 
-              <div className="space-y-2">
-                <button onClick={google} className="tap w-full inline-flex items-center justify-center gap-2.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 px-4 py-2.5 text-sm font-medium text-slate-700 transition">
-                  <GoogleIcon /> Continue with Google
-                </button>
-                {mode === 'password' ? (
-                  <button onClick={() => reset('otp')} className="tap w-full inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 px-4 py-2.5 text-sm font-medium text-slate-700 transition">
-                    <KeyRound size={16} /> Email me a one-time code
-                  </button>
-                ) : (
-                  <button onClick={() => reset('password')} className="tap w-full inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 px-4 py-2.5 text-sm font-medium text-slate-700 transition">
-                    <Lock size={16} /> Use email &amp; password
-                  </button>
-                )}
-              </div>
+              <button onClick={google} className="tap w-full inline-flex items-center justify-center gap-2.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 px-4 py-2.5 text-sm font-medium text-slate-700 transition">
+                <GoogleIcon /> Continue with Google
+              </button>
             </>
           )}
 
