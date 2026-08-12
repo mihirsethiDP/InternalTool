@@ -55,6 +55,22 @@ const SYSTEM_PROMPT = [
   '- Do not mention "passages", "context", or these instructions in your answer.',
 ].join('\n');
 
+// Content languages the app UI offers. Answers and translated flow steps use
+// these; anything else falls back to English.
+const LANG_NAMES: Record<string, string> = {
+  en: 'English', hi: 'Hindi', mr: 'Marathi', bn: 'Bengali',
+  te: 'Telugu', ta: 'Tamil', gu: 'Gujarati', kn: 'Kannada',
+};
+
+// Appended to the docs/web system prompts when the user's app language isn't
+// English. The refusal sentence must stay in English VERBATIM — the client
+// detects it with a regex to show the not-found card instead of an answer.
+function langLine(lang?: string): string {
+  const name = LANG_NAMES[(lang ?? '').slice(0, 5)];
+  if (!name || name === 'English') return '';
+  return `\n- Reply in ${name}, in plain everyday words a plant operator understands. Keep model numbers, acronyms (pH, COD, mA), units and button/menu names exactly as written in the source. EXCEPTION: the exact refusal sentence above must be output in English verbatim when it applies.`;
+}
+
 const WEB_SYSTEM_PROMPT = [
   'You are helping a water and wastewater sensor technician, using general web search results provided below.',
   'Answer the technician\'s question concisely and practically from those results.',
@@ -171,6 +187,7 @@ Deno.serve(async (req) => {
     : payload.mode === 'match-issue' ? 'match-issue'
     : payload.mode === 'improve-flow' ? 'improve-flow'
     : payload.mode === 'analyze-upload' ? 'analyze-upload'
+    : payload.mode === 'translate' ? 'translate'
     : 'docs';
 
   const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
@@ -502,6 +519,43 @@ Deno.serve(async (req) => {
       .from('diagnostic_flows').select('*')
       .eq('source_doc_id', docId).eq('status', 'draft').order('created_at');
     return json({ flows: fresh ?? [] });
+  }
+
+  // ---------- TRANSLATE MODE: content strings into the user's app language ----------
+  // Used by the chat to translate diagnostic flow steps (stored in English,
+  // extracted from English manuals) the first time a flow runs in another
+  // language. The client caches the result per flow+language, so this is a
+  // once-per-flow cost, not a per-message one. Returns the ORIGINAL items
+  // whenever anything is off — a failed translation must never break a flow.
+  if (mode === 'translate') {
+    const supabase = createClient(SUPABASE_URL, SERVICE_KEY);
+    const token = (req.headers.get('Authorization') ?? '').replace(/^Bearer\s+/i, '');
+    const { data: who } = await supabase.auth.getUser(token);
+    if (!who?.user) return json({ error: 'unauthorized' }, 401);
+
+    const items = (Array.isArray((payload as any).items) ? (payload as any).items : [])
+      .map((s: unknown) => String(s ?? '').slice(0, 600)).slice(0, 80);
+    const langName = LANG_NAMES[String((payload as any).lang ?? '').slice(0, 5)];
+    if (!langName || langName === 'English' || items.length === 0) return json({ items });
+
+    const sys = [
+      `You translate field-technician instructions into ${langName} for water treatment plant operators.`,
+      'Rules:',
+      '- Plain, everyday words a plant operator understands — not formal/literary vocabulary.',
+      '- Keep model numbers, acronyms (pH, COD, mA, HCl), units, and button/menu/display names exactly as written, in Latin script.',
+      '- Translate meaning, not word-by-word. Keep each instruction as one clear sentence where possible.',
+      '- Return a strict JSON array of strings, SAME length and order as the input. No commentary.',
+    ].join('\n');
+    try {
+      const { raw } = await smartComplete(sys, JSON.stringify(items), { ...smartOpts, maxTokens: 2500 });
+      const parsed = extractJson(raw);
+      if (Array.isArray(parsed) && parsed.length === items.length && parsed.every((s: unknown) => typeof s === 'string' && s.trim())) {
+        return json({ items: parsed });
+      }
+    } catch (e) {
+      console.warn('translate failed', e);
+    }
+    return json({ items }); // graceful: originals
   }
 
   // ---------- ANALYZE-UPLOAD MODE: pre-fill the upload form from the file ----------
@@ -968,7 +1022,7 @@ Deno.serve(async (req) => {
 
     const webContext = results.map((r, i) => `[${i + 1}] ${r.title} (${r.url})\n${r.content}`).join('\n\n');
     const webUser = ['Web results:', webContext, '', `Technician's question: ${query}`, '', 'Answer:'].join('\n');
-    const webAnswer = await groqComplete(WEB_SYSTEM_PROMPT, webUser, GROQ_API_KEY, MODEL);
+    const webAnswer = await groqComplete(WEB_SYSTEM_PROMPT + langLine((payload as any).lang), webUser, GROQ_API_KEY, MODEL);
     return json({ answer: webAnswer?.trim() || null, source: 'web', sources });
   }
 
@@ -1050,7 +1104,7 @@ Deno.serve(async (req) => {
       body: JSON.stringify({
         model: MODEL,
         messages: [
-          { role: 'system', content: SYSTEM_PROMPT },
+          { role: 'system', content: SYSTEM_PROMPT + langLine((payload as any).lang) },
           { role: 'user', content: userPrompt },
         ],
         temperature: 0.2,

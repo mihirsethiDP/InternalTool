@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import i18n from '../i18n';
 import { X, Send, ArrowRight, ExternalLink, ChevronDown, Sparkles, Bot, Trash2, Wrench, Cpu, Globe, Compass, CheckCircle2, PhoneCall, GitBranch, Phone, Mic, Undo2, Volume2, VolumeX } from 'lucide-react';
 import { speak, stopSpeaking, ttsSupported } from '../lib/tts';
+import { translateFlowDefinition } from '../lib/translateFlow';
 import { supabase } from '../lib/supabase';
 import { runSearch } from '../lib/search';
 import { logUnanswered, logEvent } from '../lib/telemetry';
@@ -174,7 +175,7 @@ async function askAssistant(
   };
   try {
     const { data, error } = await supabase.functions.invoke('chat-answer', {
-      body: { query, sensor_model_id: scopeArg.sensorModelId ?? null, category_id: scopeArg.categoryId ?? null },
+      body: { query, sensor_model_id: scopeArg.sensorModelId ?? null, category_id: scopeArg.categoryId ?? null, lang: i18n.language },
     });
     if (!error && data && !(data as any).error) {
       // The Edge Function responded — trust it; do NOT fall back to raw
@@ -403,7 +404,7 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
     setTurns((t) => t.map((turn, i) => (i === turnIndex && turn.role === 'bot') ? { ...turn, webLoading: true } : turn));
     let result: { answer: string; sources: { title: string; url: string }[] } | null = null;
     try {
-      const { data, error } = await supabase.functions.invoke('chat-answer', { body: { query, mode: 'web' } });
+      const { data, error } = await supabase.functions.invoke('chat-answer', { body: { query, mode: 'web', lang: i18n.language } });
       const d = data as { answer?: string | null; sources?: { title: string; url: string }[] } | null;
       if (!error && d && d.answer && d.answer.trim()) {
         result = { answer: d.answer.trim(), sources: (d.sources ?? []).filter((s) => s?.url) };
@@ -755,7 +756,11 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
     };
   }
 
-  async function startFlow(flow: DiagnosticFlow, scopeLabel?: string) {
+  async function startFlow(rawFlow: DiagnosticFlow, scopeLabel?: string) {
+    // Steps are stored in English; translate the whole flow once (cached on
+    // device) so a Hindi/Marathi/... user reads AND hears their language.
+    const definition = await translateFlowDefinition(rawFlow, i18n.language);
+    const flow: DiagnosticFlow = definition === rawFlow.definition ? rawFlow : { ...rawFlow, definition };
     const start = getNode(flow.definition, flow.definition.start);
     if (!start) return; // validator should prevent this; RAG path already skipped, show not-found
     flowRef.current = flow;
