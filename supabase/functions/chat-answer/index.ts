@@ -141,7 +141,9 @@ async function anthropicComplete(system: string, user: string, key: string, mode
 function extractJson(raw: string | null): any {
   if (!raw) return {};
   try { return JSON.parse(raw); } catch { /* try harder */ }
-  const m = raw.match(/\{[\s\S]*\}/);
+  // Models often wrap JSON in fences or preamble. Objects first, then bare
+  // arrays (the translate mode returns a top-level array).
+  const m = raw.match(/\{[\s\S]*\}/) ?? raw.match(/\[[\s\S]*\]/);
   if (m) { try { return JSON.parse(m[0]); } catch { /* give up */ } }
   return {};
 }
@@ -544,14 +546,16 @@ Deno.serve(async (req) => {
       '- Plain, everyday words a plant operator understands — not formal/literary vocabulary.',
       '- Keep model numbers, acronyms (pH, COD, mA, HCl), units, and button/menu/display names exactly as written, in Latin script.',
       '- Translate meaning, not word-by-word. Keep each instruction as one clear sentence where possible.',
-      '- Return a strict JSON array of strings, SAME length and order as the input. No commentary.',
+      '- Return strict JSON, nothing else: {"items": ["...", ...]} with the SAME length and order as the input.',
     ].join('\n');
     try {
       const { raw } = await smartComplete(sys, JSON.stringify(items), { ...smartOpts, maxTokens: 2500 });
       const parsed = extractJson(raw);
-      if (Array.isArray(parsed) && parsed.length === items.length && parsed.every((s: unknown) => typeof s === 'string' && s.trim())) {
-        return json({ items: parsed });
+      const arr = Array.isArray(parsed) ? parsed : parsed?.items;
+      if (Array.isArray(arr) && arr.length === items.length && arr.every((s: unknown) => typeof s === 'string' && (s as string).trim())) {
+        return json({ items: arr });
       }
+      console.warn('translate: unusable model output', (raw ?? '').slice(0, 200));
     } catch (e) {
       console.warn('translate failed', e);
     }
