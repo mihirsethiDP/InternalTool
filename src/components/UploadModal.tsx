@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, ReactNode } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
-import { extractPdfText, chunkPage } from '../lib/pdf';
+import { extractPdfText, chunkPage, sanitizeText } from '../lib/pdf';
 import { analyzeUpload, AUTOFILL_CONFIDENCE, type UploadAnalysis } from '../lib/analyzeUpload';
 import { classifyDoc, MISMATCH_CONFIDENCE } from '../lib/classify';
 import AddSensorModal from './AddSensorModal';
@@ -265,7 +265,7 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
       vendor_url: vendorUrl || null,
       size_bytes: file.size,
       page_count: pageCount,
-      extracted_text: extractedText || null,
+      extracted_text: sanitizeText(extractedText) || null,
       target_section: null,
       // Everything the AI saw in this document — the approve screen uses it to
       // pre-select the split when the content spans several activities.

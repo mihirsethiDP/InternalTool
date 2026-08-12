@@ -7,7 +7,7 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../lib/auth';
 import PageHeader from '../components/PageHeader';
 import { useUpload } from '../components/UploadModal';
-import { extractPdfText } from '../lib/pdf';
+import { extractPdfText, sanitizeText } from '../lib/pdf';
 import { fetchMyScore, POINTS } from '../lib/contributions';
 import { SECTION_LABEL } from '../lib/consolidated';
 import type { SubmissionStatus, SubmissionSection } from '../lib/types';
@@ -249,7 +249,7 @@ function ReviseModal({ submission, onClose, onDone }: { submission: any; onClose
           try {
             const pages = await extractPdfText(file);
             update.page_count = pages.length;
-            update.extracted_text = pages.map((p) => `[Page ${p.page}]\n${p.text}`).join('\n\n');
+            update.extracted_text = sanitizeText(pages.map((p) => `[Page ${p.page}]\n${p.text}`).join('\n\n'));
           } catch { /* keep prior extracted_text */ }
         }
       }

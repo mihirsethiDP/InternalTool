@@ -4,12 +4,18 @@ import * as pdfjsLib from 'pdfjs-dist';
 // @ts-ignore
 import workerSrc from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 
+import { sanitizeText } from './text';
+
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerSrc;
+
+// Re-exported so existing callers can keep importing it from here.
+export { sanitizeText };
 
 export interface ExtractedPage {
   page: number;
   text: string;
 }
+
 
 export async function extractPdfText(file: File): Promise<ExtractedPage[]> {
   const buf = await file.arrayBuffer();
@@ -25,7 +31,7 @@ export async function extractPdfText(file: File): Promise<ExtractedPage[]> {
 }
 
 function normalize(t: string) {
-  return t.replace(/\s+/g, ' ').trim();
+  return sanitizeText(t).replace(/\s+/g, ' ').trim();
 }
 
 // Chunk a page into ~1000 char chunks at sentence boundaries when possible.
