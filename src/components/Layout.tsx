@@ -45,7 +45,10 @@ function Inner() {
 
   return (
     <div className="min-h-full flex flex-col bg-slate-50">
-      <header className="bg-brand-700 text-white">
+      {/* Sticky: the brand bar + nav stay visible while scrolling, so content
+          scrolls INTO it instead of being sliced by the raw viewport edge
+          (the viewer sidebar's lg:top-16 always assumed this). */}
+      <header className="bg-brand-700 text-white sticky top-0 z-40 shadow-sm">
         <div className="max-w-7xl mx-auto px-4 sm:px-5 h-16 flex items-center gap-3 md:gap-6">
           <NavLink to="/" className="flex items-center shrink-0" aria-label="DigitalPaani — home">
             <img
