@@ -13,7 +13,9 @@
 //
 // Deploy (Supabase dashboard → Edge Functions) and set secrets:
 //   GROQ_API_KEY      = <your gsk_… key from console.groq.com/keys>
-//   GROQ_MODEL        = llama-3.3-70b-versatile   (optional; this is the default)
+//   GROQ_MODEL        = openai/gpt-oss-120b   (optional; this is the default.
+//                       Groq RETIRES model ids — if answers start failing,
+//                       check console.groq.com/docs/models and set this.)
 //   ANTHROPIC_API_KEY = <your sk-ant-… key>  (optional — when set, Claude runs
 //                       the reasoning-heavy modes: generate-flow, split-sections,
 //                       suggest-issues, match-issue; Groq is the automatic fallback)
@@ -195,15 +197,34 @@ Deno.serve(async (req) => {
   const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
   const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
   const GROQ_API_KEY = Deno.env.get('GROQ_API_KEY');
-  const MODEL = Deno.env.get('GROQ_MODEL') ?? 'llama-3.3-70b-versatile';
+  // Groq retires model ids on a schedule; llama-3.3-70b-versatile was
+  // decommissioned and every Groq-only mode started returning 404 in
+  // production. Keep this current, and note that fastComplete() below now
+  // falls back to Claude so a retirement degrades speed, not availability.
+  const MODEL = Deno.env.get('GROQ_MODEL') ?? 'openai/gpt-oss-120b';
   // Optional: Claude for the reasoning-heavy modes (generation, splitting,
-  // issue mapping). When unset, everything runs on Groq as before.
+  // issue mapping) and as the fallback for the fast ones.
   const ANTHROPIC_API_KEY = Deno.env.get('ANTHROPIC_API_KEY') ?? '';
   const ANTHROPIC_MODEL = Deno.env.get('ANTHROPIC_MODEL') ?? 'claude-sonnet-4-5';
   const smartOpts = { anthropicKey: ANTHROPIC_API_KEY, anthropicModel: ANTHROPIC_MODEL, groqKey: GROQ_API_KEY ?? '', groqModel: MODEL };
 
   if (!SUPABASE_URL || !SERVICE_KEY) return json({ error: 'server not configured (supabase env)' }, 500);
-  if (!GROQ_API_KEY) return json({ error: 'server not configured (GROQ_API_KEY missing)' }, 500);
+  if (!GROQ_API_KEY && !ANTHROPIC_API_KEY) return json({ error: 'server not configured (no model provider key)' }, 500);
+
+  // Latency-sensitive completion for the high-volume modes (docs answers, web
+  // fallback, routing): Groq first because it's fast and cheap, Claude as the
+  // automatic fallback. Previously these three called Groq directly, so one
+  // retired model id took the chatbot's main answer path down while the
+  // smartComplete modes kept working — this closes that gap.
+  const fastComplete = async (system: string, user: string, jsonMode = false, maxTokens = 900): Promise<string | null> => {
+    if (GROQ_API_KEY) {
+      const raw = await groqComplete(system, user, GROQ_API_KEY, MODEL, jsonMode, maxTokens);
+      if (raw) return raw;
+      console.warn(`groq failed (model ${MODEL}) — falling back to anthropic`);
+    }
+    if (ANTHROPIC_API_KEY) return await anthropicComplete(system, user, ANTHROPIC_API_KEY, ANTHROPIC_MODEL, maxTokens);
+    return null;
+  };
 
   // ---------- CLASSIFY MODE: which catalog sensor does this document describe? ----------
   // Used at upload/review to catch a doc filed under the wrong sensor/category.
@@ -244,9 +265,10 @@ Deno.serve(async (req) => {
       'Return strict JSON: {"index": <catalog number that best matches the document, or 0 if none is a good match>, "confidence": <number 0 to 1>, "reason": "<one short sentence on the deciding evidence>"}',
     ].join('\n');
 
-    const raw = await groqComplete(sys, user, GROQ_API_KEY, MODEL, true);
-    let parsed: any = {};
-    try { parsed = JSON.parse(raw ?? '{}'); } catch { parsed = {}; }
+    const raw = await fastComplete(sys, user, true);
+    // extractJson (not raw JSON.parse) because the Claude fallback has no
+    // response_format and may wrap the object in prose or fences.
+    const parsed: any = extractJson(raw);
     const idx = Number(parsed.index) || 0;
     const chosen = list.find((x) => x.idx === idx) ?? null;
     return json({
@@ -298,9 +320,10 @@ Deno.serve(async (req) => {
       'Return strict JSON: {"rules":[{"problem":"<short symptom as a technician would phrase it>","aliases":["<alternate phrasing>"],"sections":["<section key from the allowed list>"],"clarifying_question":"<a question to disambiguate, or empty string>"}]}. Provide 5 to 10 rules. Every section must be from the allowed keys.',
     ].join('\n');
 
-    const raw = await groqComplete(sys, user, GROQ_API_KEY, MODEL, true);
-    let parsed: any = {};
-    try { parsed = JSON.parse(raw ?? '{}'); } catch { parsed = {}; }
+    const raw = await fastComplete(sys, user, true);
+    // extractJson (not raw JSON.parse) because the Claude fallback has no
+    // response_format and may wrap the object in prose or fences.
+    const parsed: any = extractJson(raw);
     let rules = (Array.isArray(parsed.rules) ? parsed.rules : []).map((r: any) => ({
       problem: String(r.problem ?? '').slice(0, 200).trim(),
       aliases: Array.isArray(r.aliases) ? r.aliases.map((a: any) => String(a).slice(0, 200).trim()).filter(Boolean).slice(0, 5) : [],
@@ -970,9 +993,10 @@ Deno.serve(async (req) => {
       ' "make": "<manufacturer name if the message mentions one, else empty string>",',
       ' "model": "<model number/name if the message mentions one, else empty string>"}',
     ].join('\n');
-    const raw = await groqComplete(sys, user, GROQ_API_KEY, MODEL, true);
-    let parsed: any = {};
-    try { parsed = JSON.parse(raw ?? '{}'); } catch { parsed = {}; }
+    const raw = await fastComplete(sys, user, true);
+    // extractJson (not raw JSON.parse) because the Claude fallback has no
+    // response_format and may wrap the object in prose or fences.
+    const parsed: any = extractJson(raw);
     const ranking: number[] = Array.isArray(parsed.ranking) ? parsed.ranking : [];
     const ordered = ranking.map((n) => cats.find((c) => c.idx === Number(n))).filter(Boolean) as { id: string; name: string }[];
     // Append any categories the model didn't rank, so the full set is still offered.
@@ -1028,7 +1052,7 @@ Deno.serve(async (req) => {
 
     const webContext = results.map((r, i) => `[${i + 1}] ${r.title} (${r.url})\n${r.content}`).join('\n\n');
     const webUser = ['Web results:', webContext, '', `Technician's question: ${query}`, '', 'Answer:'].join('\n');
-    const webAnswer = await groqComplete(WEB_SYSTEM_PROMPT + langLine((payload as any).lang), webUser, GROQ_API_KEY, MODEL);
+    const webAnswer = await fastComplete(WEB_SYSTEM_PROMPT + langLine((payload as any).lang), webUser);
     return json({ answer: webAnswer?.trim() || null, source: 'web', sources });
   }
 
@@ -1098,35 +1122,10 @@ Deno.serve(async (req) => {
     'Answer:',
   ].join('\n');
 
-  // ---------- 3. Call Groq (OpenAI-compatible) ----------
-  let answer: string | null = null;
-  try {
-    const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${GROQ_API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: MODEL,
-        messages: [
-          { role: 'system', content: SYSTEM_PROMPT + langLine((payload as any).lang) },
-          { role: 'user', content: userPrompt },
-        ],
-        temperature: 0.2,
-        max_tokens: 900,
-        top_p: 0.9,
-      }),
-    });
-    if (!res.ok) {
-      const detail = await res.text();
-      console.error('groq error', res.status, detail);
-      return json({ error: 'model call failed', status: res.status }, 502);
-    }
-    const body = await res.json();
-    answer = body?.choices?.[0]?.message?.content ?? null;
-  } catch (e) {
-    console.error('groq fetch threw', e);
+  // ---------- 3. Answer (Groq, with Claude as the automatic fallback) ----------
+  const answer = await fastComplete(SYSTEM_PROMPT + langLine((payload as any).lang), userPrompt, false, 900);
+  if (answer === null) {
+    console.error('docs answer: every provider failed');
     return json({ error: 'model call failed' }, 502);
   }
 
