@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Trash2 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
@@ -223,14 +223,17 @@ function ConsolidatedDocsPanel() {
 function CategoriesPanel() {
   const qc = useQueryClient();
   const [name, setName] = useState('');
+  const [group, setGroup] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [q, setQ] = useState('');
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
 
   const cats = useQuery({
     queryKey: ['admin-categories'],
     queryFn: async () => (await supabase
       .from('sensor_categories')
-      .select('id, name, sensor_models(count)')
+      .select('id, name, group, aliases, sensor_models(count)')
       .order('name')).data ?? [],
   });
 
@@ -239,7 +242,7 @@ function CategoriesPanel() {
     const n = name.trim();
     if (!n) return;
     setBusy(true); setErr(null);
-    const { error } = await supabase.from('sensor_categories').insert({ name: n });
+    const { error } = await supabase.from('sensor_categories').insert({ name: n, group: group.trim() || null });
     setBusy(false);
     if (error) { setErr(error.message); return; }
     setName('');
@@ -249,26 +252,93 @@ function CategoriesPanel() {
     qc.invalidateQueries({ queryKey: ['general-models'] });
   }
 
+  const list = (cats.data ?? []) as any[];
+  // Search matches the alias list too — that's how you find "Conductivity / EC"
+  // by typing "MLSS" or "magmeter".
+  const needle = q.trim().toLowerCase();
+  const filtered = needle
+    ? list.filter((c) => c.name.toLowerCase().includes(needle)
+        || (c.aliases ?? []).some((a: string) => a.toLowerCase().includes(needle)))
+    : list;
+  const groups = useMemo(() => {
+    const m = new Map<string, any[]>();
+    for (const c of filtered) {
+      const g = c.group || 'Ungrouped';
+      if (!m.has(g)) m.set(g, []);
+      m.get(g)!.push(c);
+    }
+    return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  }, [filtered]);
+  const knownGroups = useMemo(
+    () => [...new Set(list.map((c) => c.group).filter(Boolean))].sort() as string[],
+    [list],
+  );
+
   return (
     <div className="card space-y-4">
       <p className="text-xs text-slate-500">
-        Adding a category instantly creates its <strong>General {`{category}`} guidance</strong> entry, so you can
-        start filing category-level content right away.
+        The document taxonomy. Adding a category instantly creates its <strong>General {`{category}`} guidance</strong> entry,
+        so you can file category-level content right away. <strong>Also called</strong> terms let Dr. Paani route a question
+        to the right category even when the operator uses a different word for it.
       </p>
       <form onSubmit={add} className="flex gap-2 flex-wrap">
-        <input className="input flex-1 min-w-56" placeholder="New category (e.g. Gas Analysers)"
+        <input className="input flex-1 min-w-48" placeholder="New category (e.g. Gas Detection)"
           value={name} onChange={(e) => setName(e.target.value)} />
+        <input className="input w-52" placeholder="Section (optional)" list="cat-groups"
+          value={group} onChange={(e) => setGroup(e.target.value)} />
+        <datalist id="cat-groups">{knownGroups.map((g) => <option key={g} value={g} />)}</datalist>
         <button className="btn-primary" disabled={busy}>{busy ? 'Adding…' : 'Add category'}</button>
       </form>
       {err && <div className="text-sm text-red-700 bg-red-50 border border-red-100 rounded px-3 py-2">{err}</div>}
-      <ul className="divide-y divide-slate-100 text-sm">
-        {(cats.data ?? []).map((c: any) => (
-          <li key={c.id} className="py-2 flex items-center justify-between">
-            <span className="font-medium text-slate-800">{c.name}</span>
-            <span className="muted text-xs">{(c.sensor_models?.[0]?.count ?? 0)} model(s)</span>
-          </li>
-        ))}
-      </ul>
+
+      <div className="flex items-center gap-2 flex-wrap">
+        <input className="input text-sm flex-1 min-w-48" placeholder="Search categories or their other names…"
+          value={q} onChange={(e) => setQ(e.target.value)} />
+        <span className="muted text-xs">{filtered.length} of {list.length}</span>
+      </div>
+
+      <div className="space-y-2">
+        {groups.map(([g, rows]) => {
+          // Searching expands everything; otherwise sections start collapsed
+          // so 48 categories stay scannable.
+          const open = needle ? true : (openGroups[g] ?? false);
+          const documented = rows.filter((c: any) => (c.sensor_models?.[0]?.count ?? 0) > 1).length;
+          return (
+            <div key={g} className="rounded-xl border border-slate-200 overflow-hidden">
+              <button type="button" onClick={() => setOpenGroups((s) => ({ ...s, [g]: !open }))}
+                className="tap w-full px-4 py-2.5 flex items-center gap-2 text-left bg-slate-50 hover:bg-slate-100 transition">
+                <span className="text-slate-400 text-xs">{open ? '▾' : '▸'}</span>
+                <span className="text-sm font-semibold text-slate-800 flex-1">{g}</span>
+                <span className="muted text-xs">{rows.length} categor{rows.length === 1 ? 'y' : 'ies'}{documented > 0 && ` · ${documented} with content`}</span>
+              </button>
+              {open && (
+                <ul className="divide-y divide-slate-100 text-sm bg-white">
+                  {rows.map((c: any) => {
+                    // Every category has one synthetic "general" model, so >1 means real sensors.
+                    const models = Math.max(0, (c.sensor_models?.[0]?.count ?? 0) - 1);
+                    return (
+                      <li key={c.id} className="px-4 py-2.5">
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="font-medium text-slate-800">{c.name}</span>
+                          <span className={`text-xs shrink-0 ${models > 0 ? 'text-emerald-700 font-medium' : 'text-slate-400'}`}>
+                            {models > 0 ? `${models} sensor${models === 1 ? '' : 's'}` : 'no sensors yet'}
+                          </span>
+                        </div>
+                        {(c.aliases ?? []).length > 0 && (
+                          <div className="text-[11px] text-slate-500 mt-0.5">
+                            also called: {(c.aliases as string[]).join(' · ')}
+                          </div>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
+          );
+        })}
+        {groups.length === 0 && <div className="muted text-sm text-center py-4">No categories match “{q}”.</div>}
+      </div>
     </div>
   );
 }

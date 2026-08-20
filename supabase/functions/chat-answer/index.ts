@@ -936,16 +936,18 @@ Deno.serve(async (req) => {
     // Only categories that actually have documented models are useful targets.
     const { data: models, error: rErr } = await supabase
       .from('sensor_models')
-      .select('sensor_categories(id, name)')
+      .select('sensor_categories(id, name, aliases)')
       .eq('is_general', false)
       .limit(2000);
     if (rErr) { console.error('route catalog error', rErr); return json({ error: 'catalog lookup failed' }, 500); }
-    const catMap = new Map<string, string>();
+    const catMap = new Map<string, { name: string; aliases: string[] }>();
     for (const m of (models ?? []) as any[]) {
       const cat = Array.isArray(m.sensor_categories) ? m.sensor_categories[0] : m.sensor_categories;
-      if (cat?.id) catMap.set(cat.id, cat.name);
+      if (cat?.id) catMap.set(cat.id, { name: cat.name, aliases: Array.isArray(cat.aliases) ? cat.aliases : [] });
     }
-    const cats = [...catMap.entries()].map(([id, name], i) => ({ idx: i + 1, id, name }));
+    // Sub-category terms from the master list go to the model as "also called",
+    // so "MLSS probe" or "magmeter" routes without the formal category name.
+    const cats = [...catMap.entries()].map(([id, v], i) => ({ idx: i + 1, id, name: v.name, aliases: v.aliases }));
     if (cats.length === 0) return json({ categories: [], top: null });
 
     // The user may be vague, non-technical, or misspell things ("presure senser
@@ -957,7 +959,7 @@ Deno.serve(async (req) => {
       'Respond with strict JSON only.',
     ].join('\n');
     const user = [
-      `Sensor types (numbered):\n${cats.map((c) => `${c.idx}. ${c.name}`).join('\n')}`,
+      `Sensor types (numbered):\n${cats.map((c) => `${c.idx}. ${c.name}${c.aliases.length ? ` (also called: ${c.aliases.slice(0, 8).join(', ')})` : ''}`).join('\n')}`,
       '',
       `Technician's message: ${query}`,
       '',

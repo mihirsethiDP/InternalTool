@@ -40,12 +40,17 @@ export async function loadLexicon(): Promise<Set<string>> {
     const lex = new Set<string>(CORE_WORDS);
     try {
       const [cats, makes, models, syns] = await Promise.all([
-        supabase.from('sensor_categories').select('name'),
+        supabase.from('sensor_categories').select('name, aliases'),
         supabase.from('sensor_makes').select('name'),
         supabase.from('sensor_models').select('model_no, name'),
         supabase.from('search_synonyms').select('terms'),
       ]);
-      for (const r of (cats.data ?? []) as any[]) wordsFrom(r.name).forEach((w) => lex.add(w));
+      for (const r of (cats.data ?? []) as any[]) {
+        wordsFrom(r.name).forEach((w) => lex.add(w));
+        // Sub-category terms from the master list ("MLSS Sensor", "Magmeter")
+        // — so field vocabulary survives the spell-corrector.
+        for (const a of (r.aliases ?? [])) wordsFrom(a).forEach((w) => lex.add(w));
+      }
       for (const r of (makes.data ?? []) as any[]) wordsFrom(r.name).forEach((w) => lex.add(w));
       for (const r of (models.data ?? []) as any[]) { wordsFrom(r.model_no).forEach((w) => lex.add(w)); wordsFrom(r.name).forEach((w) => lex.add(w)); }
       for (const r of (syns.data ?? []) as any[]) for (const t of (r.terms ?? [])) wordsFrom(t).forEach((w) => lex.add(w));
