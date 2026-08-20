@@ -3,9 +3,10 @@ import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import i18n from '../i18n';
-import { X, Send, ArrowRight, ExternalLink, ChevronDown, Sparkles, Bot, Trash2, Wrench, Cpu, Globe, Compass, CheckCircle2, PhoneCall, GitBranch, Phone, Mic, Undo2, Volume2, VolumeX } from 'lucide-react';
+import { X, Send, ArrowRight, ExternalLink, ChevronDown, Sparkles, Bot, Trash2, Wrench, Cpu, Globe, Compass, CheckCircle2, PhoneCall, GitBranch, Phone, Mic, Undo2, Volume2, VolumeX, Loader2 } from 'lucide-react';
 import { speak, stopSpeaking, ttsSupported } from '../lib/tts';
 import { translateFlowDefinition } from '../lib/translateFlow';
+import { startRecording, recordingSupported, MAX_RECORDING_MS, type Recorder } from '../lib/speech';
 import { supabase } from '../lib/supabase';
 import { runSearch } from '../lib/search';
 import { logUnanswered, logEvent } from '../lib/telemetry';
@@ -304,14 +305,24 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
   // the ordered flows; queueIndex is the one currently running. When a flow
   // ends unresolved and more remain, the chat offers "Start next fix".
   const queueRef = useRef<{ issueLabel: string; flows: DiagnosticFlow[]; index: number } | null>(null);
-  // Issue matched but not yet started — waiting on the user to confirm it (or
-  // to tell us the make/model when the fix depends on it).
-  const pendingRef = useRef<{ issue: Issue; info: IssueQueueInfo; origQuery: string } | null>(null);
+  // Matched but not yet started — waiting on the user to confirm (or to tell
+  // us the make/model when the fix depends on it). Either a curated issue with
+  // its flow queue, or a single flow matched by phrasing; both confirm first.
+  const pendingRef = useRef<
+    | { kind: 'issue'; issue: Issue; info: IssueQueueInfo; origQuery: string }
+    | { kind: 'flow'; flow: DiagnosticFlow; origQuery: string }
+    | null
+  >(null);
   // Voice replies: which turn is being read aloud, whether the current message
   // came in by voice (→ speak the answer back without an extra tap).
   const [speakingIdx, setSpeakingIdx] = useState<number | null>(null);
   const voiceAskedRef = useRef(false);
   const autoSpeakRef = useRef(false);
+  // Push-to-talk recording state (Whisper path).
+  const recorderRef = useRef<Recorder | null>(null);
+  const [transcribing, setTranscribing] = useState(false);
+  const [recSecs, setRecSecs] = useState(0);
+  const [voiceNote, setVoiceNote] = useState<string | null>(null);
   const [queueTick, setQueueTick] = useState(0); // re-render trigger for queue chips
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -322,11 +333,50 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
   const focusInput = () => inputRef.current?.focus();
 
   // Voice input — speak the problem instead of typing (big for low-literacy
-  // field techs). Uses the browser's speech recognition in the chosen app
-  // language; the button is hidden where the API isn't available.
-  function toggleVoice() {
+  // field techs).
+  //
+  // Preferred path: record until the USER taps stop, then transcribe with
+  // Whisper. The browser's SpeechRecognition ended at the first breath and
+  // misheard Indian-accented English; this keeps pauses harmless and is far
+  // better on accents and Hinglish. SpeechRecognition stays as the fallback
+  // where mic capture isn't available.
+  async function toggleVoice() {
+    if (transcribing) return;
+    if (recorderRef.current) { // stop → transcribe
+      const rec = recorderRef.current;
+      recorderRef.current = null;
+      setListening(false);
+      setTranscribing(true);
+      const text = await rec.stop();
+      setTranscribing(false);
+      if (text) {
+        setInput(text);
+        voiceAskedRef.current = true; // spoke the question → speak the answer back
+        inputRef.current?.focus();
+      } else {
+        setVoiceNote(t('chat.voiceNothing'));
+        setTimeout(() => setVoiceNote(null), 4000);
+      }
+      return;
+    }
+    if (recordingSupported) {
+      try {
+        stopSpeaking(); // don't record Dr. Paani talking back
+        recorderRef.current = await startRecording(i18n.language);
+        setListening(true);
+        return;
+      } catch (e) {
+        console.warn('mic unavailable — falling back to speech recognition', e);
+        recorderRef.current = null;
+      }
+    }
+    legacyVoice();
+  }
+
+  // Fallback only: browsers without MediaRecorder / mic permission.
+  function legacyVoice() {
     const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SR) return;
+    if (!SR) { setVoiceNote(t('chat.voiceUnavailable')); setTimeout(() => setVoiceNote(null), 4000); return; }
     if (listening) { try { recogRef.current?.stop(); } catch { /* already stopped */ } return; }
     const r = new SR();
     const langMap: Record<string, string> = { en: 'en-IN', hi: 'hi-IN', bn: 'bn-IN', mr: 'mr-IN', te: 'te-IN', ta: 'ta-IN', gu: 'gu-IN', kn: 'kn-IN' };
@@ -345,7 +395,20 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
     setListening(true);
     try { r.start(); } catch { setListening(false); }
   }
-  useEffect(() => () => { try { recogRef.current?.stop(); } catch { /* noop */ } stopSpeaking(); }, []);
+  useEffect(() => () => {
+    try { recogRef.current?.stop(); } catch { /* noop */ }
+    recorderRef.current?.cancel(); // never leave the mic open on unmount
+    stopSpeaking();
+  }, []);
+
+  // Elapsed seconds while recording — reassurance that it's still listening
+  // (the old one silently gave up, so silence now needs to look intentional).
+  useEffect(() => {
+    if (!listening || !recorderRef.current) { setRecSecs(0); return; }
+    const started = Date.now();
+    const id = setInterval(() => setRecSecs(Math.floor((Date.now() - started) / 1000)), 250);
+    return () => clearInterval(id);
+  }, [listening]);
 
   // The text a bot turn would read aloud — mirrors what's rendered.
   function speakableTurnText(turn: Extract<Turn, { role: 'bot' }>): string | null {
@@ -556,6 +619,23 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
           : Promise.resolve(null),
       ]);
 
+      // ---- Priority 0: too vague to act on ("COD sensor kharab hai") — ASK
+      // before doing anything. This has to run BEFORE the flow matchers: a
+      // message with no symptom in it can still word-overlap a flow title
+      // ("...not working" matched "Automatic cleaning not working" and dropped
+      // the user into an unrelated fix), and a wrong fix is worse than a
+      // question. If a rule still routed it, point at that procedure instead.
+      if (vague) {
+        if (routed) {
+          setTurns((t) => fillLoadingTurn(t, { role: 'bot', query: q, loading: false, narrowedLabel: activeScope?.label, answer: null, citations: [], hits: [], routed }));
+          return;
+        }
+        logUnanswered({ query: q, source: 'chat', sensorModelId: activeScope?.modelId ?? null });
+        const options = await symptomOptions(activeScope);
+        setTurns((t) => fillLoadingTurn(t, { role: 'bot', query: q, loading: false, narrowedLabel: activeScope?.label, probe: { text: probeText(activeScope?.label), options } }));
+        return;
+      }
+
       const issue: Issue | null = clientIssue ?? llmIssue;
       if (issue) {
         // Never jump straight into a flow. Confirm the issue first — and when
@@ -564,7 +644,7 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
         // flow is model-agnostic, skip the model question entirely.
         const info = await issueQueueInfo(issue.id);
         if (info.flows.length > 0) {
-          pendingRef.current = { issue, info, origQuery: q };
+          pendingRef.current = { kind: 'issue', issue, info, origQuery: q };
           const elicit = buildElicit(issue, info, activeScope);
           if (elicit) {
             setTurns((t) => fillLoadingTurn(t, { role: 'bot', query: q, loading: false, narrowedLabel: activeScope?.label, elicit }));
@@ -574,25 +654,24 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
         }
       }
 
-      // ---- Priority 2: a single approved flow matched by phrasing.
+      // ---- Priority 2: a single approved flow matched by phrasing. Confirm
+      // it too — the issue path asks first, and this path landing straight in
+      // a fix was exactly how a COD question became a cleaning procedure.
       if (flow) {
         queueRef.current = null;
-        await startFlow(flow, activeScope?.label);
-        return;
-      }
-
-      // ---- Too vague to answer ("sensor not working") → don't dump a generic
-      // answer. If a rule still routed it, point at the procedure; otherwise
-      // PROBE: ask what it's doing (symptom chips) and log the gap so admins
-      // see which phrasings users actually bring.
-      if (vague) {
-        if (routed) {
-          setTurns((t) => fillLoadingTurn(t, { role: 'bot', query: q, loading: false, narrowedLabel: activeScope?.label, answer: null, citations: [], hits: [], routed }));
-          return;
-        }
-        logUnanswered({ query: q, source: 'chat', sensorModelId: activeScope?.modelId ?? null });
-        const options = await symptomOptions(activeScope);
-        setTurns((t) => fillLoadingTurn(t, { role: 'bot', query: q, loading: false, narrowedLabel: activeScope?.label, probe: { text: probeText(activeScope?.label), options } }));
+        pendingRef.current = { kind: 'flow', flow, origQuery: q };
+        // Built outside setTurns: the updater's `t` parameter shadows the
+        // translation function.
+        const flowElicit = {
+          text: t('chat.issueConfirm', { issue: flow.title }),
+          chips: [
+            { label: t('chat.startFix'), act: 'start' as const },
+            { label: t('chat.notThis'), act: 'reject' as const },
+          ],
+        };
+        setTurns((prev) => fillLoadingTurn(prev, {
+          role: 'bot', query: q, loading: false, narrowedLabel: activeScope?.label, elicit: flowElicit,
+        }));
         return;
       }
 
@@ -676,6 +755,22 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
     if (!p || sendingRef.current) return;
     sendingRef.current = true;
     try {
+      // Single matched flow: confirm, then run it (no queue, no model question
+      // — the flow already names the sensor it belongs to).
+      if (p.kind === 'flow') {
+        if (chip.act === 'start') {
+          pendingRef.current = null;
+          setTurns((t) => [...t, { role: 'user', text: chip.label }, { role: 'bot', query: p.origQuery, loading: true }]);
+          await startFlow(p.flow, scope?.label);
+          return;
+        }
+        pendingRef.current = null;
+        logUnanswered({ query: p.origQuery, source: 'chat', sensorModelId: scope?.modelId ?? null });
+        setTurns((t) => [...t, { role: 'user', text: chip.label }, { role: 'bot', query: p.origQuery, loading: true }]);
+        const opts = await symptomOptions(scope);
+        setTurns((t) => fillLoadingTurn(t, { role: 'bot', query: p.origQuery, loading: false, narrowedLabel: scope?.label, probe: { text: probeText(scope?.label), options: opts } }));
+        return;
+      }
       if (chip.act === 'reject') {
         // Wrong guess — fall back to the symptom probe so they can tell us
         // what it's actually doing, and log the miss for the admins.
@@ -1148,6 +1243,34 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
               </button>
             </div>
           )}
+          {/* Voice status — the old input died silently at the first pause, so
+              recording now says plainly that it's still listening and that the
+              user is the one who ends it. */}
+          {(listening || transcribing || voiceNote) && (
+            <div role="status" className={`mb-2 rounded-xl px-3 py-2 text-xs flex items-center gap-2 ${
+              listening ? 'bg-red-50 border border-red-200 text-red-800'
+                : transcribing ? 'bg-brand-50 border border-brand-200 text-brand-900'
+                : 'bg-amber-50 border border-amber-200 text-amber-900'
+            }`}>
+              {listening && (
+                <>
+                  <span className="relative flex h-2.5 w-2.5 shrink-0">
+                    <span className="animate-ping absolute h-full w-full rounded-full bg-red-400 opacity-75" />
+                    <span className="relative rounded-full h-2.5 w-2.5 bg-red-500" />
+                  </span>
+                  <span className="font-medium">{t('chat.voiceListening')}</span>
+                  <span className="tabular-nums text-red-700/70">
+                    {Math.floor(recSecs / 60)}:{String(recSecs % 60).padStart(2, '0')} / {MAX_RECORDING_MS / 60000}:00
+                  </span>
+                  <button type="button" onClick={toggleVoice} className="tap ml-auto rounded-lg bg-red-600 text-white px-2.5 py-1 font-semibold hover:bg-red-700 transition">
+                    {t('chat.voiceDone')}
+                  </button>
+                </>
+              )}
+              {transcribing && <><Loader2 size={13} className="animate-spin shrink-0" /> <span className="font-medium">{t('chat.voiceTranscribing')}</span></>}
+              {!listening && !transcribing && voiceNote && <span>{voiceNote}</span>}
+            </div>
+          )}
           <form onSubmit={(e) => { e.preventDefault(); send(input); }} className="flex items-center gap-2">
             <div className="relative flex-1 min-w-0">
               <input
@@ -1159,14 +1282,14 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
                 className="w-full rounded-2xl border border-slate-300 bg-slate-50 focus:bg-white pl-4 pr-3 py-3 text-sm focus:border-brand-700 focus:ring-2 focus:ring-brand-700/20 outline-none transition"
               />
             </div>
-            {voiceSupported && (
-              <button type="button" onClick={toggleVoice}
+            {(voiceSupported || recordingSupported) && (
+              <button type="button" onClick={toggleVoice} disabled={transcribing}
                 aria-label={listening ? t('chat.voiceStop') : t('chat.voiceStart')}
                 title={listening ? t('chat.voiceStop') : t('chat.voiceStart')}
                 className={`tap rounded-2xl w-12 h-12 flex items-center justify-center shrink-0 transition ${
-                  listening ? 'bg-red-500 text-white animate-pulse' : 'bg-slate-100 text-slate-500 hover:text-brand-700 hover:bg-slate-200'
+                  listening ? 'bg-red-500 text-white' : transcribing ? 'bg-brand-100 text-brand-700' : 'bg-slate-100 text-slate-500 hover:text-brand-700 hover:bg-slate-200'
                 }`}>
-                <Mic size={18} />
+                {transcribing ? <Loader2 size={18} className="animate-spin" /> : <Mic size={18} className={listening ? 'animate-pulse' : ''} />}
               </button>
             )}
             <button type="submit" disabled={!input.trim() || isBusy} aria-label="Send message"

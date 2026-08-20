@@ -192,6 +192,7 @@ Deno.serve(async (req) => {
     : payload.mode === 'improve-flow' ? 'improve-flow'
     : payload.mode === 'analyze-upload' ? 'analyze-upload'
     : payload.mode === 'translate' ? 'translate'
+    : payload.mode === 'transcribe' ? 'transcribe'
     : 'docs';
 
   const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
@@ -544,6 +545,78 @@ Deno.serve(async (req) => {
       .from('diagnostic_flows').select('*')
       .eq('source_doc_id', docId).eq('status', 'draft').order('created_at');
     return json({ flows: fresh ?? [] });
+  }
+
+  // ---------- TRANSCRIBE MODE: speech → text via Whisper ----------
+  // The browser's SpeechRecognition cut off at the first breath and mangled
+  // Indian-accented English (reported from the field). Whisper transcribes a
+  // complete recording instead of streaming, so pauses and sighs are just
+  // audio, and it is far stronger on accents and Hinglish code-switching.
+  // The sensor catalogue is passed as a bias prompt so "MAG-110" and "OCEMS"
+  // come back spelled correctly rather than phonetically.
+  if (mode === 'transcribe') {
+    const supabase = createClient(SUPABASE_URL, SERVICE_KEY);
+    const token = (req.headers.get('Authorization') ?? '').replace(/^Bearer\s+/i, '');
+    const { data: who } = await supabase.auth.getUser(token);
+    if (!who?.user) return json({ error: 'unauthorized' }, 401);
+    if (!GROQ_API_KEY) return json({ error: 'transcription unavailable (no GROQ_API_KEY)' }, 503);
+
+    const b64 = ((payload as any).audio ?? '').toString();
+    if (!b64) return json({ error: 'no audio' }, 400);
+    // ~10 MB of base64 ≈ a few minutes of opus; beyond that, refuse rather
+    // than time out.
+    if (b64.length > 10_000_000) return json({ error: 'recording too long' }, 413);
+    let bytes: Uint8Array;
+    try {
+      const bin = atob(b64);
+      bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    } catch {
+      return json({ error: 'audio not valid base64' }, 400);
+    }
+
+    // Domain vocabulary → Whisper's prompt, so technical terms survive.
+    let bias = 'Water and wastewater sensor troubleshooting. Terms: pH, ORP, DO, COD, BOD, MLSS, TSS, turbidity, conductivity, EC, flow meter, transmitter, analyser, calibration, 4-20mA, Modbus.';
+    try {
+      const [{ data: makes }, { data: models }] = await Promise.all([
+        supabase.from('sensor_makes').select('name').limit(50),
+        supabase.from('sensor_models').select('model_no').eq('is_general', false).limit(100),
+      ]);
+      const names = [
+        ...((makes ?? []) as any[]).map((m) => m.name),
+        ...((models ?? []) as any[]).map((m) => m.model_no),
+      ].filter(Boolean);
+      if (names.length) bias += ' Equipment: ' + names.join(', ') + '.';
+    } catch { /* bias is optional */ }
+
+    const lang = String((payload as any).lang ?? '').slice(0, 2);
+    const form = new FormData();
+    form.append('file', new Blob([bytes], { type: (payload as any).mime || 'audio/webm' }), 'speech.webm');
+    form.append('model', 'whisper-large-v3');
+    form.append('prompt', bias.slice(0, 800));
+    form.append('temperature', '0');
+    form.append('response_format', 'json');
+    // Naming the language helps a lot; 'en' is left OFF deliberately so
+    // Hinglish ("COD sensor kharab hai") isn't forced into one language.
+    if (lang && lang !== 'en') form.append('language', lang);
+
+    try {
+      const res = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${GROQ_API_KEY}` },
+        body: form,
+      });
+      if (!res.ok) {
+        const detail = await res.text();
+        console.error('whisper error', res.status, detail.slice(0, 300));
+        return json({ error: 'transcription failed', status: res.status }, 502);
+      }
+      const body = await res.json();
+      return json({ text: String(body?.text ?? '').trim() });
+    } catch (e) {
+      console.error('whisper fetch threw', e);
+      return json({ error: 'transcription failed' }, 502);
+    }
   }
 
   // ---------- TRANSLATE MODE: content strings into the user's app language ----------
