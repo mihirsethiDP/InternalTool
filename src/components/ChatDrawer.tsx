@@ -12,6 +12,7 @@ import { runSearch } from '../lib/search';
 import { logUnanswered, logEvent } from '../lib/telemetry';
 import { SECTION_LABEL, parseSections } from '../lib/consolidated';
 import { renderMarkdown, normalizeAnswerSteps } from '../lib/markdown';
+import { stripCitationMarkers } from '../lib/text';
 import { conversationalReply, isVagueQuery } from '../lib/chatIntent';
 import { matchRule, type RouteMatch } from '../lib/routing';
 import { matchFlow, getNode, failTarget, fetchContacts, contactsForSkill, type DiagnosticFlow, type FlowNode, type EscalationContact } from '../lib/flows';
@@ -1166,11 +1167,21 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
                 </div>
               ) : turn.routed ? null : (
                 <div className="card-tight bg-white text-sm text-slate-600 space-y-2.5">
-                  <div>{t('chat.nothing')}</div>
+                  {/* Not scoped to a sensor yet? Then "nothing documented" is
+                      usually FALSE — a broad search pulls whichever sensor's
+                      manual shares the most words, and the model rightly
+                      refuses to answer a COD question from a flow meter's
+                      pages. Ask which sensor (the picker is right below)
+                      instead of telling the user the library is empty. */}
+                  <div>{scope?.modelId ? t('chat.nothing') : t('chat.nothingNarrow')}</div>
                   <div className="flex flex-col gap-2">
                     <button
                       onClick={() => fetchWebAnswer(i, turn.query)}
-                      className="tap inline-flex items-center justify-center gap-1.5 rounded-lg bg-gradient-to-br from-brand-600 to-brand-800 text-white px-3 py-2 text-xs font-semibold hover:from-brand-700 hover:to-brand-900 transition"
+                      className={`tap inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold transition ${
+                        scope?.modelId
+                          ? 'bg-gradient-to-br from-brand-600 to-brand-800 text-white hover:from-brand-700 hover:to-brand-900'
+                          : 'border border-slate-200 text-slate-600 hover:border-brand-700 hover:text-brand-700'
+                      }`}
                     >
                       <Globe size={13} /> Get an answer from the web
                     </button>
@@ -1425,7 +1436,9 @@ function AnswerCard({ answer, citations, narrowedLabel, onOpenCitation }: {
   narrowedLabel?: string;
   onOpenCitation: (c: Citation) => void;
 }) {
-  const html = useMemo(() => renderMarkdown(normalizeAnswerSteps(answer)), [answer]);
+  // Inline [1]/【2】 markers are noise mid-instruction; SOURCES below is built
+  // from retrieval, so nothing is lost by dropping them.
+  const html = useMemo(() => renderMarkdown(normalizeAnswerSteps(stripCitationMarkers(answer))), [answer]);
   return (
     <div className="rounded-2xl rounded-tl-md overflow-hidden border border-brand-200 shadow-sm bg-white">
       {/* Gradient header makes the synthesized answer stand out */}
@@ -1650,7 +1663,7 @@ function FlowNodeCard({ turn, active, isLast, failNext, onChoose, onTicket, onBa
 // Web fallback answer — deliberately distinct from the verified-doc answer:
 // amber framing, an "unverified" tag, web source links, and a disclaimer.
 function WebAnswerCard({ data }: { data: { answer: string; sources: { title: string; url: string }[] } }) {
-  const html = useMemo(() => renderMarkdown(normalizeAnswerSteps(data.answer)), [data.answer]);
+  const html = useMemo(() => renderMarkdown(normalizeAnswerSteps(stripCitationMarkers(data.answer))), [data.answer]);
   return (
     <div className="rounded-2xl rounded-tl-md overflow-hidden border border-amber-200 shadow-sm bg-white">
       <div className="bg-gradient-to-r from-amber-500 to-amber-600 px-3.5 py-2 inline-flex items-center gap-1.5 w-full">

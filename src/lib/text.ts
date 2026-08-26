@@ -24,3 +24,23 @@ export function sanitizeText(t: string): string {
   }
   return out;
 }
+
+// Remove inline reference markers the answer model emits — [1], 【2】, [1,2].
+//
+// The SOURCES list under an answer is built from what RETRIEVAL returned, not
+// from these markers, so dropping them loses nothing: the reader still gets
+// the documents, without "[1]" interrupting every instruction. Handles the
+// fullwidth CJK brackets too, since the model reaches for those unprompted.
+//
+// Only pure-number brackets are stripped, so real content like "[Page 4]"
+// or "(≤5 % H₂SO₄)" is left alone.
+export function stripCitationMarkers(md: string): string {
+  // [^\S\r\n] is whitespace-except-newline: the model often separates a
+  // marker with a NON-BREAKING space, which a plain space/tab class misses —
+  // leaving "acid ." in the rendered answer.
+  return (md ?? '')
+    .replace(/[^\S\r\n]*[\[【]\s*\d+(?:\s*[,;、–—-]\s*\d+)*\s*[\]】][^\S\r\n]*/g, (m) => (/\n/.test(m) ? m : ' '))
+    .replace(/[^\S\r\n]+([.,;:!?])/g, '$1')   // "carefully ." -> "carefully."
+    .replace(/[^\S\r\n]{2,}/g, ' ')
+    .replace(/[^\S\r\n]+$/gm, '');
+}

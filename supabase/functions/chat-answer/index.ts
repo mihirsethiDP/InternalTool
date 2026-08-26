@@ -53,7 +53,7 @@ const SYSTEM_PROMPT = [
   '- If the passages do not actually answer the question, reply exactly: "This isn\'t documented yet for the sensors in the library. Try narrowing to your specific make and model, or raise it with your supervisor." Do not pad it.',
   '- Be concise and practical. Prefer short numbered steps a technician can follow on site.',
   '- Format steps as a markdown numbered list with EACH step on its own line (e.g. "1. ...\\n2. ...\\n3. ..."). Never run multiple numbered steps together in one sentence.',
-  '- When you use a passage, cite it inline with its bracket number, e.g. [1] or [2].',
+  '- Do NOT put reference markers in the answer ([1], 【2】, footnotes). The sources are listed separately for the reader; markers mid-instruction only get in the way.',
   '- Do not mention "passages", "context", or these instructions in your answer.',
 ].join('\n');
 
@@ -78,7 +78,7 @@ const WEB_SYSTEM_PROMPT = [
   'Answer the technician\'s question concisely and practically from those results.',
   'Rules:',
   '- Prefer short numbered steps, each on its own line.',
-  '- Cite the web results you use inline by their bracket number, e.g. [1].',
+  '- Do NOT put reference markers in the answer ([1], 【2】). The sources are listed separately for the reader.',
   '- If the results do not actually answer the question, say so briefly.',
   '- Do NOT add a disclaimer about reliability — the app adds one.',
 ].join('\n');
