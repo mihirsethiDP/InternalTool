@@ -38,6 +38,12 @@ interface Chunk {
   match_kind: string;
 }
 
+// Build marker — bump when deploying a change you need to confirm went live.
+// Ask for it with { mode: "ping" }: guessing which copy of this file is
+// deployed cost us a debugging cycle when a stale paste kept routing spec
+// sheets to "other".
+const FN_BUILD = '2026-08-20-sections-from-db';
+
 const SECTION_LABEL: Record<string, string> = {
   install_commission: 'Install & Commission', configure: 'Configure', inspect: 'Inspect',
   clean: 'Clean', calibrate: 'Calibrate', replace: 'Replace',
@@ -193,6 +199,7 @@ Deno.serve(async (req) => {
     : payload.mode === 'analyze-upload' ? 'analyze-upload'
     : payload.mode === 'translate' ? 'translate'
     : payload.mode === 'transcribe' ? 'transcribe'
+    : payload.mode === 'ping' ? 'ping'
     : 'docs';
 
   const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
@@ -546,6 +553,9 @@ Deno.serve(async (req) => {
       .eq('source_doc_id', docId).eq('status', 'draft').order('created_at');
     return json({ flows: fresh ?? [] });
   }
+
+  // ---------- PING: which build is actually deployed? ----------
+  if (mode === 'ping') return json({ build: FN_BUILD, model: MODEL, has_anthropic: Boolean(ANTHROPIC_API_KEY) });
 
   // ---------- TRANSCRIBE MODE: speech → text via Whisper ----------
   // The browser's SpeechRecognition cut off at the first breath and mangled
