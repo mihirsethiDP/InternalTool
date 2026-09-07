@@ -934,18 +934,28 @@ Deno.serve(async (req) => {
     const visible = paras.slice(0, cut);
     const truncated = cut < paras.length;
 
-    const SECTION_DEFS = [
-      'install_commission (mounting, wiring, first start-up, commissioning)',
-      'configure (settings, parameters, menus, communication setup)',
-      'inspect (visual checks, routine inspection)',
-      'clean (cleaning the sensor/probe)',
-      'calibrate (calibration, zero/span, buffers, verification)',
-      'replace (replacing the sensor or its parts/consumables)',
-      'troubleshoot_repair (faults, error codes, symptoms and fixes, repair)',
-      'maintenance_planning (maintenance schedules, intervals, planning)',
-      'other (specs, safety notes, anything that fits nowhere else)',
-    ];
-    const SECTION_KEYS = SECTION_DEFS.map((s) => s.split(' ')[0]);
+    // Sections come from document_types — the one taxonomy (migration 040) —
+    // so a type an admin adds ("Technical Data Sheet") is offered to the model
+    // here instead of only existing on the upload form. Built-in descriptions
+    // sharpen the nine originals; anything new is described by its label.
+    const BUILTIN_HINTS: Record<string, string> = {
+      install_commission: 'mounting, wiring, first start-up, commissioning',
+      configure: 'settings, parameters, menus, communication setup',
+      inspect: 'visual checks, routine inspection',
+      clean: 'cleaning the sensor/probe',
+      calibrate: 'calibration, zero/span, buffers, verification',
+      replace: 'replacing the sensor or its parts/consumables',
+      troubleshoot_repair: 'faults, error codes, symptoms and fixes, repair',
+      maintenance_planning: 'maintenance schedules, intervals, planning',
+      other: 'anything that fits nowhere else',
+    };
+    const { data: typeRows } = await supabase
+      .from('document_types').select('key, label, sort_order').eq('scope', 'general').order('sort_order');
+    const sectionRows = (typeRows ?? []).length
+      ? (typeRows as { key: string; label: string }[])
+      : Object.keys(BUILTIN_HINTS).map((k) => ({ key: k, label: k }));
+    const SECTION_DEFS = sectionRows.map((r) => `${r.key} (${BUILTIN_HINTS[r.key] ?? r.label})`);
+    const SECTION_KEYS = sectionRows.map((r) => r.key);
 
     const sys = [
       'You ROUTE paragraphs of a sensor document to activity sections. You never rewrite content.',

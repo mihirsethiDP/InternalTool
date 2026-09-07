@@ -488,11 +488,16 @@ function TypesPanel() {
     e.preventDefault();
     if (!label || !key) return;
     const nextOrder = (types.data?.length ?? 0) + 1;
-    await supabase.from('document_types').insert({ key, label, scope: 'general', sort_order: nextOrder });
+    // default_section = key keeps the one-taxonomy rule (migration 040): the
+    // type an uploader picks IS the section its content lands in, so a new type
+    // is immediately usable at approval instead of being upload-only.
+    await supabase.from('document_types').insert({ key, label, scope: 'general', default_section: key, sort_order: nextOrder });
     setLabel(''); setKey('');
     qc.invalidateQueries({ queryKey: ['admin-types'] });
     qc.invalidateQueries({ queryKey: ['types'] });
     qc.invalidateQueries({ queryKey: ['types-general'] });
+    qc.invalidateQueries({ queryKey: ['section-defs'] });
+    qc.invalidateQueries({ queryKey: ['type-default-sections'] });
   }
   async function remove(t: any) {
     if (!confirm(`Remove the "${t.label}" type? Types already used by documents can't be removed.`)) return;

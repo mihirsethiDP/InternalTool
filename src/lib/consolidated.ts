@@ -41,6 +41,41 @@ export const SECTION_HINT: Record<SubmissionSection, string> = {
   other: 'Anything that does not fit the categories above',
 };
 
+// ---------------------------------------------------------------------------
+// Runtime section registry.
+//
+// Migration 040 made the upload type and the approval section ONE taxonomy,
+// stored in document_types — but the lists above stayed hard-coded, so a type
+// added in Admin (e.g. "Technical Data Sheet") never became a section: missing
+// from the approve dropdowns, invisible to the AI splitter, and renderSections
+// would have DROPPED its content on the next save.
+//
+// Filled from document_types at boot (see useSectionDefs); falls back to the
+// built-in nine so nothing depends on that fetch succeeding.
+export interface SectionDef { key: string; label: string; hint?: string }
+
+const BUILTIN_DEFS: SectionDef[] = SECTION_ORDER.map((k) => ({
+  key: k, label: SECTION_LABEL[k], hint: SECTION_HINT[k],
+}));
+
+let REGISTRY: SectionDef[] = BUILTIN_DEFS;
+
+export function setSectionRegistry(defs: SectionDef[]) {
+  if (defs.length) REGISTRY = defs;
+}
+export function sectionDefs(): SectionDef[] { return REGISTRY; }
+export function sectionKeys(): string[] { return REGISTRY.map((d) => d.key); }
+
+/** Human label for a section key — DB label, else built-in, else prettified. */
+export function sectionLabel(key: string): string {
+  return REGISTRY.find((d) => d.key === key)?.label
+    ?? SECTION_LABEL[key as SubmissionSection]
+    ?? key.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+}
+export function sectionHint(key: string): string {
+  return REGISTRY.find((d) => d.key === key)?.hint ?? SECTION_HINT[key as SubmissionSection] ?? '';
+}
+
 // Categories that count toward "documentation completeness". A newly-added
 // sensor has none, so it reads as incomplete until filled. All 8 activity
 // categories count (Other is a catch-all and does not).
@@ -64,34 +99,48 @@ export function coverageOf(markdown: string | null | undefined): Coverage {
   return { covered, total: CHECKLIST_SECTIONS.length, missing, complete: missing.length === 0 };
 }
 
-export type Sections = Record<SubmissionSection, string>;
+// Keyed by string, not the built-in union: sections are data now, so a
+// document can legitimately carry a key added in Admin.
+export type Sections = Record<string, string>;
 
 const EMPTY_SECTIONS = (): Sections =>
-  Object.fromEntries(SECTION_ORDER.map((s) => [s, ''])) as unknown as Sections;
+  Object.fromEntries(sectionKeys().map((s) => [s, ''])) as unknown as Sections;
 
-const SECTION_RE = new RegExp(`^##\\s+(${SECTION_ORDER.join('|')})\\b`, 'i');
+// ANY "## some_key" header is a section, not only the ones we know about, so a
+// document written under a key the registry hasn't loaded (or that was later
+// removed) still round-trips instead of being silently dropped.
+const SECTION_RE = /^##\s+([a-z0-9_]+)\s*$/i;
 
 export function parseSections(md: string | null | undefined): Sections {
   const out = EMPTY_SECTIONS();
   if (!md) return out;
   const lines = md.split('\n');
-  let current: SubmissionSection | null = null;
-  const buffers = Object.fromEntries(SECTION_ORDER.map((s) => [s, []])) as unknown as Record<SubmissionSection, string[]>;
+  let current: string | null = null;
+  const buffers: Record<string, string[]> = {};
+  for (const key of sectionKeys()) buffers[key] = [];
   for (const line of lines) {
     const m = line.match(SECTION_RE);
     if (m) {
-      current = m[1].toLowerCase() as SubmissionSection;
+      current = m[1].toLowerCase();
+      if (!buffers[current]) buffers[current] = [];
       continue;
     }
     if (current) buffers[current].push(line);
   }
-  for (const s of SECTION_ORDER) out[s] = buffers[s].join('\n').trim();
+  for (const key of Object.keys(buffers)) (out as Record<string, string>)[key] = buffers[key].join('\n').trim();
   return out;
 }
 
 export function renderSections(sections: Sections): string {
-  return SECTION_ORDER.map((s) => `## ${s}\n\n${sections[s] || ''}\n`).join('\n').trim() + '\n';
+  // Registry order first, then any other key the document already carries —
+  // writing only the known list would delete content on the next save.
+  const known = sectionKeys();
+  const extras = Object.keys(sections).filter((k) => !known.includes(k));
+  return [...known, ...extras]
+    .map((s) => `## ${s}\n\n${(sections as Record<string, string>)[s] || ''}\n`)
+    .join('\n').trim() + '\n';
 }
+
 
 export function replaceSection(md: string, section: SubmissionSection, body: string): string {
   const sections = parseSections(md);

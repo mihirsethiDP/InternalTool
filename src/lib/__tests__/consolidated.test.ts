@@ -1,7 +1,7 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import {
   parseSections, renderSections, replaceSection, appendSection, chunkSections,
-  coverageOf, CHECKLIST_SECTIONS, SECTION_ORDER,
+  coverageOf, CHECKLIST_SECTIONS, SECTION_ORDER, SECTION_LABEL, setSectionRegistry, sectionLabel,
 } from '../consolidated';
 
 const sampleMd = `## troubleshoot_repair
@@ -101,5 +101,34 @@ describe('chunkSections', () => {
   it('omits empty sections', () => {
     const chunks = chunkSections(parseSections(sampleMd));
     expect(chunks.every((c) => c.text.trim().length > 0)).toBe(true);
+  });
+});
+
+describe('custom sections (types added in Admin)', () => {
+  afterEach(() => setSectionRegistry(SECTION_ORDER.map((k) => ({ key: k, label: SECTION_LABEL[k] }))));
+
+  it('round-trips a section the registry knows about', () => {
+    setSectionRegistry([
+      ...SECTION_ORDER.map((k) => ({ key: k, label: SECTION_LABEL[k] })),
+      { key: 'tds', label: 'Technical Data Sheet' },
+    ]);
+    const md = renderSections({ ...parseSections(''), tds: 'Supply voltage 12 V DC' });
+    expect(md).toContain('## tds');
+    expect(parseSections(md).tds).toBe('Supply voltage 12 V DC');
+  });
+
+  it('NEVER drops content stored under an unknown section', () => {
+    // registry is the built-in nine; the document already has a 'tds' block
+    const stored = '## clean\n\nWipe the probe.\n\n## tds\n\nSupply voltage 12 V DC\n';
+    const parsed = parseSections(stored);
+    expect(parsed.tds).toBe('Supply voltage 12 V DC');
+    // re-saving must preserve it rather than silently deleting it
+    expect(renderSections(parsed)).toContain('Supply voltage 12 V DC');
+  });
+
+  it('labels an unknown key readably instead of showing blank', () => {
+    expect(sectionLabel('tds')).toBe('Tds');           // prettified fallback
+    setSectionRegistry([{ key: 'tds', label: 'Technical Data Sheet' }]);
+    expect(sectionLabel('tds')).toBe('Technical Data Sheet');
   });
 });

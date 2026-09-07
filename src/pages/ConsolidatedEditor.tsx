@@ -10,6 +10,7 @@ import { useAuth, isAdmin } from '../lib/auth';
 import PageHeader from '../components/PageHeader';
 import {
   SECTION_LABEL, SECTION_ORDER, parseSections, renderSections,
+  type Sections,
 } from '../lib/consolidated';
 import { writeConsolidated } from '../lib/consolidatedWrite';
 import type { SubmissionSection } from '../lib/types';
@@ -27,8 +28,8 @@ export default function ConsolidatedEditor() {
   const nav = useNavigate();
   const qc = useQueryClient();
 
-  const [sections, setSections] = useState<Record<SubmissionSection, string>>(
-    () => Object.fromEntries(SECTION_ORDER.map((s) => [s, ''])) as Record<SubmissionSection, string>
+  const [sections, setSections] = useState<Sections>(
+    () => Object.fromEntries(SECTION_ORDER.map((s) => [s, ''])) as Sections
   );
   const [busy, setBusy] = useState(false);
   const [savedAt, setSavedAt] = useState<string | null>(null);

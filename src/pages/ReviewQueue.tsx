@@ -8,7 +8,8 @@ import { useAuth, isAdmin } from '../lib/auth';
 import { softDeleteSubmission } from '../lib/recycleBin';
 import PageHeader from '../components/PageHeader';
 import type { SubmissionSection } from '../lib/types';
-import { SECTION_LABEL, SECTION_ORDER, SECTION_HINT, parseSections } from '../lib/consolidated';
+import { SECTION_LABEL, SECTION_ORDER, SECTION_HINT, parseSections, sectionLabel, sectionHint } from '../lib/consolidated';
+import { useSectionDefs } from '../lib/useSectionDefs';
 import { classifyDoc, MISMATCH_CONFIDENCE } from '../lib/classify';
 import { approveSubmission, approveSubmissionParts, type ApprovalPart } from '../lib/approve';
 
@@ -121,6 +122,8 @@ export function ReviewQueueList() {
 function QuickApprove({ submission, qc }: { submission: any; qc: ReturnType<typeof useQueryClient> }) {
   const [open, setOpen] = useState(false);
   const typeDefaults = useTypeDefaults();
+  // Sections come from document_types, so a type added in Admin appears here.
+  const { data: sections = [] } = useSectionDefs();
   const [section, setSection] = useState<SubmissionSection>(
     submission.target_section || typeDefaults[submission.type_id] || 'troubleshoot_repair'
   );
@@ -153,7 +156,7 @@ function QuickApprove({ submission, qc }: { submission: any; qc: ReturnType<type
     <div className="shrink-0 flex items-center gap-1.5" onClick={(e) => e.preventDefault()}>
       <select value={section} onChange={(e) => setSection(e.target.value as SubmissionSection)}
         className="rounded-lg border border-slate-300 text-xs px-2 py-1.5 max-w-[9rem]">
-        {SECTION_ORDER.map((s) => <option key={s} value={s}>{SECTION_LABEL[s]}</option>)}
+        {sections.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
       </select>
       <button onClick={go} disabled={busy}
         className="tap inline-flex items-center gap-1 rounded-lg bg-emerald-600 text-white px-2.5 py-1.5 text-xs font-semibold hover:bg-emerald-700 disabled:opacity-60">
@@ -529,6 +532,7 @@ function ApproveModal({ submission, editedText, onClose, onDone }: any) {
   // Pre-fill the section from the document TYPE's default (types describe the
   // file; the default connects them to the activity section it usually feeds).
   const typeDefaults = useTypeDefaults();
+  const { data: sections = [] } = useSectionDefs();
   const [tab, setTab] = useState<'single' | 'split'>('single');
   const [section, setSection] = useState<SubmissionSection>(
     submission.target_section || typeDefaults[submission.type_id] || 'troubleshoot_repair'
@@ -655,11 +659,11 @@ function ApproveModal({ submission, editedText, onClose, onDone }: any) {
               <label className="label">Activity section</label>
               <div className="flex items-center gap-2">
                 <select className="input flex-1" value={section} onChange={(e) => setSection(e.target.value as SubmissionSection)}>
-                  {SECTION_ORDER.map((s) => <option key={s} value={s}>{SECTION_LABEL[s]}</option>)}
+                  {sections.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
                 </select>
                 {wordsBadge(section)}
               </div>
-              <div className="text-xs text-slate-500 mt-1.5">{SECTION_HINT[section]}</div>
+              <div className="text-xs text-slate-500 mt-1.5">{sectionHint(section)}</div>
               {(submission.detected_sections ?? []).length > 1 ? (
                 <div className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mt-2">
                   At upload this document was detected as covering{' '}
@@ -717,7 +721,7 @@ function ApproveModal({ submission, editedText, onClose, onDone }: any) {
                       <input type="checkbox" checked={p.include} onChange={(e) => patchPart(i, { include: e.target.checked })} aria-label="Include this part" />
                       <select value={p.section} onChange={(e) => patchPart(i, { section: e.target.value as SubmissionSection })}
                         className="rounded-lg border border-slate-300 text-xs px-2 py-1.5 font-medium">
-                        {SECTION_ORDER.map((s) => <option key={s} value={s}>{SECTION_LABEL[s]}</option>)}
+                        {sections.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
                       </select>
                       {wordsBadge(p.section)}
                       <select value={p.mode} onChange={(e) => patchPart(i, { mode: e.target.value as 'replace' | 'append' })}
