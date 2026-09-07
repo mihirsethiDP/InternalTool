@@ -16,11 +16,11 @@ export function useSectionDefs() {
     queryFn: async (): Promise<SectionDef[]> => {
       const { data, error } = await supabase
         .from('document_types')
-        .select('key, label, sort_order')
+        .select('key, label, hint, sort_order')
         .eq('scope', 'general')
         .order('sort_order');
       if (error || !data?.length) return sectionDefs(); // keep the built-in nine
-      const defs = data.map((t: { key: string; label: string }) => ({ key: t.key, label: t.label }));
+      const defs = data.map((t: { key: string; label: string; hint?: string | null }) => ({ key: t.key, label: t.label, hint: t.hint ?? undefined }));
       setSectionRegistry(defs);
       return defs;
     },

@@ -507,6 +507,15 @@ function TypesPanel() {
     qc.invalidateQueries({ queryKey: ['types'] });
     qc.invalidateQueries({ queryKey: ['types-general'] });
   }
+  // What belongs in this section. The AI splitter reads it — without one it
+  // sees only a label and routes that content to "Other".
+  async function setHint(t: any, hint: string) {
+    const { error } = await supabase.from('document_types').update({ hint: hint.trim() || null }).eq('id', t.id);
+    if (error) { alert('Could not save the description — make sure migration 047 has been run.'); return; }
+    qc.invalidateQueries({ queryKey: ['admin-types'] });
+    qc.invalidateQueries({ queryKey: ['section-defs'] });
+  }
+
   async function setDefault(t: any, section: string) {
     const { error } = await supabase.from('document_types').update({ default_section: section || null }).eq('id', t.id);
     if (error) { alert('Could not save the default — make sure migration 039 has been run.'); return; }
@@ -547,6 +556,15 @@ function TypesPanel() {
               {SECTION_ORDER.map((s) => <option key={s} value={s}>{SECTION_LABEL[s]}</option>)}
             </select>
             <button onClick={() => remove(t)} aria-label={`Remove ${t.label}`} className="tap text-slate-300 hover:text-red-500 transition justify-self-end"><Trash2 size={12} /></button>
+            <div className="sm:col-span-3">
+              <input
+                defaultValue={t.hint ?? ''}
+                onBlur={(e) => { if (e.target.value !== (t.hint ?? '')) setHint(t, e.target.value); }}
+                placeholder="What belongs in this section? (helps the AI file content here)"
+                aria-label={`Description for ${t.label}`}
+                className="w-full rounded-lg border border-slate-200 bg-slate-50/60 focus:bg-white text-xs px-2.5 py-1.5"
+              />
+            </div>
           </div>
         ))}
       </div>

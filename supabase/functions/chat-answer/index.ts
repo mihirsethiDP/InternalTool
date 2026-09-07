@@ -934,10 +934,11 @@ Deno.serve(async (req) => {
     const visible = paras.slice(0, cut);
     const truncated = cut < paras.length;
 
-    // Sections come from document_types — the one taxonomy (migration 040) —
-    // so a type an admin adds ("Technical Data Sheet") is offered to the model
-    // here instead of only existing on the upload form. Built-in descriptions
-    // sharpen the nine originals; anything new is described by its label.
+    // Sections come from document_types — the one taxonomy (migration 040) — so
+    // a type an admin adds ("Technical Data Sheet") is offered to the model here
+    // instead of only existing on the upload form. Its hint (047) says what
+    // belongs in it; without one the model has only a bare label to go on and
+    // falls back to "other".
     const BUILTIN_HINTS: Record<string, string> = {
       install_commission: 'mounting, wiring, first start-up, commissioning',
       configure: 'settings, parameters, menus, communication setup',
@@ -947,20 +948,22 @@ Deno.serve(async (req) => {
       replace: 'replacing the sensor or its parts/consumables',
       troubleshoot_repair: 'faults, error codes, symptoms and fixes, repair',
       maintenance_planning: 'maintenance schedules, intervals, planning',
-      other: 'anything that fits nowhere else',
+      other: 'anything that genuinely fits no other section',
     };
     const { data: typeRows } = await supabase
-      .from('document_types').select('key, label, sort_order').eq('scope', 'general').order('sort_order');
+      .from('document_types').select('key, label, hint, sort_order').eq('scope', 'general').order('sort_order');
     const sectionRows = (typeRows ?? []).length
-      ? (typeRows as { key: string; label: string }[])
-      : Object.keys(BUILTIN_HINTS).map((k) => ({ key: k, label: k }));
-    const SECTION_DEFS = sectionRows.map((r) => `${r.key} (${BUILTIN_HINTS[r.key] ?? r.label})`);
+      ? (typeRows as { key: string; label: string; hint?: string | null }[])
+      : Object.keys(BUILTIN_HINTS).map((k) => ({ key: k, label: k, hint: null }));
+    const SECTION_DEFS = sectionRows.map((r) =>
+      `${r.key} — ${r.label}: ${r.hint || BUILTIN_HINTS[r.key] || r.label}`);
     const SECTION_KEYS = sectionRows.map((r) => r.key);
 
     const sys = [
       'You ROUTE paragraphs of a sensor document to activity sections. You never rewrite content.',
       'Assign CONTIGUOUS paragraph ranges to exactly one section each. Ranges must not overlap.',
       'Skip paragraphs that are pure noise (page headers, tables of contents, legal boilerplate) by not assigning them.',
+      'Match content to the section whose description fits it best. Use "other" ONLY when no other section applies — a section named for the content (specifications, datasheet) beats "other" every time.',
       'Respond with strict JSON only.',
     ].join('\n');
     const user = [
