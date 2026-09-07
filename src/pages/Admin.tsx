@@ -509,6 +509,14 @@ function TypesPanel() {
   }
   // What belongs in this section. The AI splitter reads it — without one it
   // sees only a label and routes that content to "Other".
+  // Whether this section counts toward a sensor being "documented" (048).
+  async function setCounts(t: any, counts: boolean) {
+    const { error } = await supabase.from('document_types').update({ counts_toward_completeness: counts }).eq('id', t.id);
+    if (error) { alert('Could not save — make sure migration 048 has been run.'); return; }
+    qc.invalidateQueries({ queryKey: ['admin-types'] });
+    qc.invalidateQueries({ queryKey: ['section-defs'] });
+  }
+
   async function setHint(t: any, hint: string) {
     const { error } = await supabase.from('document_types').update({ hint: hint.trim() || null }).eq('id', t.id);
     if (error) { alert('Could not save the description — make sure migration 047 has been run.'); return; }
@@ -556,7 +564,7 @@ function TypesPanel() {
               {SECTION_ORDER.map((s) => <option key={s} value={s}>{SECTION_LABEL[s]}</option>)}
             </select>
             <button onClick={() => remove(t)} aria-label={`Remove ${t.label}`} className="tap text-slate-300 hover:text-red-500 transition justify-self-end"><Trash2 size={12} /></button>
-            <div className="sm:col-span-3">
+            <div className="sm:col-span-3 flex items-center gap-2">
               <input
                 defaultValue={t.hint ?? ''}
                 onBlur={(e) => { if (e.target.value !== (t.hint ?? '')) setHint(t, e.target.value); }}
@@ -564,6 +572,10 @@ function TypesPanel() {
                 aria-label={`Description for ${t.label}`}
                 className="w-full rounded-lg border border-slate-200 bg-slate-50/60 focus:bg-white text-xs px-2.5 py-1.5"
               />
+              <label className="shrink-0 flex items-center gap-1.5 text-[11px] text-slate-500 whitespace-nowrap" title="Counts toward a sensor reading as fully documented">
+                <input type="checkbox" checked={t.counts_toward_completeness !== false} onChange={(e) => setCounts(t, e.target.checked)} />
+                counts as documented
+              </label>
             </div>
           </div>
         ))}

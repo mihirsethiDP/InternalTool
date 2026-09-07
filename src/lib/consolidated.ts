@@ -52,10 +52,10 @@ export const SECTION_HINT: Record<SubmissionSection, string> = {
 //
 // Filled from document_types at boot (see useSectionDefs); falls back to the
 // built-in nine so nothing depends on that fetch succeeding.
-export interface SectionDef { key: string; label: string; hint?: string }
+export interface SectionDef { key: string; label: string; hint?: string; counts?: boolean }
 
 const BUILTIN_DEFS: SectionDef[] = SECTION_ORDER.map((k) => ({
-  key: k, label: SECTION_LABEL[k], hint: SECTION_HINT[k],
+  key: k, label: SECTION_LABEL[k], hint: SECTION_HINT[k], counts: k !== 'other',
 }));
 
 let REGISTRY: SectionDef[] = BUILTIN_DEFS;
@@ -87,16 +87,23 @@ export const CHECKLIST_SECTIONS: SubmissionSection[] = [
 export interface Coverage {
   covered: number;
   total: number;
-  missing: SubmissionSection[];
+  missing: string[];
   complete: boolean;
+}
+
+/** Documentation coverage of a sensor's OWN consolidated content. */
+/** Sections that count as "documented". The DB flag decides (migration 048),
+ *  so a section an admin adds opts in or out without a code change. */
+export function checklistSections(): string[] {
+  return REGISTRY.filter((d) => d.counts !== false).map((d) => d.key);
 }
 
 /** Documentation coverage of a sensor's OWN consolidated content. */
 export function coverageOf(markdown: string | null | undefined): Coverage {
   const s = parseSections(markdown);
-  const missing = CHECKLIST_SECTIONS.filter((x) => !s[x]);
-  const covered = CHECKLIST_SECTIONS.length - missing.length;
-  return { covered, total: CHECKLIST_SECTIONS.length, missing, complete: missing.length === 0 };
+  const checklist = checklistSections();
+  const missing = checklist.filter((x) => !s[x]);
+  return { covered: checklist.length - missing.length, total: checklist.length, missing, complete: missing.length === 0 };
 }
 
 // Keyed by string, not the built-in union: sections are data now, so a

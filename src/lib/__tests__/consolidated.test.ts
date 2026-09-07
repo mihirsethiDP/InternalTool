@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import {
   parseSections, renderSections, replaceSection, appendSection, chunkSections,
-  coverageOf, CHECKLIST_SECTIONS, SECTION_ORDER, SECTION_LABEL, setSectionRegistry, sectionLabel,
+  coverageOf, CHECKLIST_SECTIONS, SECTION_ORDER, SECTION_LABEL, setSectionRegistry, sectionLabel, checklistSections,
 } from '../consolidated';
 
 const sampleMd = `## troubleshoot_repair
@@ -130,5 +130,47 @@ describe('custom sections (types added in Admin)', () => {
     expect(sectionLabel('tds')).toBe('Tds');           // prettified fallback
     setSectionRegistry([{ key: 'tds', label: 'Technical Data Sheet' }]);
     expect(sectionLabel('tds')).toBe('Technical Data Sheet');
+  });
+});
+
+describe('completeness is registry-driven (048)', () => {
+  afterEach(() => setSectionRegistry(SECTION_ORDER.map((k) => ({ key: k, label: SECTION_LABEL[k], counts: k !== 'other' }))));
+
+  it('counts the built-in eight, never the catch-all', () => {
+    setSectionRegistry(SECTION_ORDER.map((k) => ({ key: k, label: SECTION_LABEL[k], counts: k !== 'other' })));
+    expect(checklistSections()).toHaveLength(8);
+    expect(checklistSections()).not.toContain('other');
+  });
+
+  it('an admin-added section that counts raises the denominator', () => {
+    setSectionRegistry([
+      ...SECTION_ORDER.map((k) => ({ key: k, label: SECTION_LABEL[k], counts: k !== 'other' })),
+      { key: 'tds', label: 'Technical Data Sheet', counts: true },
+    ]);
+    const cov = coverageOf('## clean\n\nWipe the probe.\n');
+    expect(cov.total).toBe(9);          // 8 activities + Technical Data Sheet
+    expect(cov.covered).toBe(1);
+    expect(cov.missing).toContain('tds');
+    expect(cov.complete).toBe(false);
+  });
+
+  it('a filled datasheet section now counts as documented', () => {
+    setSectionRegistry([
+      { key: 'clean', label: 'Clean', counts: true },
+      { key: 'tds', label: 'Technical Data Sheet', counts: true },
+    ]);
+    const cov = coverageOf('## clean\n\nWipe the probe.\n\n## tds\n\nSupply voltage 12 V DC\n');
+    expect(cov.covered).toBe(2);
+    expect(cov.complete).toBe(true);
+  });
+
+  it('a section opted OUT stays out of the score', () => {
+    setSectionRegistry([
+      { key: 'clean', label: 'Clean', counts: true },
+      { key: 'tds', label: 'Technical Data Sheet', counts: false },
+    ]);
+    const cov = coverageOf('## clean\n\nWipe the probe.\n');
+    expect(cov.total).toBe(1);
+    expect(cov.complete).toBe(true);
   });
 });

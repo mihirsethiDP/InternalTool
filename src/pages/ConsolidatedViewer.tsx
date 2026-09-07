@@ -11,7 +11,7 @@ import {
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth, isAdmin } from '../lib/auth';
-import { SECTION_LABEL, SECTION_ORDER, parseSections, CHECKLIST_SECTIONS } from '../lib/consolidated';
+import { SECTION_LABEL, SECTION_ORDER, parseSections, checklistSections, sectionLabel } from '../lib/consolidated';
 import { renderMarkdown, normalizeAnswerSteps } from '../lib/markdown';
 import RevisionHistory from '../components/RevisionHistory';
 import AnswerFeedback from '../components/AnswerFeedback';
@@ -179,8 +179,9 @@ export default function ConsolidatedViewer() {
   const docTypeGroups = Object.keys(sourcesByDocType);
 
   // Completeness is measured on OUTPUT work-type content only.
-  const covered = (s: SubmissionSection) => Boolean(sections[s]);
-  const coveredCount = CHECKLIST_SECTIONS.filter(covered).length;
+  const covered = (s: string) => Boolean(sections[s]);
+  const checklist = checklistSections();
+  const coveredCount = checklist.filter(covered).length;
 
   // Re-scan highlights (consolidated mode only). Only auto-scroll to the first
   // match when the query itself changed — not when general guidance is toggled
@@ -668,21 +669,21 @@ export default function ConsolidatedViewer() {
           <div className="bg-white rounded-xl border border-slate-200 overflow-hidden lg:sticky lg:top-16">
             <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
               <span className="text-xs uppercase tracking-wide font-semibold text-slate-500">{t('viewer.docStatus')}</span>
-              <span className={`text-xs font-semibold ${coveredCount === CHECKLIST_SECTIONS.length ? 'text-emerald-600' : 'text-amber-600'}`}>
-                {coveredCount}/{CHECKLIST_SECTIONS.length}
+              <span className={`text-xs font-semibold ${coveredCount === checklist.length ? 'text-emerald-600' : 'text-amber-600'}`}>
+                {coveredCount}/{checklist.length}
               </span>
             </div>
             <div className="p-2">
-              {CHECKLIST_SECTIONS.map((s) => (
+              {checklist.map((s: string) => (
                 <div key={s} className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg">
                   {covered(s)
                     ? <CheckCircle2 size={15} className="text-emerald-500 shrink-0" />
                     : <Circle size={15} className="text-slate-300 shrink-0" />}
-                  <span className={`text-sm ${covered(s) ? 'text-slate-800' : 'text-slate-400'}`}>{SECTION_LABEL[s]}</span>
+                  <span className={`text-sm ${covered(s) ? 'text-slate-800' : 'text-slate-400'}`}>{sectionLabel(s)}</span>
                 </div>
               ))}
             </div>
-            {coveredCount < CHECKLIST_SECTIONS.length && (
+            {coveredCount < checklist.length && (
               <div className="px-4 py-3 border-t border-slate-100 bg-amber-50/50">
                 <div className="text-xs text-amber-900 leading-relaxed">
                   {t('viewer.incomplete')}{' '}

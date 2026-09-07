@@ -7,7 +7,7 @@ import { supabase } from '../lib/supabase';
 import { useAuth, canUpload } from '../lib/auth';
 import PageHeader from '../components/PageHeader';
 import AddSensorModal from '../components/AddSensorModal';
-import { coverageOf, SECTION_LABEL } from '../lib/consolidated';
+import { coverageOf, SECTION_LABEL, sectionLabel } from '../lib/consolidated';
 
 const PAGE_SIZE = 24;
 
@@ -160,7 +160,7 @@ export default function SensorModelList() {
                     <CoverageChip cov={c} />
                   </div>
                   {!c.complete && c.missing.length > 0 && (
-                    <div className="text-xs text-slate-500 mt-1">Missing: {c.missing.map((s) => SECTION_LABEL[s]).join(' · ')}</div>
+                    <div className="text-xs text-slate-500 mt-1">Missing: {c.missing.map((s) => sectionLabel(s)).join(' · ')}</div>
                   )}
                 </div>
                 <div className="hidden sm:block w-24 h-1.5 rounded-full bg-slate-100 overflow-hidden shrink-0">
