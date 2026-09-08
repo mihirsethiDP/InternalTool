@@ -174,3 +174,22 @@ describe('completeness is registry-driven (048)', () => {
     expect(cov.complete).toBe(true);
   });
 });
+
+describe('indexing an admin-added section (049)', () => {
+  afterEach(() => setSectionRegistry(SECTION_ORDER.map((k) => ({ key: k, label: SECTION_LABEL[k], counts: k !== 'other' }))));
+
+  it('chunks content in a custom section so it becomes searchable', () => {
+    setSectionRegistry([
+      ...SECTION_ORDER.map((k) => ({ key: k, label: SECTION_LABEL[k] })),
+      { key: 'tds', label: 'Technical Data Sheet' },
+    ]);
+    const chunks = chunkSections(parseSections('## tds\n\nSupply voltage 12 V DC. IP rating IP65.\n'));
+    expect(chunks.map((c) => c.section)).toContain('tds');
+  });
+
+  it('still chunks a section the registry has NOT loaded — approved content is never left unindexed', () => {
+    // registry = built-in nine only, document already carries 'tds'
+    const chunks = chunkSections(parseSections('## clean\n\nWipe it.\n\n## tds\n\nSupply voltage 12 V DC.\n'));
+    expect(chunks.map((c) => c.section).sort()).toEqual(['clean', 'tds']);
+  });
+});

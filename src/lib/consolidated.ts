@@ -165,9 +165,14 @@ export function appendSection(md: string, section: SubmissionSection, addition: 
 
 // Sentence-boundary chunking, target ~1000 chars, returns chunks per section
 // for re-indexing into consolidated_doc_chunks.
-export function chunkSections(sections: Sections, target = 1000): Array<{ section: SubmissionSection; text: string }> {
-  const out: Array<{ section: SubmissionSection; text: string }> = [];
-  for (const s of SECTION_ORDER) {
+export function chunkSections(sections: Sections, target = 1000): Array<{ section: string; text: string }> {
+  const out: Array<{ section: string; text: string }> = [];
+  // Iterate what the DOCUMENT actually has, not the built-in list: content
+  // filed into an admin-added section would otherwise never be indexed, so it
+  // would approve cleanly and then be invisible to search and to Dr. Paani.
+  const known = sectionKeys();
+  const order = [...known, ...Object.keys(sections).filter((k) => !known.includes(k))];
+  for (const s of order) {
     const body = (sections[s] || '').trim();
     if (!body) continue;
     if (body.length <= target) { out.push({ section: s, text: body }); continue; }
