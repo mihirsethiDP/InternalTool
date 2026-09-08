@@ -30,7 +30,7 @@ export default function RecycleBinPanel() {
     queryKey: ['bin-subs'],
     queryFn: async () => (await supabase
       .from('document_submissions')
-      .select('id, title, status, storage_path, deleted_at, document_types(label)')
+      .select('id, title, status, storage_path, deleted_at, document_types!document_submissions_type_id_fkey(label)')
       .not('deleted_at', 'is', null)
       .order('deleted_at', { ascending: false })).data ?? [],
   });

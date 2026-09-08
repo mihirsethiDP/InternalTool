@@ -35,6 +35,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (active) setState({ loading: false, userId: null, email: null, profile: null });
         return;
       }
+      // Publish the SESSION before fetching the profile. Waiting for the
+      // profile left a window where loading was already false and userId was
+      // still null, so <Protected> bounced a just-signed-in user straight
+      // back to /login — the session was in localStorage but the app looked
+      // signed out until a manual reload.
+      if (active) setState((prev) => ({ loading: false, userId: uid, email, profile: prev.userId === uid ? prev.profile : null }));
       if (loadedFor.current === uid) return; // already have this user's profile
       loadedFor.current = uid;
       const { data } = await supabase.from('profiles').select('*').eq('id', uid).maybeSingle();

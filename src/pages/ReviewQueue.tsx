@@ -27,7 +27,7 @@ export function ReviewQueueList() {
     queryFn: async () => {
       let q = supabase
         .from('document_submissions')
-        .select('*, document_types(label), sensor_models(model_no, sensor_makes(name))')
+        .select('*, document_types!document_submissions_type_id_fkey(label), sensor_models(model_no, sensor_makes(name))')
         .is('deleted_at', null)
         .order('uploaded_at', { ascending: false });
       if (status !== 'all') q = q.eq('status', status);
@@ -305,7 +305,7 @@ export function ReviewQueueDetail() {
     queryFn: async () => {
       const { data } = await supabase
         .from('document_submissions')
-        .select('*, document_types(label, key), sensor_models(id, model_no, sensor_makes(name))')
+        .select('*, document_types!document_submissions_type_id_fkey(label, key), sensor_models(id, model_no, sensor_makes(name))')
         .eq('id', id)
         .maybeSingle();
       return data;

@@ -141,7 +141,7 @@ export default function ConsolidatedViewer() {
       if (!cdoc.data?.sensor_model_id) return [];
       const { data } = await supabase
         .from('document_submissions')
-        .select('id, title, storage_path, reviewed_at, page_count, document_types(label)')
+        .select('id, title, storage_path, reviewed_at, page_count, document_types!document_submissions_type_id_fkey(label)')
         .eq('sensor_model_id', cdoc.data.sensor_model_id)
         .eq('status', 'approved')
         .order('reviewed_at', { ascending: false });

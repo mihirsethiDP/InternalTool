@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, ReactNode } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useLocation } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { extractPdfText, chunkPage, sanitizeText } from '../lib/pdf';
 import { analyzeUpload, AUTOFILL_CONFIDENCE, type UploadAnalysis } from '../lib/analyzeUpload';
@@ -36,6 +37,19 @@ export function useUpload() {
 export function UploadProvider({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(false);
   const [defaults, setDefaults] = useState<UploadDefaults>({});
+  const { pathname, hash } = useLocation();
+
+  // Escape closes it, and a route change dismisses it. Without these the
+  // modal stayed mounted on top of whatever page you navigated to, and the
+  // only way out was the Cancel button.
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open]);
+  useEffect(() => { setOpen(false); }, [pathname, hash]);
+
   return (
     <UploadCtx.Provider value={{ open: (d) => { setDefaults(d ?? {}); setOpen(true); } }}>
       {children}

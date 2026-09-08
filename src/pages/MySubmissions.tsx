@@ -4,7 +4,7 @@ import { FileText, Award, ArrowRight, CheckCircle2, X } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import SegmentedFilter from '../components/SegmentedFilter';
 import { supabase } from '../lib/supabase';
-import { useAuth } from '../lib/auth';
+import { useAuth, canUpload } from '../lib/auth';
 import PageHeader from '../components/PageHeader';
 import { useUpload } from '../components/UploadModal';
 import { extractPdfText, sanitizeText } from '../lib/pdf';
@@ -20,7 +20,7 @@ function StatusBadge({ s }: { s: SubmissionStatus }) {
 }
 
 export default function MySubmissions() {
-  const { userId } = useAuth();
+  const { userId, profile, loading } = useAuth();
   const upload = useUpload();
   const [filter, setFilter] = useState<'all' | SubmissionStatus>('all');
   const [reviseId, setReviseId] = useState<any | null>(null);
@@ -34,7 +34,7 @@ export default function MySubmissions() {
       if (!userId) return [];
       let q = supabase
         .from('document_submissions')
-        .select('*, document_types(label), sensor_models(model_no, sensor_makes(name))')
+        .select('*, document_types!document_submissions_type_id_fkey(label), sensor_models(model_no, sensor_makes(name))')
         .eq('uploaded_by', userId)
         .order('uploaded_at', { ascending: false });
       if (filter !== 'all') q = q.eq('status', filter);
@@ -85,6 +85,11 @@ export default function MySubmissions() {
       return r;
     },
   });
+
+  // The nav hides the link for viewers, but the ROUTE was open: a viewer could
+  // reach the full upload flow by URL. Guard it like /admin and /review.
+  if (loading) return <div className="card text-sm text-slate-500">Loading…</div>;
+  if (!canUpload(profile)) return <div className="card text-sm">Uploaders only.</div>;
 
   return (
     <div className="space-y-6">
