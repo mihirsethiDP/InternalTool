@@ -99,7 +99,7 @@ export default function Admin() {
       <AdminOnboarding />
 
       {/* Grouped tabs: group row + sub-tab pills when the group has several */}
-      <div className="border-b border-slate-200 flex gap-1 overflow-x-auto">
+      <div className="border-b border-slate-200 flex gap-1 overflow-x-auto scrollbar-thin">
         {GROUPS.map((g) => {
           const badge = g.key === 'review' ? (pending.data ?? 0) : g.key === 'knowledge' ? (draftFlows.data ?? 0) : 0;
           return (
@@ -426,7 +426,7 @@ function UsersPanel({ onChanged }: { onChanged: () => void }) {
         )}
       </form>
       <p className="text-xs text-slate-500 mb-3">Anyone who has signed in appears here. Change a user&rsquo;s role to grant upload or admin rights. Role changes apply to all of a person&rsquo;s sign-ins.</p>
-      <div className="overflow-x-auto -mx-4 px-4 sm:-mx-5 sm:px-5">
+      <div className="overflow-x-auto scrollbar-thin -mx-4 px-4 sm:-mx-5 sm:px-5">
         <table className="w-full text-sm min-w-[34rem]">
           <thead className="text-left text-xs uppercase text-slate-500"><tr><th>Email</th><th>Role</th><th></th></tr></thead>
           <tbody>
