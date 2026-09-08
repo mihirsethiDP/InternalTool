@@ -108,11 +108,12 @@ export default function ConsolidatedViewer() {
   const cdoc = useQuery({
     queryKey: ['consolidated-doc', id],
     queryFn: async () => {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('consolidated_docs')
         .select('*, sensor_models(model_no, category_id, is_general, sensor_makes(name), sensor_categories(name))')
         .eq('id', id)
         .maybeSingle();
+      if (error) throw error;
       return data;
     },
   });
@@ -124,12 +125,13 @@ export default function ConsolidatedViewer() {
     queryKey: ['general-doc', categoryId],
     queryFn: async () => {
       if (!categoryId) return null;
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('consolidated_docs')
         .select('content_markdown, sensor_models!inner(category_id, is_general)')
         .eq('sensor_models.category_id', categoryId)
         .eq('sensor_models.is_general', true)
         .maybeSingle();
+      if (error) throw error;
       return data;
     },
     enabled: Boolean(categoryId) && !isGeneralDoc,
@@ -139,12 +141,13 @@ export default function ConsolidatedViewer() {
     queryKey: ['consolidated-sources', cdoc.data?.sensor_model_id],
     queryFn: async () => {
       if (!cdoc.data?.sensor_model_id) return [];
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('document_submissions')
         .select('id, title, storage_path, reviewed_at, page_count, document_types!document_submissions_type_id_fkey(label)')
         .eq('sensor_model_id', cdoc.data.sensor_model_id)
         .eq('status', 'approved')
         .order('reviewed_at', { ascending: false });
+      if (error) throw error;
       return data ?? [];
     },
     enabled: Boolean(cdoc.data?.sensor_model_id),

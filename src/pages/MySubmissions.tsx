@@ -6,6 +6,7 @@ import SegmentedFilter from '../components/SegmentedFilter';
 import { supabase } from '../lib/supabase';
 import { useAuth, canUpload } from '../lib/auth';
 import PageHeader from '../components/PageHeader';
+import QueryError from '../components/QueryError';
 import { useUpload } from '../components/UploadModal';
 import { extractPdfText, sanitizeText } from '../lib/pdf';
 import { fetchMyScore, POINTS } from '../lib/contributions';
@@ -38,7 +39,8 @@ export default function MySubmissions() {
         .eq('uploaded_by', userId)
         .order('uploaded_at', { ascending: false });
       if (filter !== 'all') q = q.eq('status', filter);
-      const { data } = await q;
+      const { data, error } = await q;
+      if (error) throw error; // surface the failure instead of rendering "nothing here"
       return data ?? [];
     },
   });
@@ -150,6 +152,7 @@ export default function MySubmissions() {
       />
 
       <div className="space-y-3">
+        {submissions.isError && <QueryError what="your uploads" error={submissions.error} onRetry={() => submissions.refetch()} />}
         {(submissions.data ?? []).map((s: any) => (
           <div key={s.id} className="card-tight">
             <div className="flex items-start gap-3 flex-wrap">
@@ -196,7 +199,7 @@ export default function MySubmissions() {
             </div>
           </div>
         ))}
-        {!submissions.isLoading && (submissions.data ?? []).length === 0 && (
+        {submissions.isSuccess && (submissions.data ?? []).length === 0 && (
           <div className="card text-sm text-slate-500 text-center">
             No submissions {filter !== 'all' && `in "${filter}"`} yet.
             {filter === 'all' && ' Use "+ New submission" to upload your first document.'}

@@ -7,6 +7,7 @@ import {
   restoreConsolidated, hardDeleteConsolidated,
   restoreSubmission, hardDeleteSubmission,
 } from '../lib/recycleBin';
+import QueryError from './QueryError';
 
 // Admin → Recycle bin. Everything soft-deleted sits here for 30 days:
 // restore brings a reference back complete (search chunks rebuilt, its
@@ -20,19 +21,27 @@ export default function RecycleBinPanel() {
 
   const docs = useQuery({
     queryKey: ['bin-docs'],
-    queryFn: async () => (await supabase
+    queryFn: async () => {
+      const { data, error } = await supabase
       .from('consolidated_docs')
       .select('id, sensor_model_id, content_markdown, deleted_at, sensor_models(model_no, name, is_general, sensor_makes(name), sensor_categories(name))')
       .not('deleted_at', 'is', null)
-      .order('deleted_at', { ascending: false })).data ?? [],
+      .order('deleted_at', { ascending: false });
+      if (error) throw error; // a failed load must not look like an empty bin
+      return data ?? [];
+    },
   });
   const subs = useQuery({
     queryKey: ['bin-subs'],
-    queryFn: async () => (await supabase
+    queryFn: async () => {
+      const { data, error } = await supabase
       .from('document_submissions')
       .select('id, title, status, storage_path, deleted_at, document_types!document_submissions_type_id_fkey(label)')
       .not('deleted_at', 'is', null)
-      .order('deleted_at', { ascending: false })).data ?? [],
+      .order('deleted_at', { ascending: false });
+      if (error) throw error; // a failed load must not look like an empty bin
+      return data ?? [];
+    },
   });
 
   const refresh = () => {
@@ -74,7 +83,8 @@ export default function RecycleBinPanel() {
       </p>
       {note && <div className="text-xs rounded-lg bg-brand-50 border border-brand-200 text-brand-800 px-3 py-2">{note}</div>}
 
-      {empty && (
+      {(docs.isError || subs.isError) && <QueryError what="the recycle bin" error={docs.error ?? subs.error} onRetry={() => { docs.refetch(); subs.refetch(); }} />}
+      {docs.isSuccess && subs.isSuccess && empty && (
         <div className="card text-sm text-slate-500 text-center py-8">
           <Trash2 size={22} className="mx-auto mb-2 text-slate-300" />
           The recycle bin is empty.

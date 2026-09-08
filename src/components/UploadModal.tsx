@@ -6,6 +6,7 @@ import { extractPdfText, chunkPage, sanitizeText } from '../lib/pdf';
 import { analyzeUpload, AUTOFILL_CONFIDENCE, type UploadAnalysis } from '../lib/analyzeUpload';
 import { classifyDoc, MISMATCH_CONFIDENCE } from '../lib/classify';
 import AddSensorModal from './AddSensorModal';
+import { useToast } from './Toast';
 import { Loader2, Sparkles } from 'lucide-react';
 
 interface UploadDefaults {
@@ -68,6 +69,7 @@ function fileIcon(name: string) {
 }
 
 function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onClose: () => void }) {
+  const toast = useToast();
   const qc = useQueryClient();
   const [file, setFile] = useState<File | null>(null);
   const [title, setTitle] = useState('');
@@ -473,6 +475,7 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
 
     setProgress(100);
     setStatus('✅ Submitted for review. You\'ll be notified when an admin approves or rejects it.');
+    toast.success(`“${title}” sent for review.`);
     qc.invalidateQueries({ queryKey: ['my-submissions'] });
     qc.invalidateQueries({ queryKey: ['my-submissions-counts'] });
     qc.invalidateQueries({ queryKey: ['pending-submissions'] });

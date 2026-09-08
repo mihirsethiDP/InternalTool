@@ -7,11 +7,13 @@ import { supabase } from '../lib/supabase';
 import { useAuth, isAdmin } from '../lib/auth';
 import { softDeleteSubmission } from '../lib/recycleBin';
 import PageHeader from '../components/PageHeader';
+import { useToast } from '../components/Toast';
 import type { SubmissionSection } from '../lib/types';
 import { SECTION_LABEL, SECTION_HINT, parseSections, sectionLabel, sectionHint, orderedKeys } from '../lib/consolidated';
 import { useSectionDefs } from '../lib/useSectionDefs';
 import { classifyDoc, MISMATCH_CONFIDENCE } from '../lib/classify';
 import { approveSubmission, approveSubmissionParts, type ApprovalPart } from '../lib/approve';
+import QueryError from '../components/QueryError';
 
 /* =========================================================
    List page — /review
@@ -31,7 +33,8 @@ export function ReviewQueueList() {
         .is('deleted_at', null)
         .order('uploaded_at', { ascending: false });
       if (status !== 'all') q = q.eq('status', status);
-      const { data } = await q;
+      const { data, error } = await q;
+      if (error) throw error; // surface the failure instead of rendering "nothing here"
       return data ?? [];
     },
   });
@@ -109,7 +112,8 @@ export function ReviewQueueList() {
             {s.status === 'pending' && (s.extracted_text || '').trim() && <QuickApprove submission={s} qc={qc} />}
           </div>
         ))}
-        {!subs.isLoading && rows.length === 0 && (
+        {subs.isError && <QueryError what="the review queue" error={subs.error} onRetry={() => subs.refetch()} />}
+        {subs.isSuccess && rows.length === 0 && (
           <div className="card text-sm text-slate-500 text-center">{q ? 'No matches.' : 'Nothing here.'}</div>
         )}
       </div>
@@ -303,11 +307,12 @@ export function ReviewQueueDetail() {
   const sub = useQuery({
     queryKey: ['submission', id],
     queryFn: async () => {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('document_submissions')
         .select('*, document_types!document_submissions_type_id_fkey(label, key), sensor_models(id, model_no, sensor_makes(name))')
         .eq('id', id)
         .maybeSingle();
+      if (error) throw error;
       return data;
     },
   });
@@ -367,6 +372,7 @@ export function ReviewQueueDetail() {
   if (loading) return <div className="card text-sm text-slate-500">Loading…</div>;
   if (!isAdmin(profile)) return <div className="card text-sm">Admins only.</div>;
   if (sub.isLoading) return <div className="muted">Loading…</div>;
+  if (sub.isError) return <QueryError what="this submission" error={sub.error} onRetry={() => sub.refetch()} />;
   if (!s) return <div className="card text-sm">Submission not found.</div>;
 
   // Approved → guided next steps instead of a dead end.
@@ -528,6 +534,7 @@ export function ReviewQueueDetail() {
 type SplitPart = ApprovalPart & { include: boolean };
 
 function ApproveModal({ submission, editedText, onClose, onDone }: any) {
+  const toast = useToast();
   const qc = useQueryClient();
   // Pre-fill the section from the document TYPE's default (types describe the
   // file; the default connects them to the activity section it usually feeds).
@@ -619,6 +626,7 @@ function ApproveModal({ submission, editedText, onClose, onDone }: any) {
           })
         : await approveSubmission({ submission, editedText, section, mode, note, qc });
       qc.invalidateQueries({ queryKey: ['submission', submission.id] });
+      toast.success(`Approved “${submission.title}”.`);
       onDone(docId);
     } catch (e: any) {
       setErr(e.message || String(e));
@@ -763,6 +771,7 @@ function ApproveModal({ submission, editedText, onClose, onDone }: any) {
    Request changes modal — sends back to the maker; keeps the file
 ========================================================= */
 function RequestChangesModal({ submission, editedText, initialNote, onClose, onDone }: any) {
+  const toast = useToast();
   const qc = useQueryClient();
   const [note, setNote] = useState(initialNote ?? '');
   const [busy, setBusy] = useState(false);
@@ -796,6 +805,7 @@ function RequestChangesModal({ submission, editedText, initialNote, onClose, onD
       qc.invalidateQueries({ queryKey: ['review-queue'] });
       qc.invalidateQueries({ queryKey: ['review-queue-counts'] });
       qc.invalidateQueries({ queryKey: ['my-submissions'] });
+      toast.success('Changes requested — sent back to the uploader.');
       onDone();
     } catch (e: any) {
       setErr(e.message || String(e));
@@ -829,6 +839,7 @@ function RequestChangesModal({ submission, editedText, initialNote, onClose, onD
    Reject modal — soft archive; the file is RETAINED
 ========================================================= */
 function RejectModal({ submission, onClose, onDone }: any) {
+  const toast = useToast();
   const qc = useQueryClient();
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
@@ -860,6 +871,7 @@ function RejectModal({ submission, onClose, onDone }: any) {
       qc.invalidateQueries({ queryKey: ['review-queue'] });
       qc.invalidateQueries({ queryKey: ['review-queue-counts'] });
       qc.invalidateQueries({ queryKey: ['my-submissions'] });
+      toast.success('Submission rejected.');
       onDone();
     } catch (e: any) {
       setErr(e.message || String(e));
@@ -893,6 +905,7 @@ function RejectModal({ submission, onClose, onDone }: any) {
    Delete submission — soft delete into the 30-day recycle bin
 ========================================================= */
 function DeleteFileModal({ submission, onClose, onDone }: any) {
+  const toast = useToast();
   const qc = useQueryClient();
   const { userId } = useAuth();
   const [busy, setBusy] = useState(false);
@@ -906,6 +919,7 @@ function DeleteFileModal({ submission, onClose, onDone }: any) {
       qc.invalidateQueries({ queryKey: ['review-queue-counts'] });
       qc.invalidateQueries({ queryKey: ['submission', submission.id] });
       qc.invalidateQueries({ queryKey: ['bin-subs'] });
+      toast.success('File deleted.');
       onDone();
     } catch (e: any) {
       setErr(e.message || String(e));

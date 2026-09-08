@@ -6,6 +6,7 @@ import { supabase } from '../lib/supabase';
 import { useAuth, canUpload, isAdmin } from '../lib/auth';
 import { useSectionDefs } from '../lib/useSectionDefs';
 import { UploadProvider, useUpload } from './UploadModal';
+import { ToastProvider } from './Toast';
 import NotificationBell from './NotificationBell';
 import ChatDrawer from './ChatDrawer';
 import UserMenu from './UserMenu';
@@ -142,5 +143,5 @@ function Inner() {
 }
 
 export default function Layout() {
-  return <UploadProvider><Inner /></UploadProvider>;
+  return <ToastProvider><UploadProvider><Inner /></UploadProvider></ToastProvider>;
 }
