@@ -38,11 +38,11 @@ interface Chunk {
   match_kind: string;
 }
 
-// Build marker — bump when deploying a change you need to confirm went live.
+// Build marker — BUMP THIS IN THE SAME EDIT as any change to this file.
 // Ask for it with { mode: "ping" }: guessing which copy of this file is
 // deployed cost us a debugging cycle when a stale paste kept routing spec
 // sheets to "other".
-const FN_BUILD = '2026-08-20-qa-sweep-auth-gate';
+const FN_BUILD = '2026-08-20-detect-new-sensors';
 
 const SECTION_LABEL: Record<string, string> = {
   install_commission: 'Install & Commission', configure: 'Configure', inspect: 'Inspect',
