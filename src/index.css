@@ -126,3 +126,23 @@ html[data-contrast='high'] :focus-visible { outline-color: #000; outline-width: 
   border-radius: 9999px;
 }
 .scrollbar-thin::-webkit-scrollbar-thumb:hover { background: rgb(148 163 184); }
+
+/* The page scrollbar itself.
+   Chrome on Windows draws OVERLAY scrollbars — they float on top of the
+   content as dark rounded pills rather than taking layout width (which is why
+   `clientWidth === scrollWidth` even while a bar is visible). Untouched, that
+   pill reads as a dark slab sitting over the UI. Match it to the app: slim,
+   light slate, transparent track. */
+html {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(203 213 225) transparent;
+}
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: rgb(203 213 225);
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover { background: rgb(148 163 184); background-clip: content-box; }
