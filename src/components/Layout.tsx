@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { Plus, MessageSquare, Menu, X } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth, canUpload, isAdmin } from '../lib/auth';
+import { useSectionDefs } from '../lib/useSectionDefs';
 import { UploadProvider, useUpload } from './UploadModal';
 import NotificationBell from './NotificationBell';
 import ChatDrawer from './ChatDrawer';
@@ -21,6 +22,11 @@ const mobileNavCls = ({ isActive }: { isActive: boolean }) =>
   }`;
 
 function Inner() {
+  // Seed the section registry ONCE for the whole app. It is module-level, so
+  // a page that never calls this falls back to the built-in nine — which is
+  // why an admin-added section was missing from the viewer checklist and
+  // rendered with a fallback label everywhere except the review screen.
+  useSectionDefs();
   const { profile, email } = useAuth();
   const nav = useNavigate();
   const { t } = useTranslation();
