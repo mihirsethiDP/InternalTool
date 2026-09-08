@@ -7,7 +7,7 @@ import { analyzeUpload, AUTOFILL_CONFIDENCE, type UploadAnalysis } from '../lib/
 import { classifyDoc, MISMATCH_CONFIDENCE } from '../lib/classify';
 import AddSensorModal from './AddSensorModal';
 import { useToast } from './Toast';
-import { Loader2, Sparkles } from 'lucide-react';
+import { Loader2, Sparkles, Plus } from 'lucide-react';
 
 interface UploadDefaults {
   sensor_model_id?: string;
@@ -101,6 +101,8 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
   const [analyzing, setAnalyzing] = useState(false);
   const [typeTouched, setTypeTouched] = useState(false);
   const [sensorTouched, setSensorTouched] = useState(false);
+  const [creatingSensor, setCreatingSensor] = useState(false);
+  const [sensorErr, setSensorErr] = useState<string | null>(null);
   // Batch mode: several files picked at once → one submission per file.
   // The sensor scope is shared (a batch is "this sensor's manuals"); title and
   // type are per file, auto-detected per file, always editable.
@@ -233,6 +235,57 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
       }
     }
     patchItem(idx, { reading: false });
+  }
+
+  // The document named a sensor that IS catalogued (under another spelling).
+  async function useDetectedExisting(d: NonNullable<UploadAnalysis["detected"]>) {
+    if (!d.existing_model_id) return;
+    setSensorTouched(true);
+    setScope('model');
+    const { data } = await supabase.from('sensor_models').select('make_id').eq('id', d.existing_model_id).maybeSingle();
+    if ((data as any)?.make_id) setMakeId((data as any).make_id);
+    setSensorModelId(d.existing_model_id);
+  }
+
+  // The document named a sensor that is NOT catalogued. Creates the make when
+  // it is new too, then the model, then selects it — so the uploader never
+  // leaves the form to add a sensor by hand.
+  async function createDetectedSensor(d: NonNullable<UploadAnalysis["detected"]>) {
+    if (!d.model) { setSensorErr('No model number was detected — please pick the sensor manually.'); return; }
+    setCreatingSensor(true); setSensorErr(null);
+    try {
+      let makeId2 = d.make_id;
+      if (!makeId2) {
+        if (!d.make) throw new Error('No manufacturer was detected — please add the sensor manually.');
+        // Re-check by name first: two uploaders adding the same make at once
+        // must not create it twice.
+        const { data: existingMake } = await supabase.from('sensor_makes').select('id').ilike('name', d.make).maybeSingle();
+        if (existingMake) makeId2 = (existingMake as any).id;
+        else {
+          const ins = await supabase.from('sensor_makes').insert({ name: d.make }).select('id').single();
+          if (ins.error) throw ins.error;
+          makeId2 = ins.data.id;
+        }
+      }
+      const categoryId2 = d.category_id ?? categoryId ?? null;
+      if (!categoryId2) throw new Error('Pick the sensor category below, then add it.');
+      const insModel = await supabase.from('sensor_models')
+        .insert({ make_id: makeId2, category_id: categoryId2, model_no: d.model, name: d.model, is_general: false })
+        .select('id').single();
+      if (insModel.error) throw insModel.error;
+      setSensorTouched(true);
+      setScope('model');
+      setMakeId(makeId2!);
+      setSensorModelId(insModel.data.id);
+      qc.invalidateQueries({ queryKey: ['makes'] });
+      qc.invalidateQueries({ queryKey: ['models-by-make', makeId2] });
+      qc.invalidateQueries({ queryKey: ['sensor-models'] });
+      toast.success(`Added ${[d.make, d.model].filter(Boolean).join(' ')} to the catalogue.`);
+    } catch (e: any) {
+      setSensorErr(e.message || String(e));
+    } finally {
+      setCreatingSensor(false);
+    }
   }
 
   // Read the document and pre-fill the form: which activities it covers and
@@ -759,8 +812,49 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
                 {!analyzing && analysis?.model && !sensorTouched && analysis.model.confidence >= AUTOFILL_CONFIDENCE && (
                   <div className="text-xs text-emerald-700">✓ Detected <b>{analysis.model.label}</b> from the document — change it above if that's wrong.</div>
                 )}
-                {!analyzing && analysis && !analysis.model && extracted && (
-                  <div className="text-xs text-slate-500">Couldn't tell which sensor this is from the text — please pick it.</div>
+                {/* The sensor the DOCUMENT names. Three outcomes, in order of
+                    least work for the uploader:
+                      1. already catalogued (maybe spelled differently) -> select it
+                      2. known make, new model -> one tap adds the model
+                      3. new make and model   -> one tap adds both
+                    Nothing is created without an explicit tap. */}
+                {!analyzing && !sensorTouched && analysis?.detected && !analysis.model && (analysis.detected.model || analysis.detected.make) && (
+                  <div className="rounded-xl border border-brand-200 bg-brand-50/60 px-3.5 py-3 space-y-2">
+                    <div className="text-sm text-brand-900">
+                      The document is about{' '}
+                      <b>{[analysis.detected.make, analysis.detected.model].filter(Boolean).join(' ')}</b>
+                      {analysis.detected.existing_model_id
+                        ? <> — already in the catalogue as <b>{analysis.detected.existing_model_label}</b>.</>
+                        : analysis.detected.make_id
+                          ? <> — that make is known, but this model isn’t in the catalogue yet.</>
+                          : <> — neither the make nor the model is in the catalogue yet.</>}
+                    </div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {analysis.detected.existing_model_id ? (
+                        <button type="button" onClick={() => useDetectedExisting(analysis.detected!)}
+                          className="tap rounded-lg bg-brand-700 text-white px-3 py-1.5 text-xs font-semibold hover:bg-brand-800 transition">
+                          Use {analysis.detected.existing_model_label}
+                        </button>
+                      ) : (
+                        <button type="button" onClick={() => createDetectedSensor(analysis.detected!)} disabled={creatingSensor}
+                          className="tap inline-flex items-center gap-1.5 rounded-lg bg-brand-700 text-white px-3 py-1.5 text-xs font-semibold hover:bg-brand-800 transition disabled:opacity-60">
+                          {creatingSensor ? <Loader2 size={12} className="animate-spin" /> : <Plus size={12} />}
+                          {analysis.detected.make_id ? 'Add this model' : 'Add this make & model'}
+                        </button>
+                      )}
+                      <button type="button" onClick={() => setSensorTouched(true)}
+                        className="tap rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 hover:border-brand-700 hover:text-brand-700 transition">
+                        I’ll pick it myself
+                      </button>
+                      {analysis.detected.category_name && !analysis.detected.existing_model_id && (
+                        <span className="text-[11px] text-slate-500">files under <b>{analysis.detected.category_name}</b></span>
+                      )}
+                    </div>
+                    {sensorErr && <div className="text-xs text-red-700">{sensorErr}</div>}
+                  </div>
+                )}
+                {!analyzing && analysis && !analysis.model && !analysis.detected && extracted && (
+                  <div className="text-xs text-slate-500">Couldn’t tell which sensor this is from the text — please pick it.</div>
                 )}
               </>
             )}

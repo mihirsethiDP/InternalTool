@@ -684,11 +684,13 @@ Deno.serve(async (req) => {
     if (text.length < 100 && !title) return json({ sections: [], make: null, model: null, note: 'not enough text to analyze' });
 
     // Catalogue the model can choose from (ids come back so the form can select).
-    const [{ data: types }, { data: models }] = await Promise.all([
+    const [{ data: types }, { data: models }, { data: cats }, { data: makes }] = await Promise.all([
       supabase.from('document_types').select('key, label').eq('scope', 'general').order('sort_order'),
       supabase.from('sensor_models')
         .select('id, model_no, name, is_general, category_id, sensor_makes(id, name), sensor_categories(name)')
         .eq('is_general', false).limit(300),
+      supabase.from('sensor_categories').select('id, name, aliases').order('name'),
+      supabase.from('sensor_makes').select('id, name').order('name'),
     ]);
     const typeList = (types ?? []) as { key: string; label: string }[];
     const modelList = ((models ?? []) as any[]).map((m) => {
@@ -696,24 +698,32 @@ Deno.serve(async (req) => {
       const ct = Array.isArray(m.sensor_categories) ? m.sensor_categories[0] : m.sensor_categories;
       return { id: m.id, make_id: mk?.id ?? null, label: `${mk?.name ?? ''} ${m.model_no || m.name}`.trim(), category: ct?.name ?? '' };
     });
+    const catList = ((cats ?? []) as any[]).map((c) => ({ id: c.id, name: c.name, aliases: Array.isArray(c.aliases) ? c.aliases : [] }));
+    const makeList = ((makes ?? []) as any[]).map((m) => ({ id: m.id, name: m.name }));
 
     const sys = [
       'You classify water/wastewater sensor documents for a maintenance library.',
       'Return (a) EVERY activity type the document genuinely covers, most prominent first, and (b) which catalogued sensor it is about.',
       'Only list an activity if the document actually contains instructions for it — do not guess from the title alone.',
-      'Only name a sensor from the provided catalogue, and only when the document clearly identifies it. Otherwise return null.',
+      'Match to the catalogue when the document is clearly about a catalogued sensor.',
+      'SEPARATELY, always report the manufacturer and model EXACTLY as printed in the document, even when they are not in the catalogue — that is how a new sensor gets added. Use null only when the document truly does not name one.',
+      'Also say which sensor category it belongs to, chosen from the category list.',
       'Respond with strict JSON only.',
     ].join('\n');
     const userMsg = [
       `Document title: ${title || '(none)'}`,
       `Activity types (use ONLY these keys): ${typeList.map((t) => `${t.key} (${t.label})`).join('; ')}`,
       `Sensor catalogue (use ONLY these ids): ${modelList.map((m) => `${m.id} = ${m.label}${m.category ? ` [${m.category}]` : ''}`).join('; ') || '(catalogue empty)'}`,
+      `Sensor categories (use ONLY these ids): ${catList.map((c) => `${c.id} = ${c.name}${c.aliases.length ? ` (also: ${c.aliases.slice(0, 5).join(', ')})` : ''}`).join('; ')}`,
       '',
       `Document text:\n${text}`,
       '',
       'Return strict JSON:',
       '{"sections":[{"key":"<type key>","confidence":<0 to 1>}],',
-      ' "model_id":"<catalogue id or null>","model_confidence":<0 to 1>}',
+      ' "model_id":"<catalogue id or null>","model_confidence":<0 to 1>,',
+      ' "printed_make":"<manufacturer exactly as printed, or null>",',
+      ' "printed_model":"<model number exactly as printed, or null>",',
+      ' "category_id":"<category id or null>"}',
     ].join('\n');
 
     const { raw } = await smartComplete(sys, userMsg, { ...smartOpts, maxTokens: 700 });
@@ -727,9 +737,44 @@ Deno.serve(async (req) => {
       .slice(0, 5);
     const hit = modelList.find((m) => m.id === parsed.model_id);
     const modelConfidence = typeof parsed.model_confidence === 'number' ? parsed.model_confidence : 0;
+
+    // What the document actually says it is — reported even when the sensor is
+    // not catalogued yet, so the upload form can offer to create it.
+    const printedMake = (parsed.printed_make ?? "").toString().trim().slice(0, 80) || null;
+    const printedModel = (parsed.printed_model ?? "").toString().trim().slice(0, 80) || null;
+    // Loose compare: "MAG-110", "MAG110" and "mag 110" are the same sensor. This
+    // is what stops the catalogue filling up with near-duplicates.
+    const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+    const makeMatch = printedMake ? makeList.find((m) => norm(m.name) === norm(printedMake)) ?? null : null;
+    let closeModel: { id: string; make_id: string | null; label: string } | null = null;
+    if (printedModel) {
+      const target = norm(printedModel);
+      closeModel = modelList.find((m) => {
+        // strip the make prefix by LENGTH, not regex — a make name is user data
+        // and could contain regex metacharacters.
+        const mkName = makeMatch?.name ?? '';
+        const stripped = mkName && m.label.toLowerCase().startsWith(mkName.toLowerCase()) ? m.label.slice(mkName.length) : m.label;
+        const modelPart = norm(stripped);
+        return modelPart === target || norm(m.label) === norm(`${printedMake ?? ""} ${printedModel}`);
+      }) ?? null;
+    }
+    const catHit = catList.find((c) => c.id === parsed.category_id) ?? null;
+
     return json({
       sections,
       model: hit && modelConfidence >= 0.5 ? { id: hit.id, make_id: hit.make_id, label: hit.label, confidence: modelConfidence } : null,
+      // The sensor as printed. `existing_model_id` is set when it is already
+      // catalogued under a different spelling; `make_id` when only the make is
+      // known. Both null = genuinely new make AND model.
+      detected: (printedMake || printedModel) ? {
+        make: printedMake,
+        model: printedModel,
+        make_id: makeMatch?.id ?? null,
+        existing_model_id: closeModel?.id ?? null,
+        existing_model_label: closeModel?.label ?? null,
+        category_id: catHit?.id ?? null,
+        category_name: catHit?.name ?? null,
+      } : null,
     });
   }
 

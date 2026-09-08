@@ -9,9 +9,27 @@ import { supabase } from './supabase';
 export interface DetectedSection { key: string; confidence: number }
 export interface DetectedModel { id: string; make_id: string | null; label: string; confidence: number }
 
+/**
+ * The sensor as PRINTED in the document, reported whether or not it is
+ * catalogued — that is what lets the upload form offer to create it.
+ *   existing_model_id -> already catalogued (possibly spelled differently)
+ *   make_id set, no model id -> known manufacturer, NEW model
+ *   neither set -> new manufacturer AND new model
+ */
+export interface DetectedSensor {
+  make: string | null;
+  model: string | null;
+  make_id: string | null;
+  existing_model_id: string | null;
+  existing_model_label: string | null;
+  category_id: string | null;
+  category_name: string | null;
+}
+
 export interface UploadAnalysis {
   sections: DetectedSection[]; // most prominent first
-  model: DetectedModel | null;
+  model: DetectedModel | null; // confident catalogue match
+  detected: DetectedSensor | null; // what the document says it is
 }
 
 export async function analyzeUpload(text: string, title: string): Promise<UploadAnalysis | null> {
@@ -26,6 +44,7 @@ export async function analyzeUpload(text: string, title: string): Promise<Upload
     return {
       sections: Array.isArray(d.sections) ? d.sections : [],
       model: d.model ?? null,
+      detected: d.detected ?? null,
     };
   } catch {
     return null;
