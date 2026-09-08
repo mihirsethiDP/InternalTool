@@ -42,7 +42,7 @@ interface Chunk {
 // Ask for it with { mode: "ping" }: guessing which copy of this file is
 // deployed cost us a debugging cycle when a stale paste kept routing spec
 // sheets to "other".
-const FN_BUILD = '2026-08-20-sections-from-db';
+const FN_BUILD = '2026-08-20-qa-sweep-auth-gate';
 
 const SECTION_LABEL: Record<string, string> = {
   install_commission: 'Install & Commission', configure: 'Configure', inspect: 'Inspect',
@@ -879,6 +879,10 @@ Deno.serve(async (req) => {
   // semantic backstop ("value looks weird" → "Reading fluctuating").
   if (mode === 'match-issue') {
     const supabase = createClient(SUPABASE_URL, SERVICE_KEY);
+    // Sits BEFORE the shared signed-in gate below, so it needs its own.
+    const miToken = (req.headers.get('Authorization') ?? '').replace(/^Bearer\s+/i, '');
+    const { data: miUser } = await supabase.auth.getUser(miToken);
+    if (!miUser?.user) return json({ error: 'unauthorized' }, 401);
     const q = ((payload as any).query ?? '').toString().slice(0, 500).trim();
     if (!q) return json({ error: 'query required' }, 400);
     const categoryId = ((payload as any).category_id ?? '').toString() || null;
