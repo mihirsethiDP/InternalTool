@@ -808,7 +808,16 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
         queue = filterQueueForModel(p.info.flows, runScope?.modelId ?? null);
       }
       pendingRef.current = null;
-      if (queue.length === 0) return;
+      // A silent return here left the user tapping a chip and getting NOTHING
+      // back (reachable when the issue lists models whose flows do not survive
+      // the model filter). Fall through to the symptom probe instead.
+      if (queue.length === 0) {
+        logUnanswered({ query: p.origQuery, source: 'chat', sensorModelId: runScope?.modelId ?? null });
+        setTurns((t) => [...t, { role: 'user', text: chip.label }, { role: 'bot', query: p.origQuery, loading: true }]);
+        const opts = await symptomOptions(runScope);
+        setTurns((t) => fillLoadingTurn(t, { role: 'bot', query: p.origQuery, loading: false, narrowedLabel: runScope?.label, probe: { text: probeText(runScope?.label), options: opts } }));
+        return;
+      }
       queueRef.current = { issueLabel: p.issue.label, flows: queue, index: 0 };
       setQueueTick((t) => t + 1);
       setTurns((t) => [...t, { role: 'user', text: chip.label }, { role: 'bot', query: p.origQuery, loading: true }]);

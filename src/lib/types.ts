@@ -93,7 +93,10 @@ export type SubmissionStatus = 'pending' | 'approved' | 'rejected' | 'changes_re
 // input form (document_types).
 export type SubmissionSection =
   | 'install_commission' | 'configure' | 'inspect' | 'clean' | 'calibrate'
-  | 'replace' | 'troubleshoot_repair' | 'maintenance_planning' | 'other';
+  | 'replace' | 'troubleshoot_repair' | 'maintenance_planning' | 'other'
+  // Sections are DATA (document_types rows): an admin can add one in the UI,
+  // and it must flow through the same code paths as the built-ins above.
+  | (string & {});
 
 export interface DocumentSubmission {
   id: string;

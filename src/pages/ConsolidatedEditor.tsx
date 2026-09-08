@@ -9,7 +9,7 @@ import { supabase } from '../lib/supabase';
 import { useAuth, isAdmin } from '../lib/auth';
 import PageHeader from '../components/PageHeader';
 import {
-  SECTION_LABEL, SECTION_ORDER, parseSections, renderSections,
+  sectionLabel, sectionKeys, orderedKeys, parseSections, renderSections,
   type Sections,
 } from '../lib/consolidated';
 import { writeConsolidated } from '../lib/consolidatedWrite';
@@ -29,7 +29,7 @@ export default function ConsolidatedEditor() {
   const qc = useQueryClient();
 
   const [sections, setSections] = useState<Sections>(
-    () => Object.fromEntries(SECTION_ORDER.map((s) => [s, ''])) as Sections
+    () => Object.fromEntries(sectionKeys().map((s) => [s, ''])) as Sections
   );
   const [busy, setBusy] = useState(false);
   const [savedAt, setSavedAt] = useState<string | null>(null);
@@ -103,7 +103,7 @@ export default function ConsolidatedEditor() {
       )}
 
       <div className="space-y-5">
-        {SECTION_ORDER.map((s) => (
+        {orderedKeys(sections).map((s) => (
           <SectionEditor
             key={s}
             section={s}
@@ -134,7 +134,7 @@ function SectionEditor({ section, initialBody, onChange, onSave, busy }: {
   const editor = useEditor({
     extensions: [
       StarterKit,
-      Placeholder.configure({ placeholder: `Start typing the ${SECTION_LABEL[section]} content…` }),
+      Placeholder.configure({ placeholder: `Start typing the ${sectionLabel(section)} content…` }),
       Link.configure({ openOnClick: false, autolink: true, HTMLAttributes: { rel: 'noreferrer', class: 'text-brand-700 underline' } }),
     ],
     content: bodyToHtml(initialBody),
@@ -163,7 +163,7 @@ function SectionEditor({ section, initialBody, onChange, onSave, busy }: {
   return (
     <div className="card">
       <div className="flex items-center justify-between mb-3">
-        <h2 className="text-xs uppercase tracking-wider font-semibold text-slate-500">{SECTION_LABEL[section]}</h2>
+        <h2 className="text-xs uppercase tracking-wider font-semibold text-slate-500">{sectionLabel(section)}</h2>
         <div className="flex items-center gap-1 flex-wrap">
           <TbBtn active={editor.isActive('bold')} onClick={() => editor.chain().focus().toggleBold().run()}><strong>B</strong></TbBtn>
           <TbBtn active={editor.isActive('italic')} onClick={() => editor.chain().focus().toggleItalic().run()}><em>I</em></TbBtn>

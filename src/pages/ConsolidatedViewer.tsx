@@ -11,7 +11,7 @@ import {
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth, isAdmin } from '../lib/auth';
-import { SECTION_LABEL, SECTION_ORDER, parseSections, checklistSections, sectionLabel } from '../lib/consolidated';
+import { SECTION_LABEL, parseSections, checklistSections, sectionLabel, orderedKeys } from '../lib/consolidated';
 import { renderMarkdown, normalizeAnswerSteps } from '../lib/markdown';
 import RevisionHistory from '../components/RevisionHistory';
 import AnswerFeedback from '../components/AnswerFeedback';
@@ -156,9 +156,10 @@ export default function ConsolidatedViewer() {
   const sections = useMemo(() => parseSections(cdoc.data?.content_markdown), [cdoc.data?.content_markdown]);
   const generalSections = useMemo(() => parseSections(generalDoc.data?.content_markdown), [generalDoc.data?.content_markdown]);
   const [showGeneral, setShowGeneral] = useState(true);
-  const hasGeneral = SECTION_ORDER.some((s) => generalSections[s]);
+  const docKeys = orderedKeys(sections, generalSections);
+  const hasGeneral = docKeys.some((s) => generalSections[s]);
   // A section is shown if the model has content, or (when general is on) general has content.
-  const presentSections = SECTION_ORDER.filter((s) => sections[s] || (showGeneral && !isGeneralDoc && generalSections[s]));
+  const presentSections = docKeys.filter((s) => sections[s] || (showGeneral && !isGeneralDoc && generalSections[s]));
 
   // Focus mode only "engages" when the chat actually pointed us at a section
   // that exists here — otherwise collapsing every section would hide everything.

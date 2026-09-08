@@ -8,7 +8,7 @@ import { useAuth, isAdmin } from '../lib/auth';
 import { softDeleteSubmission } from '../lib/recycleBin';
 import PageHeader from '../components/PageHeader';
 import type { SubmissionSection } from '../lib/types';
-import { SECTION_LABEL, SECTION_ORDER, SECTION_HINT, parseSections, sectionLabel, sectionHint } from '../lib/consolidated';
+import { SECTION_LABEL, SECTION_HINT, parseSections, sectionLabel, sectionHint, orderedKeys } from '../lib/consolidated';
 import { useSectionDefs } from '../lib/useSectionDefs';
 import { classifyDoc, MISMATCH_CONFIDENCE } from '../lib/classify';
 import { approveSubmission, approveSubmissionParts, type ApprovalPart } from '../lib/approve';
@@ -561,7 +561,7 @@ function ApproveModal({ submission, editedText, onClose, onDone }: any) {
         .eq('sensor_model_id', submission.sensor_model_id).is('deleted_at', null).maybeSingle();
       const sections = parseSections(data?.content_markdown);
       const words: Partial<Record<SubmissionSection, number>> = {};
-      for (const s of SECTION_ORDER) {
+      for (const s of orderedKeys(sections)) {
         const t = (sections[s] ?? '').trim();
         if (t) words[s] = t.split(/\s+/).length;
       }

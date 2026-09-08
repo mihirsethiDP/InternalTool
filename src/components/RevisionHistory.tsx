@@ -3,7 +3,7 @@ import { useMemo, useState } from 'react';
 import { History, X, RotateCcw, Plus, Minus } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { writeConsolidated, lineDiff } from '../lib/consolidatedWrite';
-import { parseSections, SECTION_ORDER, SECTION_LABEL } from '../lib/consolidated';
+import { parseSections, SECTION_LABEL, sectionLabel, orderedKeys } from '../lib/consolidated';
 import type { SubmissionSection } from '../lib/types';
 
 interface Revision {
@@ -26,7 +26,7 @@ const KIND_LABEL: Record<string, string> = {
 function changedSections(prevMd: string, curMd: string): SubmissionSection[] {
   const prev = parseSections(prevMd);
   const cur = parseSections(curMd);
-  return SECTION_ORDER.filter((s) => (prev[s] || '').trim() !== (cur[s] || '').trim());
+  return orderedKeys(prev, cur).filter((s) => (prev[s] || '').trim() !== (cur[s] || '').trim());
 }
 
 // Clean a markdown line into friendly display text.
@@ -117,7 +117,7 @@ export default function RevisionHistory({ docId, sensorModelId, onClose, onRever
     if (!selected) return [];
     const prev = parseSections(priorContent(selected));
     const cur = parseSections(selected.content_markdown);
-    return SECTION_ORDER
+    return orderedKeys(prev, cur)
       .map((s) => {
         const diff = lineDiff(prev[s] || '', cur[s] || '');
         const added = diff.filter((d) => d.t === 'add').map((d) => d.line);
@@ -166,7 +166,7 @@ export default function RevisionHistory({ docId, sensorModelId, onClose, onRever
                       {secs.length > 0 && (
                         <div className="flex flex-wrap gap-1 mt-1.5">
                           {secs.slice(0, 4).map((s) => (
-                            <span key={s} className="text-[10px] bg-slate-100 text-slate-600 rounded px-1.5 py-0.5">{SECTION_LABEL[s]}</span>
+                            <span key={s} className="text-[10px] bg-slate-100 text-slate-600 rounded px-1.5 py-0.5">{sectionLabel(s)}</span>
                           ))}
                           {secs.length > 4 && <span className="text-[10px] text-slate-400">+{secs.length - 4}</span>}
                         </div>

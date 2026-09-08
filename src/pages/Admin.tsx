@@ -561,7 +561,7 @@ function TypesPanel() {
               aria-label={`Default section for ${t.label}`}
             >
               <option value="">— admin picks at approval —</option>
-              {SECTION_ORDER.map((s) => <option key={s} value={s}>{SECTION_LABEL[s]}</option>)}
+              {(types.data ?? []).map((x: any) => <option key={x.key} value={x.key}>{x.label}</option>)}
             </select>
             <button onClick={() => remove(t)} aria-label={`Remove ${t.label}`} className="tap text-slate-300 hover:text-red-500 transition justify-self-end"><Trash2 size={12} /></button>
             <div className="sm:col-span-3 flex items-center gap-2">

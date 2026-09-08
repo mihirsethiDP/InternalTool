@@ -1,6 +1,6 @@
 import type { QueryClient } from '@tanstack/react-query';
 import { supabase } from './supabase';
-import { replaceSection, appendSection, SECTION_LABEL } from './consolidated';
+import { replaceSection, appendSection, sectionLabel } from './consolidated';
 import { writeConsolidated } from './consolidatedWrite';
 import { awardApproval, awardFlowBonus } from './contributions';
 import type { SubmissionSection } from './types';
@@ -63,7 +63,7 @@ export async function approveSubmissionParts(opts: {
       : appendSection(merged, p.section, p.text,
           `Appended from "${submission.title}" on ${new Date().toLocaleDateString()}`);
   }
-  const sectionList = parts.map((p) => SECTION_LABEL[p.section]).join(', ');
+  const sectionList = parts.map((p) => sectionLabel(p.section)).join(', ');
   await writeConsolidated({
     docId: cdoc.id, sensorModelId, markdown: merged, changeKind: 'approval',
     note: `Approved "${submission.title}" into ${sectionList}${note ? ` — ${note}` : ''}`,

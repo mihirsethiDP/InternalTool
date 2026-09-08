@@ -186,3 +186,17 @@ export function chunkSections(sections: Sections, target = 1000): Array<{ sectio
   }
   return out;
 }
+
+/**
+ * Section keys to iterate for a given document: registry order first, then any
+ * key the document itself carries that the registry doesn't know.
+ *
+ * Every UI that lists sections must use this. Filtering by the built-in nine
+ * hides content approved into an admin-added section — an approved datasheet
+ * sat invisible in production because the viewer filtered SECTION_ORDER.
+ */
+export function orderedKeys(...maps: (Sections | null | undefined)[]): string[] {
+  const known = sectionKeys();
+  const extras = [...new Set(maps.flatMap((m) => Object.keys(m ?? {})))].filter((k) => !known.includes(k));
+  return [...known, ...extras];
+}

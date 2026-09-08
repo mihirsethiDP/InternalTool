@@ -76,7 +76,7 @@ const LANG_NAMES: Record<string, string> = {
 function langLine(lang?: string): string {
   const name = LANG_NAMES[(lang ?? '').slice(0, 5)];
   if (!name || name === 'English') return '';
-  return `\n- Reply in ${name}, in plain everyday words a plant operator understands. Keep model numbers, acronyms (pH, COD, mA), units and button/menu names exactly as written in the source. EXCEPTION: the exact refusal sentence above must be output in English verbatim when it applies.`;
+  return `\n- Reply in ${name}, in plain everyday words a plant operator understands. Keep model numbers, acronyms (pH, COD, mA), units and button/menu names exactly as written in the source. Translate EVERY step you would have given in English - same count, same order. NEVER drop a safety step (PPE, isolate power, depressurise, chemical handling): omitting one in translation is the most dangerous failure here. EXCEPTION: the exact refusal sentence above must be output in English verbatim when it applies.`;
 }
 
 const WEB_SYSTEM_PROMPT = [
@@ -927,15 +927,19 @@ Deno.serve(async (req) => {
     const fullText = ((sub as any).extracted_text ?? '').trim();
     if (fullText.length < 200) return json({ parts: [], note: 'not enough text to split' });
 
-    // Paragraphs: split on blank lines; glue fragments < 60 chars to the
-    // previous paragraph so headings stay attached to their body.
+    // Paragraphs: split on blank lines. A short fragment is almost always a
+    // HEADING, so glue it FORWARD onto the block it introduces - gluing it
+    // backwards ended each section with the NEXT heading.
     const rawParas = fullText.split(/\n\s*\n/).map((p: string) => p.trim()).filter(Boolean);
     const paras: string[] = [];
+    let carry = '';
     for (const p of rawParas) {
-      if (paras.length && (p.length < 60 || paras[paras.length - 1].length < 60)) paras[paras.length - 1] += '\n\n' + p;
-      else paras.push(p);
+      if (p.length < 60) { carry = carry ? carry + '\n\n' + p : p; continue; }
+      paras.push(carry ? carry + '\n\n' + p : p);
+      carry = '';
     }
-    // Cap what the model sees (~60k chars); everything beyond is reported as truncated.
+    if (carry) { if (paras.length) paras[paras.length - 1] += '\n\n' + carry; else paras.push(carry); }
+    // Cap what the model sees (~60k chars); everything beyond is truncated.
     let budget = 60_000, cut = paras.length;
     for (let i = 0, used = 0; i < paras.length; i++) {
       used += paras[i].length;
@@ -1046,22 +1050,37 @@ Deno.serve(async (req) => {
 
   if (!query) return json({ error: 'empty query' }, 400);
 
+  // Everything past this point (docs answers, web fallback, route matching,
+  // match-issue) reads verified documentation and spends an LLM call, so it
+  // requires a SIGNED-IN user. The anon key alone is not enough — it ships in
+  // the browser bundle, which left the whole corpus on an open endpoint.
+  {
+    const supabaseAuth = createClient(SUPABASE_URL, SERVICE_KEY);
+    const authToken = (req.headers.get('Authorization') ?? '').replace(/^Bearer\s+/i, '');
+    const { data: caller } = await supabaseAuth.auth.getUser(authToken);
+    if (!caller?.user) return json({ error: 'unauthorized' }, 401);
+  }
+
   // ---------- ROUTE MODE: infer the sensor TYPE (category) from the symptom ----------
   // Powers the elicitation layer: rank which sensor categories the user's
   // free-text problem likely belongs to, so the chatbot can lead with the right
   // type instead of demanding a make/model.
   if (mode === 'route') {
     const supabase = createClient(SUPABASE_URL, SERVICE_KEY);
-    // Only categories that actually have documented models are useful targets.
-    const { data: models, error: rErr } = await supabase
-      .from('sensor_models')
-      .select('sensor_categories(id, name, aliases)')
-      .eq('is_general', false)
-      .limit(2000);
+    // Only categories with APPROVED, INDEXED content are useful targets. The
+    // old query filtered on sensor_models.is_general = false, i.e. catalogue
+    // presence — so a sensor added ahead of its document being approved put
+    // its category on the menu, and every answer scoped there could only be a
+    // refusal. Route to what we can actually answer from.
+    const { data: chunkRows, error: rErr } = await supabase
+      .from('consolidated_doc_chunks')
+      .select('sensor_models(category_id, sensor_categories(id, name, aliases))')
+      .limit(5000);
     if (rErr) { console.error('route catalog error', rErr); return json({ error: 'catalog lookup failed' }, 500); }
     const catMap = new Map<string, { name: string; aliases: string[] }>();
-    for (const m of (models ?? []) as any[]) {
-      const cat = Array.isArray(m.sensor_categories) ? m.sensor_categories[0] : m.sensor_categories;
+    for (const row of (chunkRows ?? []) as any[]) {
+      const sm = Array.isArray(row.sensor_models) ? row.sensor_models[0] : row.sensor_models;
+      const cat = sm ? (Array.isArray(sm.sensor_categories) ? sm.sensor_categories[0] : sm.sensor_categories) : null;
       if (cat?.id) catMap.set(cat.id, { name: cat.name, aliases: Array.isArray(cat.aliases) ? cat.aliases : [] });
     }
     // Sub-category terms from the master list go to the model as "also called",
@@ -1229,5 +1248,10 @@ Deno.serve(async (req) => {
     return json({ answer: null, grounded: false, citations });
   }
 
+  // The model may return the refusal sentence verbatim. That is a not-found,
+  // not a grounded answer — saying otherwise attaches sources to a non-answer.
+  if (/isn.?ts+documenteds+yet/i.test(answer)) {
+    return json({ answer: null, grounded: false, citations: [] });
+  }
   return json({ answer: answer.trim(), grounded: true, citations });
 });
