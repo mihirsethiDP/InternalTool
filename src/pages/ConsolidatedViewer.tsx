@@ -29,6 +29,12 @@ export const SECTION_ICON: Record<SubmissionSection, React.ReactNode> = {
   other: <Layers size={15} strokeWidth={2} />,
 };
 
+/** Icon for a section — sections are DATA, so an admin-added one has no
+ *  entry in the map above and would otherwise render as an empty badge. */
+function sectionIcon(key: string): React.ReactNode {
+  return SECTION_ICON[key] ?? <FileText size={15} strokeWidth={2} />;
+}
+
 type ViewMode = 'docs' | 'consolidated';
 
 // ---------- Kindle-style reader preferences ----------
@@ -515,8 +521,8 @@ export default function ConsolidatedViewer() {
                     : 'bg-white text-slate-700 border-slate-200 hover:border-brand-700 hover:text-brand-700'
                 }`}
               >
-                {SECTION_ICON[s]}
-                {SECTION_LABEL[s]}
+                {sectionIcon(s)}
+                {sectionLabel(s)}
               </button>
             ))}
           </nav>
@@ -613,9 +619,9 @@ export default function ConsolidatedViewer() {
                     }`}
                   >
                     <span className="bg-brand-700 text-white rounded-lg w-8 h-8 flex items-center justify-center shrink-0 shadow-sm">
-                      {SECTION_ICON[s]}
+                      {sectionIcon(s)}
                     </span>
-                    <h2 className="reader-heading text-sm font-semibold tracking-tight flex-1">{SECTION_LABEL[s]}</h2>
+                    <h2 className="reader-heading text-sm font-semibold tracking-tight flex-1">{sectionLabel(s)}</h2>
                     {isMatch && chatAnswer && (
                       <span className="badge-blue text-[10px] shrink-0">Relevant</span>
                     )}
