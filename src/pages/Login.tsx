@@ -58,7 +58,7 @@ export default function Login() {
             className="h-12 w-auto object-contain mb-4"
             onError={(e) => { (e.currentTarget.style.display = 'none'); }}
           />
-          <h1 className="text-white text-xl font-bold tracking-tight">Sensor Troubleshooting Hub</h1>
+          <h1 className="text-white text-xl font-bold tracking-tight">Troubleshooting Hub</h1>
           <p className="text-white/70 text-sm mt-1">DigitalPaani · internal access</p>
         </div>
 

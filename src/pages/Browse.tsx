@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 import { supabase } from '../lib/supabase';
+import CategoryOptions from '../components/CategoryOptions';
 import { runSearch } from '../lib/search';
 import { DocCard } from '../components/DocCard';
 import PageHeader from '../components/PageHeader';
@@ -19,7 +20,7 @@ export default function Browse() {
   const [make, setMake] = useState('');         // sensor_makes.id
   const [model, setModel] = useState('');       // sensor_models.id
 
-  const cats = useQuery({ queryKey: ['cats'], queryFn: async () => (await supabase.from('sensor_categories').select('id,name').order('name')).data ?? [] });
+  const cats = useQuery({ queryKey: ['cats-domain'], queryFn: async () => (await supabase.from('sensor_categories').select('id,name,domain').order('name')).data ?? [] });
   const makes = useQuery({ queryKey: ['makes'], queryFn: async () => (await supabase.from('sensor_makes').select('id,name').order('name')).data ?? [] });
   const types = useQuery({ queryKey: ['types'], queryFn: async () => (await supabase.from('document_types').select('id,key,label,scope').eq('scope', 'general').order('sort_order')).data ?? [] });
 
@@ -76,7 +77,7 @@ export default function Browse() {
           <>
             <FilterSelect value={category} active={Boolean(category)} onChange={setCategory}>
               <option value="">All categories</option>
-              {cats.data?.map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              <CategoryOptions categories={cats.data as any} />
             </FilterSelect>
             <FilterSelect value={make} active={Boolean(make)} onChange={(v) => { setMake(v); setModel(''); }}>
               <option value="">All makes</option>

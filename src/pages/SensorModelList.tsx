@@ -6,6 +6,7 @@ import { FilterBar, FilterSearch, FilterSelect, FilterClear } from '../component
 import { supabase } from '../lib/supabase';
 import { useAuth, canUpload } from '../lib/auth';
 import PageHeader from '../components/PageHeader';
+import CategoryOptions from '../components/CategoryOptions';
 import AddSensorModal from '../components/AddSensorModal';
 import { coverageOf, SECTION_LABEL, sectionLabel } from '../lib/consolidated';
 
@@ -26,7 +27,7 @@ export default function SensorModelList() {
   const [sortMode, setSortMode] = useState<'category' | 'gap'>(docsParam === 'incomplete' ? 'gap' : 'category');
   const [incompleteOnly, setIncompleteOnly] = useState(docsParam === 'incomplete');
 
-  const cats = useQuery({ queryKey: ['cats'], queryFn: async () => (await supabase.from('sensor_categories').select('id,name').order('name')).data ?? [] });
+  const cats = useQuery({ queryKey: ['cats-domain'], queryFn: async () => (await supabase.from('sensor_categories').select('id,name,domain').order('name')).data ?? [] });
   const makes = useQuery({ queryKey: ['makes'], queryFn: async () => (await supabase.from('sensor_makes').select('id,name').order('name')).data ?? [] });
 
   const models = useQuery({
@@ -34,7 +35,7 @@ export default function SensorModelList() {
     queryFn: async () => {
       let qb = supabase
         .from('sensor_models')
-        .select('id, model_no, name, sensor_makes(name), sensor_categories(name)')
+        .select('id, model_no, name, sensor_makes(name), sensor_categories(name, domain))')
         .eq('is_general', false)
         .order('model_no')
         .limit(2000);
@@ -49,9 +50,13 @@ export default function SensorModelList() {
     queryKey: ['coverage-map'],
     enabled: showCoverage,
     queryFn: async () => {
-      const { data } = await supabase.from('consolidated_docs').select('sensor_model_id, content_markdown').is('deleted_at', null);
+      const { data } = await supabase.from('consolidated_docs').select('sensor_model_id, content_markdown, sensor_models(sensor_categories(domain))').is('deleted_at', null);
       const map: Record<string, ReturnType<typeof coverageOf>> = {};
-      for (const d of data ?? []) map[(d as any).sensor_model_id] = coverageOf((d as any).content_markdown);
+      for (const d of data ?? []) {
+        const sm = Array.isArray((d as any).sensor_models) ? (d as any).sensor_models[0] : (d as any).sensor_models;
+        const cat = Array.isArray(sm?.sensor_categories) ? sm.sensor_categories[0] : sm?.sensor_categories;
+        map[(d as any).sensor_model_id] = coverageOf((d as any).content_markdown, cat?.domain);
+      }
       return map;
     },
   });
@@ -83,18 +88,20 @@ export default function SensorModelList() {
   // Category-grouped view (default / everyone)
   const grouped = useMemo(() => {
     const g: Record<string, any[]> = {};
+    const e: Record<string, any[]> = {};
     for (const m of visible as any[]) {
       const k = m.sensor_categories?.name || 'Uncategorised';
-      (g[k] ??= []).push(m);
+      ((m.sensor_categories?.domain === 'electronics' ? e : g)[k] ??= []).push(m);
     }
-    return g;
+    // Electronics categories sit after the sensors, under their own heading.
+    return { ...g, ...Object.fromEntries(Object.entries(e).map(([k, v]) => [`Electronics · ${k}`, v])) };
   }, [visible]);
 
   return (
     <div className="space-y-6">
       <PageHeader
         eyebrow="Catalog"
-        title="Sensor catalog"
+        title="Device catalog"
         subtitle={`${models.data?.length ?? 0} models across ${makes.data?.length ?? 0} makes`}
         stats={[
           { label: 'Total models', value: models.data?.length ?? 0 },
@@ -103,7 +110,7 @@ export default function SensorModelList() {
         ]}
         action={canUpload(profile) && (
           <button onClick={() => setShowAdd(true)} className="bg-white text-brand-700 hover:bg-slate-100 rounded-lg px-4 py-2 font-semibold text-sm shadow-sm">
-            + New sensor
+            + New device
           </button>
         )}
       />
@@ -112,7 +119,7 @@ export default function SensorModelList() {
         <FilterSearch value={q} onChange={(v) => { setQ(v); setPage(0); }} placeholder="Search make, model, or description…" />
         <FilterSelect value={cat} active={Boolean(cat)} onChange={(v) => { setCat(v); setPage(0); }}>
           <option value="">All categories</option>
-          {cats.data?.map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          <CategoryOptions categories={cats.data as any} />
         </FilterSelect>
         <FilterSelect value={makeId} active={Boolean(makeId)} onChange={(v) => { setMakeId(v); setModelId(''); setPage(0); }}>
           <option value="">All makes</option>

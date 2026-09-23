@@ -116,7 +116,7 @@ export default function ConsolidatedViewer() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('consolidated_docs')
-        .select('*, sensor_models(model_no, category_id, is_general, sensor_makes(name), sensor_categories(name))')
+        .select('*, sensor_models(model_no, category_id, is_general, sensor_makes(name), sensor_categories(name, domain))')
         .eq('id', id)
         .maybeSingle();
       if (error) throw error;
@@ -190,7 +190,7 @@ export default function ConsolidatedViewer() {
 
   // Completeness is measured on OUTPUT work-type content only.
   const covered = (s: string) => Boolean(sections[s]);
-  const checklist = checklistSections();
+  const checklist = checklistSections((cdoc.data as any)?.sensor_models?.sensor_categories?.domain ?? null);
   const coveredCount = checklist.filter(covered).length;
 
   // Re-scan highlights (consolidated mode only). Only auto-scroll to the first

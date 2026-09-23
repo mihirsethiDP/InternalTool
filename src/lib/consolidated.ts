@@ -52,7 +52,9 @@ export const SECTION_HINT: Record<SubmissionSection, string> = {
 //
 // Filled from document_types at boot (see useSectionDefs); falls back to the
 // built-in nine so nothing depends on that fetch succeeding.
-export interface SectionDef { key: string; label: string; hint?: string; counts?: boolean }
+// appliesTo: which device domains the section is meaningful for ('sensor',
+// 'electronics'). Absent = all. "Calibrate" never counts against a camera.
+export interface SectionDef { key: string; label: string; hint?: string; counts?: boolean; appliesTo?: string[] }
 
 const BUILTIN_DEFS: SectionDef[] = SECTION_ORDER.map((k) => ({
   key: k, label: SECTION_LABEL[k], hint: SECTION_HINT[k], counts: k !== 'other',
@@ -94,14 +96,17 @@ export interface Coverage {
 /** Documentation coverage of a sensor's OWN consolidated content. */
 /** Sections that count as "documented". The DB flag decides (migration 048),
  *  so a section an admin adds opts in or out without a code change. */
-export function checklistSections(): string[] {
-  return REGISTRY.filter((d) => d.counts !== false).map((d) => d.key);
+export function checklistSections(domain?: string | null): string[] {
+  return REGISTRY
+    .filter((d) => d.counts !== false)
+    .filter((d) => !domain || !d.appliesTo || d.appliesTo.length === 0 || d.appliesTo.includes(domain))
+    .map((d) => d.key);
 }
 
 /** Documentation coverage of a sensor's OWN consolidated content. */
-export function coverageOf(markdown: string | null | undefined): Coverage {
+export function coverageOf(markdown: string | null | undefined, domain?: string | null): Coverage {
   const s = parseSections(markdown);
-  const checklist = checklistSections();
+  const checklist = checklistSections(domain);
   const missing = checklist.filter((x) => !s[x]);
   return { covered: checklist.length - missing.length, total: checklist.length, missing, complete: missing.length === 0 };
 }

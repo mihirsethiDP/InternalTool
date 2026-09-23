@@ -16,12 +16,13 @@ export function useSectionDefs() {
     queryFn: async (): Promise<SectionDef[]> => {
       const { data, error } = await supabase
         .from('document_types')
-        .select('key, label, hint, counts_toward_completeness, sort_order')
+        .select('key, label, hint, counts_toward_completeness, applies_to, sort_order')
         .eq('scope', 'general')
         .order('sort_order');
       if (error || !data?.length) return sectionDefs(); // keep the built-in nine
-      const defs = data.map((t: { key: string; label: string; hint?: string | null; counts_toward_completeness?: boolean }) => ({
+      const defs = data.map((t: { key: string; label: string; hint?: string | null; counts_toward_completeness?: boolean; applies_to?: string[] | null }) => ({
         key: t.key, label: t.label, hint: t.hint ?? undefined, counts: t.counts_toward_completeness !== false,
+        appliesTo: t.applies_to ?? undefined,
       }));
       setSectionRegistry(defs);
       return defs;

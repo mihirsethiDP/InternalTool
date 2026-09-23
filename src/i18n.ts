@@ -13,12 +13,12 @@ export const LANGUAGES: { code: string; native: string }[] = [
 ];
 
 const en = {
-  nav: { search: 'Search', browse: 'Browse', sensors: 'Sensors', uploads: 'Uploads', admin: 'Admin', upload: 'Upload', signOut: 'Sign out', editProfile: 'Edit profile', language: 'Language' },
+  nav: { search: 'Search', browse: 'Browse', sensors: 'Sensors', devices: 'Devices', plants: 'Plants', uploads: 'Uploads', admin: 'Admin', upload: 'Upload', signOut: 'Sign out', editProfile: 'Edit profile', language: 'Language' },
   home: {
-    eyebrow: 'Sensor troubleshooting hub',
-    title1: 'Sensor acting up?',
+    eyebrow: 'Troubleshooting hub',
+    title1: 'Something acting up?',
     title2: 'Start here.',
-    subtitle: 'Describe the problem and get troubleshooting steps from verified vendor documentation — or search every manual, datasheet, and procedure we have.',
+    subtitle: 'Sensors, UPS, cameras, dataloggers — describe the problem and get troubleshooting steps from verified documentation, or search every manual we have.',
     askTitle: 'Ask Dr. Paani',
     askSubtitle: 'Describe the issue in your own words — it finds the matching troubleshooting steps.',
     start: 'Start a conversation',
@@ -35,6 +35,12 @@ const en = {
     searchWeb: 'Search the web',
     playbookHint: 'Documentation incomplete for a sensor? See the',
     playbookLink: 'procurement playbook',
+    // Plant-aware entry points (migration 051)
+    atPlant: 'At {{plant}}',
+    plantDevicesHint: 'Tap what is giving trouble — I already know which make & model is installed here.',
+    pickPlant: 'Pick your plant',
+    pickPlantHint: 'so the assistant knows which devices are installed and skips the make & model questions.',
+    noDevices: 'No devices on record for this plant yet.',
   },
   chat: {
     assistant: 'Your sensor doctor',
@@ -56,6 +62,14 @@ const en = {
     voiceStop: 'Stop listening',
     probeVague: 'Let’s figure this out together. What is the sensor doing?',
     nothingNarrow: 'I couldn’t find this in the general documentation. Which sensor is it? I’ll look inside that sensor’s manual.',
+    // Plant context: the register answered the make/model question for us.
+    plantResolved: 'At {{plant}}, your {{category}} is recorded as {{label}} — answering for that.',
+    plantAssumed: 'At {{plant}}, your {{category}} is recorded as {{label}} (a working assumption, not a nameplate reading — check the label on the device). Answering for that.',
+    plantWhich: '{{plant}} has more than one {{category}} on record. Which one is giving trouble?',
+    plantNone: 'No {{category}} is on record for {{plant}}. Which make & model is it?',
+    plantChip: 'at {{plant}}',
+    whichDevice: 'Happy to help with “{{issue}}”. Which make & model is your {{category}}? The right steps depend on it.',
+    probeDevice: 'Let’s figure this out together. What is the {{category}} doing?',
     voiceListening: 'Listening — take your time',
     voiceDone: 'Done',
     voiceTranscribing: 'Writing down what you said…',
@@ -105,7 +119,7 @@ const en = {
 };
 
 const hi: typeof en = {
-  nav: { search: 'खोज', browse: 'ब्राउज़', sensors: 'सेंसर', uploads: 'अपलोड', admin: 'एडमिन', upload: 'अपलोड', signOut: 'साइन आउट', editProfile: 'प्रोफ़ाइल संपादित करें', language: 'भाषा' },
+  nav: { search: 'खोज', browse: 'ब्राउज़', sensors: 'सेंसर', devices: 'डिवाइस', plants: 'प्लांट', uploads: 'अपलोड', admin: 'एडमिन', upload: 'अपलोड', signOut: 'साइन आउट', editProfile: 'प्रोफ़ाइल संपादित करें', language: 'भाषा' },
   home: {
     eyebrow: 'सेंसर समस्या-समाधान केंद्र',
     title1: 'सेंसर में दिक्कत?',
@@ -127,6 +141,11 @@ const hi: typeof en = {
     searchWeb: 'वेब पर खोजें',
     playbookHint: 'किसी सेंसर के दस्तावेज़ अधूरे हैं? देखें',
     playbookLink: 'दस्तावेज़ प्राप्ति गाइड',
+    atPlant: '{{plant}} पर',
+    plantDevicesHint: 'जिसमें दिक्कत है उसे टैप करें — यहाँ कौन सा मेक और मॉडल लगा है, मुझे पहले से पता है।',
+    pickPlant: 'अपना प्लांट चुनें',
+    pickPlantHint: 'ताकि असिस्टेंट को पता रहे कि कौन से डिवाइस लगे हैं और मेक-मॉडल के सवाल न पूछे।',
+    noDevices: 'इस प्लांट के लिए अभी कोई डिवाइस रिकॉर्ड में नहीं है।',
   },
   chat: {
     assistant: 'आपके सेंसर का डॉक्टर',
@@ -148,6 +167,13 @@ const hi: typeof en = {
     voiceStop: 'सुनना बंद करें',
     probeVague: 'चलिए मिलकर पता लगाते हैं। सेंसर क्या कर रहा है?',
     nothingNarrow: 'सामान्य दस्तावेज़ों में यह नहीं मिला। यह कौन सा सेंसर है? मैं उसी के मैनुअल में देखता हूँ।',
+    plantResolved: '{{plant}} पर आपका {{category}} रिकॉर्ड में {{label}} है — उसी के लिए जवाब दे रहा हूँ।',
+    plantAssumed: '{{plant}} पर आपका {{category}} रिकॉर्ड में {{label}} है (यह एक अनुमान है, नेमप्लेट से पढ़ा नहीं गया — डिवाइस पर लगा लेबल जाँच लें)। उसी के लिए जवाब दे रहा हूँ।',
+    plantWhich: '{{plant}} पर एक से ज़्यादा {{category}} रिकॉर्ड में हैं। किसमें दिक्कत है?',
+    plantNone: '{{plant}} के लिए कोई {{category}} रिकॉर्ड में नहीं है। मेक और मॉडल क्या है?',
+    plantChip: '{{plant}} पर',
+    whichDevice: '“{{issue}}” में मदद करता हूँ। आपके {{category}} का मेक और मॉडल क्या है? सही स्टेप्स उसी पर निर्भर हैं।',
+    probeDevice: 'चलिए मिलकर समझते हैं। {{category}} क्या कर रहा है?',
     voiceListening: 'सुन रहा हूँ — आराम से बोलिए',
     voiceDone: 'हो गया',
     voiceTranscribing: 'आपकी बात लिखी जा रही है…',
@@ -197,7 +223,7 @@ const hi: typeof en = {
 };
 
 const mr: typeof en = {
-  nav: { search: 'शोध', browse: 'ब्राउझ', sensors: 'सेन्सर', uploads: 'अपलोड', admin: 'अ‍ॅडमिन', upload: 'अपलोड', signOut: 'साइन आउट', editProfile: 'प्रोफाइल संपादित करा', language: 'भाषा' },
+  nav: { search: 'शोध', browse: 'ब्राउझ', sensors: 'सेन्सर', devices: 'डिव्हाइस', plants: 'प्लांट', uploads: 'अपलोड', admin: 'अ‍ॅडमिन', upload: 'अपलोड', signOut: 'साइन आउट', editProfile: 'प्रोफाइल संपादित करा', language: 'भाषा' },
   home: {
     eyebrow: 'सेन्सर समस्या-निवारण केंद्र',
     title1: 'सेन्सरमध्ये बिघाड?',
@@ -219,6 +245,11 @@ const mr: typeof en = {
     searchWeb: 'वेबवर शोधा',
     playbookHint: 'एखाद्या सेन्सरचे दस्तऐवज अपूर्ण आहेत? पहा',
     playbookLink: 'दस्तऐवज प्राप्ती मार्गदर्शक',
+    atPlant: '{{plant}} येथे',
+    plantDevicesHint: 'ज्यात अडचण आहे त्यावर टॅप करा — येथे कोणता मेक आणि मॉडेल बसवला आहे हे मला आधीच माहीत आहे.',
+    pickPlant: 'तुमचा प्लांट निवडा',
+    pickPlantHint: 'म्हणजे असिस्टंटला कोणती उपकरणे बसवली आहेत हे कळेल आणि मेक-मॉडेलचे प्रश्न टळतील.',
+    noDevices: 'या प्लांटसाठी अजून कोणतेही उपकरण नोंदवलेले नाही.',
   },
   chat: {
     assistant: 'तुमच्या सेन्सरचा डॉक्टर',
@@ -240,6 +271,13 @@ const mr: typeof en = {
     voiceStop: 'ऐकणे थांबवा',
     probeVague: 'चला मिळून शोधूया. सेन्सर काय करत आहे?',
     nothingNarrow: 'सर्वसाधारण दस्तऐवजांत हे सापडले नाही. हा कोणता सेन्सर आहे? मी त्याच्या मॅन्युअलमध्ये पाहतो.',
+    plantResolved: '{{plant}} येथे तुमचा {{category}} नोंदीत {{label}} आहे — त्यासाठीच उत्तर देत आहे.',
+    plantAssumed: '{{plant}} येथे तुमचा {{category}} नोंदीत {{label}} आहे (हा अंदाज आहे, नेमप्लेटवरून वाचलेला नाही — उपकरणावरील लेबल तपासा). त्यासाठीच उत्तर देत आहे.',
+    plantWhich: '{{plant}} येथे एकापेक्षा जास्त {{category}} नोंदीत आहेत. कोणत्यात अडचण आहे?',
+    plantNone: '{{plant}} साठी कोणताही {{category}} नोंदीत नाही. मेक आणि मॉडेल काय आहे?',
+    plantChip: '{{plant}} येथे',
+    whichDevice: '“{{issue}}” मध्ये मदत करतो. तुमच्या {{category}} चा मेक आणि मॉडेल काय आहे? योग्य पायऱ्या त्यावर अवलंबून आहेत.',
+    probeDevice: 'चला मिळून पाहू. {{category}} काय करत आहे?',
     voiceListening: 'ऐकत आहे — आरामात बोला',
     voiceDone: 'झाले',
     voiceTranscribing: 'तुमचे बोलणे लिहित आहे…',
@@ -289,7 +327,7 @@ const mr: typeof en = {
 };
 
 const bn: typeof en = {
-  nav: { search: 'খুঁজুন', browse: 'ব্রাউজ', sensors: 'সেন্সর', uploads: 'আপলোড', admin: 'অ্যাডমিন', upload: 'আপলোড', signOut: 'সাইন আউট', editProfile: 'প্রোফাইল সম্পাদনা', language: 'ভাষা' },
+  nav: { search: 'খুঁজুন', browse: 'ব্রাউজ', sensors: 'সেন্সর', devices: 'ডিভাইস', plants: 'প্ল্যান্ট', uploads: 'আপলোড', admin: 'অ্যাডমিন', upload: 'আপলোড', signOut: 'সাইন আউট', editProfile: 'প্রোফাইল সম্পাদনা', language: 'ভাষা' },
   home: {
     eyebrow: 'সেন্সর ত্রুটি-সমাধান কেন্দ্র',
     title1: 'সেন্সরে সমস্যা?',
@@ -311,6 +349,11 @@ const bn: typeof en = {
     searchWeb: 'ওয়েবে খুঁজুন',
     playbookHint: 'কোনো সেন্সরের ডকুমেন্ট অসম্পূর্ণ? দেখুন',
     playbookLink: 'ডকুমেন্ট সংগ্রহ নির্দেশিকা',
+    atPlant: '{{plant}}-এ',
+    plantDevicesHint: 'যেটায় সমস্যা সেটায় ট্যাপ করুন — এখানে কোন মেক ও মডেল বসানো আছে তা আমি আগেই জানি।',
+    pickPlant: 'আপনার প্ল্যান্ট বেছে নিন',
+    pickPlantHint: 'যাতে সহকারী জানে কোন ডিভাইস বসানো আছে এবং মেক-মডেলের প্রশ্ন এড়িয়ে যায়।',
+    noDevices: 'এই প্ল্যান্টের জন্য এখনও কোনো ডিভাইস নথিভুক্ত নেই।',
   },
   chat: {
     assistant: 'আপনার সেন্সরের ডাক্তার',
@@ -332,6 +375,13 @@ const bn: typeof en = {
     voiceStop: 'শোনা বন্ধ করুন',
     probeVague: 'চলুন একসাথে বের করি। সেন্সরটি কী করছে?',
     nothingNarrow: 'সাধারণ ডকুমেন্টে এটি পাইনি। এটি কোন সেন্সর? আমি সেটির ম্যানুয়ালে দেখব।',
+    plantResolved: '{{plant}}-এ আপনার {{category}} নথিতে {{label}} — সেটার জন্যই উত্তর দিচ্ছি।',
+    plantAssumed: '{{plant}}-এ আপনার {{category}} নথিতে {{label}} (এটি অনুমান, নেমপ্লেট থেকে পড়া নয় — ডিভাইসের লেবেল দেখে নিন)। সেটার জন্যই উত্তর দিচ্ছি।',
+    plantWhich: '{{plant}}-এ একাধিক {{category}} নথিভুক্ত আছে। কোনটায় সমস্যা?',
+    plantNone: '{{plant}}-এর জন্য কোনো {{category}} নথিভুক্ত নেই। মেক ও মডেল কী?',
+    plantChip: '{{plant}}-এ',
+    whichDevice: '“{{issue}}”-এ সাহায্য করছি। আপনার {{category}}-এর মেক ও মডেল কী? সঠিক ধাপ তার উপর নির্ভর করে।',
+    probeDevice: 'চলুন একসাথে দেখি। {{category}} কী করছে?',
     voiceListening: 'শুনছি — ধীরে বলুন',
     voiceDone: 'হয়ে গেছে',
     voiceTranscribing: 'আপনার কথা লেখা হচ্ছে…',
@@ -381,7 +431,7 @@ const bn: typeof en = {
 };
 
 const te: typeof en = {
-  nav: { search: 'శోధన', browse: 'బ్రౌజ్', sensors: 'సెన్సర్లు', uploads: 'అప్‌లోడ్‌లు', admin: 'అడ్మిన్', upload: 'అప్‌లోడ్', signOut: 'సైన్ అవుట్', editProfile: 'ప్రొఫైల్ సవరించండి', language: 'భాష' },
+  nav: { search: 'శోధన', browse: 'బ్రౌజ్', sensors: 'సెన్సర్లు', devices: 'పరికరాలు', plants: 'ప్లాంట్లు', uploads: 'అప్‌లోడ్‌లు', admin: 'అడ్మిన్', upload: 'అప్‌లోడ్', signOut: 'సైన్ అవుట్', editProfile: 'ప్రొఫైల్ సవరించండి', language: 'భాష' },
   home: {
     eyebrow: 'సెన్సర్ ట్రబుల్‌షూటింగ్ హబ్',
     title1: 'సెన్సర్ సరిగా పనిచేయడం లేదా?',
@@ -403,6 +453,11 @@ const te: typeof en = {
     searchWeb: 'వెబ్‌లో శోధించండి',
     playbookHint: 'ఏదైనా సెన్సర్ డాక్యుమెంటేషన్ అసంపూర్ణంగా ఉందా? చూడండి',
     playbookLink: 'డాక్యుమెంట్ సేకరణ మార్గదర్శి',
+    atPlant: '{{plant}} వద్ద',
+    plantDevicesHint: 'సమస్య ఉన్నదాన్ని ట్యాప్ చేయండి — ఇక్కడ ఏ మేక్ & మోడల్ ఉందో నాకు ముందే తెలుసు.',
+    pickPlant: 'మీ ప్లాంట్‌ను ఎంచుకోండి',
+    pickPlantHint: 'అప్పుడు అసిస్టెంట్‌కు ఏ పరికరాలు ఉన్నాయో తెలుస్తుంది, మేక్-మోడల్ ప్రశ్నలు అడగదు.',
+    noDevices: 'ఈ ప్లాంట్‌కు ఇంకా పరికరాలు నమోదు కాలేదు.',
   },
   chat: {
     assistant: 'మీ సెన్సర్ డాక్టర్',
@@ -424,6 +479,13 @@ const te: typeof en = {
     voiceStop: 'వినడం ఆపండి',
     probeVague: 'కలిసి తెలుసుకుందాం. సెన్సర్ ఏం చేస్తోంది?',
     nothingNarrow: 'సాధారణ డాక్యుమెంట్లలో ఇది దొరకలేదు. ఇది ఏ సెన్సర్? దాని మాన్యువల్‌లో చూస్తాను.',
+    plantResolved: '{{plant}} వద్ద మీ {{category}} రికార్డులో {{label}} — దానికే సమాధానం ఇస్తున్నాను.',
+    plantAssumed: '{{plant}} వద్ద మీ {{category}} రికార్డులో {{label}} (ఇది అంచనా, నేమ్‌ప్లేట్ నుంచి కాదు — పరికరంపై లేబుల్ చూడండి). దానికే సమాధానం ఇస్తున్నాను.',
+    plantWhich: '{{plant}} వద్ద ఒకటికి మించి {{category}} రికార్డులో ఉన్నాయి. ఏది సమస్య ఇస్తోంది?',
+    plantNone: '{{plant}} కు ఏ {{category}} రికార్డులో లేదు. మేక్ & మోడల్ ఏమిటి?',
+    plantChip: '{{plant}} వద్ద',
+    whichDevice: '“{{issue}}” లో సహాయం చేస్తాను. మీ {{category}} మేక్ & మోడల్ ఏమిటి? సరైన దశలు దానిపై ఆధారపడతాయి.',
+    probeDevice: 'కలిసి తెలుసుకుందాం. {{category}} ఏం చేస్తోంది?',
     voiceListening: 'వింటున్నాను — నెమ్మదిగా చెప్పండి',
     voiceDone: 'పూర్తయింది',
     voiceTranscribing: 'మీరు చెప్పింది రాస్తున్నాను…',
@@ -473,7 +535,7 @@ const te: typeof en = {
 };
 
 const ta: typeof en = {
-  nav: { search: 'தேடல்', browse: 'உலாவு', sensors: 'சென்சார்கள்', uploads: 'பதிவேற்றங்கள்', admin: 'நிர்வாகம்', upload: 'பதிவேற்று', signOut: 'வெளியேறு', editProfile: 'சுயவிவரம் திருத்து', language: 'மொழி' },
+  nav: { search: 'தேடல்', browse: 'உலாவு', sensors: 'சென்சார்கள்', devices: 'சாதனங்கள்', plants: 'ஆலைகள்', uploads: 'பதிவேற்றங்கள்', admin: 'நிர்வாகம்', upload: 'பதிவேற்று', signOut: 'வெளியேறு', editProfile: 'சுயவிவரம் திருத்து', language: 'மொழி' },
   home: {
     eyebrow: 'சென்சார் சிக்கல் தீர்வு மையம்',
     title1: 'சென்சார் சரியாக வேலை செய்யவில்லையா?',
@@ -495,6 +557,11 @@ const ta: typeof en = {
     searchWeb: 'இணையத்தில் தேடு',
     playbookHint: 'ஏதேனும் சென்சாரின் ஆவணங்கள் முழுமையற்றதா? பார்க்கவும்',
     playbookLink: 'ஆவண சேகரிப்பு வழிகாட்டி',
+    atPlant: '{{plant}}-இல்',
+    plantDevicesHint: 'பிரச்சனை உள்ளதைத் தட்டுங்கள் — இங்கு எந்த மேக் & மாடல் உள்ளது என்பது எனக்கு முன்பே தெரியும்.',
+    pickPlant: 'உங்கள் ஆலையைத் தேர்வு செய்யுங்கள்',
+    pickPlantHint: 'அப்போது எந்த சாதனங்கள் உள்ளன என்பது உதவியாளருக்குத் தெரியும்; மேக்-மாடல் கேள்விகள் தவிர்க்கப்படும்.',
+    noDevices: 'இந்த ஆலைக்கு இன்னும் சாதனங்கள் பதிவு செய்யப்படவில்லை.',
   },
   chat: {
     assistant: 'உங்கள் சென்சார் மருத்துவர்',
@@ -516,6 +583,13 @@ const ta: typeof en = {
     voiceStop: 'கேட்பதை நிறுத்து',
     probeVague: 'சேர்ந்து கண்டறியலாம். சென்சார் என்ன செய்கிறது?',
     nothingNarrow: 'பொது ஆவணங்களில் இது கிடைக்கவில்லை. இது எந்த சென்சார்? அதன் கையேட்டில் பார்க்கிறேன்.',
+    plantResolved: '{{plant}}-இல் உங்கள் {{category}} பதிவில் {{label}} — அதற்கே பதிலளிக்கிறேன்.',
+    plantAssumed: '{{plant}}-இல் உங்கள் {{category}} பதிவில் {{label}} (இது ஒரு அனுமானம், நேம்ப்ளேட்டில் இருந்து படித்தது அல்ல — சாதனத்தின் லேபிளைச் சரிபார்க்கவும்). அதற்கே பதிலளிக்கிறேன்.',
+    plantWhich: '{{plant}}-இல் ஒன்றுக்கு மேற்பட்ட {{category}} பதிவில் உள்ளன. எதில் பிரச்சனை?',
+    plantNone: '{{plant}}-க்கு எந்த {{category}}-ம் பதிவில் இல்லை. மேக் & மாடல் என்ன?',
+    plantChip: '{{plant}}-இல்',
+    whichDevice: '“{{issue}}”-க்கு உதவுகிறேன். உங்கள் {{category}}-இன் மேக் & மாடல் என்ன? சரியான படிகள் அதைப் பொறுத்தது.',
+    probeDevice: 'சேர்ந்து பார்ப்போம். {{category}} என்ன செய்கிறது?',
     voiceListening: 'கேட்கிறேன் — நிதானமாகச் சொல்லுங்கள்',
     voiceDone: 'முடிந்தது',
     voiceTranscribing: 'நீங்கள் சொன்னதை எழுதுகிறேன்…',
@@ -565,7 +639,7 @@ const ta: typeof en = {
 };
 
 const gu: typeof en = {
-  nav: { search: 'શોધ', browse: 'બ્રાઉઝ', sensors: 'સેન્સર', uploads: 'અપલોડ', admin: 'એડમિન', upload: 'અપલોડ', signOut: 'સાઇન આઉટ', editProfile: 'પ્રોફાઇલ સંપાદિત કરો', language: 'ભાષા' },
+  nav: { search: 'શોધ', browse: 'બ્રાઉઝ', sensors: 'સેન્સર', devices: 'ડિવાઇસ', plants: 'પ્લાન્ટ', uploads: 'અપલોડ', admin: 'એડમિન', upload: 'અપલોડ', signOut: 'સાઇન આઉટ', editProfile: 'પ્રોફાઇલ સંપાદિત કરો', language: 'ભાષા' },
   home: {
     eyebrow: 'સેન્સર ટ્રબલશૂટિંગ હબ',
     title1: 'સેન્સરમાં તકલીફ?',
@@ -587,6 +661,11 @@ const gu: typeof en = {
     searchWeb: 'વેબ પર શોધો',
     playbookHint: 'કોઈ સેન્સરના દસ્તાવેજ અધૂરા છે? જુઓ',
     playbookLink: 'દસ્તાવેજ પ્રાપ્તિ માર્ગદર્શિકા',
+    atPlant: '{{plant}} પર',
+    plantDevicesHint: 'જેમાં તકલીફ છે તેને ટૅપ કરો — અહીં કયો મેક અને મૉડલ લગાવેલો છે તે મને પહેલેથી ખબર છે.',
+    pickPlant: 'તમારો પ્લાન્ટ પસંદ કરો',
+    pickPlantHint: 'જેથી અસિસ્ટન્ટને ખબર રહે કે કયા ડિવાઇસ લગાવેલા છે અને મેક-મૉડલના પ્રશ્નો ન પૂછે.',
+    noDevices: 'આ પ્લાન્ટ માટે હજુ કોઈ ડિવાઇસ નોંધાયેલ નથી.',
   },
   chat: {
     assistant: 'તમારા સેન્સરના ડૉક્ટર',
@@ -608,6 +687,13 @@ const gu: typeof en = {
     voiceStop: 'સાંભળવાનું બંધ કરો',
     probeVague: 'ચાલો સાથે મળીને શોધીએ. સેન્સર શું કરી રહ્યું છે?',
     nothingNarrow: 'સામાન્ય દસ્તાવેજોમાં આ મળ્યું નહીં. આ કયું સેન્સર છે? હું તેના મેન્યુઅલમાં જોઈશ.',
+    plantResolved: '{{plant}} પર તમારું {{category}} રેકોર્ડમાં {{label}} છે — તેના માટે જ જવાબ આપું છું.',
+    plantAssumed: '{{plant}} પર તમારું {{category}} રેકોર્ડમાં {{label}} છે (આ અનુમાન છે, નેમપ્લેટ પરથી વાંચેલું નથી — ડિવાઇસ પરનું લેબલ તપાસો). તેના માટે જ જવાબ આપું છું.',
+    plantWhich: '{{plant}} પર એકથી વધુ {{category}} રેકોર્ડમાં છે. કયામાં તકલીફ છે?',
+    plantNone: '{{plant}} માટે કોઈ {{category}} રેકોર્ડમાં નથી. મેક અને મૉડલ શું છે?',
+    plantChip: '{{plant}} પર',
+    whichDevice: '“{{issue}}” માં મદદ કરું. તમારા {{category}} નો મેક અને મૉડલ શું છે? સાચાં પગલાં તેના પર આધારિત છે.',
+    probeDevice: 'ચાલો સાથે સમજીએ. {{category}} શું કરી રહ્યું છે?',
     voiceListening: 'સાંભળી રહ્યો છું — આરામથી બોલો',
     voiceDone: 'થઈ ગયું',
     voiceTranscribing: 'તમે જે કહ્યું તે લખાઈ રહ્યું છે…',
@@ -657,7 +743,7 @@ const gu: typeof en = {
 };
 
 const kn: typeof en = {
-  nav: { search: 'ಹುಡುಕು', browse: 'ಬ್ರೌಸ್', sensors: 'ಸೆನ್ಸರ್‌ಗಳು', uploads: 'ಅಪ್‌ಲೋಡ್‌ಗಳು', admin: 'ಅಡ್ಮಿನ್', upload: 'ಅಪ್‌ಲೋಡ್', signOut: 'ಸೈನ್ ಔಟ್', editProfile: 'ಪ್ರೊಫೈಲ್ ಸಂಪಾದಿಸಿ', language: 'ಭಾಷೆ' },
+  nav: { search: 'ಹುಡುಕು', browse: 'ಬ್ರೌಸ್', sensors: 'ಸೆನ್ಸರ್‌ಗಳು', devices: 'ಸಾಧನಗಳು', plants: 'ಘಟಕಗಳು', uploads: 'ಅಪ್‌ಲೋಡ್‌ಗಳು', admin: 'ಅಡ್ಮಿನ್', upload: 'ಅಪ್‌ಲೋಡ್', signOut: 'ಸೈನ್ ಔಟ್', editProfile: 'ಪ್ರೊಫೈಲ್ ಸಂಪಾದಿಸಿ', language: 'ಭಾಷೆ' },
   home: {
     eyebrow: 'ಸೆನ್ಸರ್ ದೋಷನಿವಾರಣಾ ಕೇಂದ್ರ',
     title1: 'ಸೆನ್ಸರ್ ಸರಿಯಾಗಿ ಕೆಲಸ ಮಾಡುತ್ತಿಲ್ಲವೇ?',
@@ -679,6 +765,11 @@ const kn: typeof en = {
     searchWeb: 'ವೆಬ್‌ನಲ್ಲಿ ಹುಡುಕಿ',
     playbookHint: 'ಯಾವುದೇ ಸೆನ್ಸರ್‌ನ ದಾಖಲೆ ಅಪೂರ್ಣವೇ? ನೋಡಿ',
     playbookLink: 'ದಾಖಲೆ ಸಂಗ್ರಹ ಮಾರ್ಗದರ್ಶಿ',
+    atPlant: '{{plant}} ನಲ್ಲಿ',
+    plantDevicesHint: 'ತೊಂದರೆ ಇರುವುದನ್ನು ಟ್ಯಾಪ್ ಮಾಡಿ — ಇಲ್ಲಿ ಯಾವ ಮೇಕ್ & ಮಾಡೆಲ್ ಇದೆ ಎಂದು ನನಗೆ ಮೊದಲೇ ತಿಳಿದಿದೆ.',
+    pickPlant: 'ನಿಮ್ಮ ಘಟಕವನ್ನು ಆರಿಸಿ',
+    pickPlantHint: 'ಆಗ ಸಹಾಯಕನಿಗೆ ಯಾವ ಸಾಧನಗಳಿವೆ ಎಂದು ತಿಳಿಯುತ್ತದೆ; ಮೇಕ್-ಮಾಡೆಲ್ ಪ್ರಶ್ನೆಗಳು ಬೇಡ.',
+    noDevices: 'ಈ ಘಟಕಕ್ಕೆ ಇನ್ನೂ ಯಾವುದೇ ಸಾಧನ ದಾಖಲಾಗಿಲ್ಲ.',
   },
   chat: {
     assistant: 'ನಿಮ್ಮ ಸೆನ್ಸರ್ ವೈದ್ಯ',
@@ -700,6 +791,13 @@ const kn: typeof en = {
     voiceStop: 'ಕೇಳುವುದನ್ನು ನಿಲ್ಲಿಸಿ',
     probeVague: 'ಒಟ್ಟಿಗೆ ಕಂಡುಹಿಡಿಯೋಣ. ಸೆನ್ಸರ್ ಏನು ಮಾಡುತ್ತಿದೆ?',
     nothingNarrow: 'ಸಾಮಾನ್ಯ ದಾಖಲೆಗಳಲ್ಲಿ ಇದು ಸಿಗಲಿಲ್ಲ. ಇದು ಯಾವ ಸೆನ್ಸರ್? ಅದರ ಕೈಪಿಡಿಯಲ್ಲಿ ನೋಡುತ್ತೇನೆ.',
+    plantResolved: '{{plant}} ನಲ್ಲಿ ನಿಮ್ಮ {{category}} ದಾಖಲೆಯಲ್ಲಿ {{label}} — ಅದಕ್ಕೇ ಉತ್ತರಿಸುತ್ತಿದ್ದೇನೆ.',
+    plantAssumed: '{{plant}} ನಲ್ಲಿ ನಿಮ್ಮ {{category}} ದಾಖಲೆಯಲ್ಲಿ {{label}} (ಇದು ಊಹೆ, ನೇಮ್‌ಪ್ಲೇಟ್‌ನಿಂದ ಓದಿದ್ದಲ್ಲ — ಸಾಧನದ ಮೇಲಿನ ಲೇಬಲ್ ಪರಿಶೀಲಿಸಿ). ಅದಕ್ಕೇ ಉತ್ತರಿಸುತ್ತಿದ್ದೇನೆ.',
+    plantWhich: '{{plant}} ನಲ್ಲಿ ಒಂದಕ್ಕಿಂತ ಹೆಚ್ಚು {{category}} ದಾಖಲೆಯಲ್ಲಿವೆ. ಯಾವುದರಲ್ಲಿ ತೊಂದರೆ?',
+    plantNone: '{{plant}} ಗೆ ಯಾವುದೇ {{category}} ದಾಖಲೆಯಲ್ಲಿಲ್ಲ. ಮೇಕ್ & ಮಾಡೆಲ್ ಯಾವುದು?',
+    plantChip: '{{plant}} ನಲ್ಲಿ',
+    whichDevice: '“{{issue}}” ಗೆ ಸಹಾಯ ಮಾಡುತ್ತೇನೆ. ನಿಮ್ಮ {{category}} ಮೇಕ್ & ಮಾಡೆಲ್ ಯಾವುದು? ಸರಿಯಾದ ಹಂತಗಳು ಅದನ್ನು ಅವಲಂಬಿಸಿವೆ.',
+    probeDevice: 'ಒಟ್ಟಿಗೆ ನೋಡೋಣ. {{category}} ಏನು ಮಾಡುತ್ತಿದೆ?',
     voiceListening: 'ಕೇಳುತ್ತಿದ್ದೇನೆ — ನಿಧಾನವಾಗಿ ಹೇಳಿ',
     voiceDone: 'ಮುಗಿಯಿತು',
     voiceTranscribing: 'ನೀವು ಹೇಳಿದ್ದನ್ನು ಬರೆಯುತ್ತಿದ್ದೇನೆ…',

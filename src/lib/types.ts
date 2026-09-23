@@ -5,13 +5,24 @@ export interface Profile {
   email: string;
   full_name: string | null;
   role: Role;
+  is_super?: boolean;
+  technical_level?: 'non_technical' | 'technical';
+  // The plant this person usually works at (migration 051). The header
+  // switcher overrides it per device; see lib/plant.tsx.
+  home_plant_id?: string | null;
   created_at: string;
 }
+
+// 'sensor' | 'electronics' — the only thing that separates a UPS from a pH
+// probe in this tool is this column (migration 051).
+export type DeviceDomain = 'sensor' | 'electronics';
 
 export interface SensorCategory {
   id: string;
   name: string;
   group: string | null;
+  aliases?: string[];
+  domain?: DeviceDomain;
 }
 
 export interface SensorMake {
@@ -50,9 +61,34 @@ export interface PLC {
 export interface Plant {
   id: string;
   name: string;
+  // Short site code from the tags (":GD", ":ADA"). Null until imported.
+  code?: string | null;
+  client?: string | null;
+  status?: 'active' | 'discontinued';
   location: string | null;
   notes: string | null;
   created_at: string;
+}
+
+// One row of a plant’s device register (plant_sensors, flattened by
+// lib/plant.tsx normalizeDevice). Grain: one row per (plant, make/model).
+export interface PlantDevice {
+  id: string;
+  plant_id: string;
+  sensor_model_id: string;
+  category_id: string | null;
+  quantity: number;
+  tags: string[];
+  notes: string | null;
+  source: 'register' | 'rule' | 'manual';
+  // "fleet-commonest make, not a nameplate reading" — say so, don’t assert.
+  is_assumption: boolean;
+  model_no: string;
+  model_name: string | null;
+  make_id: string | null;
+  make_name: string;
+  category_name: string;
+  domain: DeviceDomain;
 }
 
 export type DocumentScope = 'general' | 'plant' | 'plant_sensor' | 'plant_with_sensor_refs';

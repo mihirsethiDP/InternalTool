@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
@@ -12,6 +12,9 @@ import { runSearch } from '../lib/search';
 import { supabase } from '../lib/supabase';
 import { openDocument } from '../lib/openDoc';
 import { useAuth, isAdmin } from '../lib/auth';
+import { usePlant, usePlantDevices, deviceLabel } from '../lib/plant';
+import PlantSwitcher from '../components/PlantSwitcher';
+import type { PlantDevice } from '../lib/types';
 
 // Operator-phrased problems — clicking one asks the assistant directly.
 const PROBLEM_PROMPTS = [
@@ -32,6 +35,7 @@ export default function Home() {
   const nav = useNavigate();
   const { t } = useTranslation();
   const { profile } = useAuth();
+  const { plant, plants } = usePlant();
 
   // Reference data for the "narrow to your sensor" probe
   const makes = useQuery({ queryKey: ['makes'], queryFn: async () => (await supabase.from('sensor_makes').select('id,name').order('name')).data ?? [] });
@@ -191,6 +195,20 @@ export default function Home() {
         </form>
       </section>
 
+      {/* Where you are: the plant's devices as one-tap entry points */}
+      {!q && plant && <PlantDevicesStrip plantId={plant.id} plantName={plant.name} />}
+      {!q && !plant && plants.length > 0 && (
+        <section className="max-w-3xl mx-auto">
+          <div className="card flex items-center gap-4 flex-wrap justify-between bg-brand-50/60 border-brand-100">
+            <div className="min-w-0">
+              <div className="font-semibold text-slate-900">{t('home.pickPlant')}</div>
+              <div className="text-sm text-slate-600">{t('home.pickPlantHint')}</div>
+            </div>
+            <PlantSwitcher variant="light" />
+          </div>
+        </section>
+      )}
+
       {/* Search results */}
       {q && (
         <section className="space-y-3 max-w-4xl mx-auto">
@@ -198,7 +216,7 @@ export default function Home() {
           <div className="bg-brand-50/70 border border-brand-100 rounded-xl px-4 py-3">
             {!modelId ? (
               <div className="flex items-center gap-3 flex-wrap">
-                <span className="text-sm text-slate-700 font-medium">Know the sensor? Narrow to your make &amp; model:</span>
+                <span className="text-sm text-slate-700 font-medium">Know the device? Narrow to your make &amp; model:</span>
                 <select
                   className="rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-sm outline-none focus:border-brand-700"
                   value={makeId}
@@ -223,7 +241,7 @@ export default function Home() {
                   Showing results for <strong>{makes.data?.find((m: any) => m.id === makeId)?.name} {selectedModel?.model_no || selectedModel?.name}</strong>
                   {generalModelId && <span className="text-slate-500"> + general guidance</span>}
                 </span>
-                <button onClick={clearNarrow} className="text-brand-700 font-medium hover:underline">Show all sensors</button>
+                <button onClick={clearNarrow} className="text-brand-700 font-medium hover:underline">Show all devices</button>
               </div>
             )}
           </div>
@@ -236,7 +254,7 @@ export default function Home() {
           ))}
           {!activeSearch.isLoading && hits.length === 0 && (
             <div className="card text-sm text-slate-600 text-center space-y-2">
-              <div>{modelId ? 'Nothing for that sensor matches your search.' : t('home.noMatches')}</div>
+              <div>{modelId ? 'Nothing for that device matches your search.' : t('home.noMatches')}</div>
               <div className="flex items-center justify-center gap-3">
                 <button onClick={() => askAssistant(q)} className="text-brand-700 font-medium hover:underline text-sm">
                   {t('home.askAssistant')}
@@ -331,5 +349,57 @@ export default function Home() {
         </div>
       )}
     </div>
+  );
+}
+
+// The devices installed where the operator is, grouped by category. Tapping
+// one opens the assistant already scoped to that device (or to the category
+// when the plant has more than one make — the drawer then asks which).
+function PlantDevicesStrip({ plantId, plantName }: { plantId: string; plantName: string }) {
+  const { t } = useTranslation();
+  const devices = usePlantDevices(plantId);
+  const groups = useMemo(() => {
+    const m = new Map<string, PlantDevice[]>();
+    for (const d of devices.data ?? []) (m.get(d.category_name) ?? m.set(d.category_name, []).get(d.category_name)!).push(d);
+    const arr = [...m.entries()].map(([name, list]) => ({ name, list, domain: list[0].domain, qty: list.reduce((a, d) => a + d.quantity, 0) }));
+    // Sensors first (most numerous first), then the electronics.
+    return arr.sort((a, b) => (a.domain === b.domain ? b.qty - a.qty : a.domain === 'sensor' ? -1 : 1));
+  }, [devices.data]);
+
+  function ask(g: { name: string; list: PlantDevice[] }) {
+    const distinct = [...new Map(g.list.map((d) => [d.sensor_model_id, d])).values()];
+    const scope = distinct.length === 1
+      ? { modelId: distinct[0].sensor_model_id, categoryId: distinct[0].category_id, label: deviceLabel(distinct[0]),
+          note: t(distinct[0].is_assumption ? 'chat.plantAssumed' : 'chat.plantResolved', { plant: plantName, category: g.name, label: deviceLabel(distinct[0]) }) }
+      : { categoryId: g.list[0].category_id, label: g.name };
+    window.dispatchEvent(new CustomEvent('dp:open-chat', { detail: { scope } }));
+  }
+
+  if (devices.isLoading) return null;
+  return (
+    <section className="max-w-5xl mx-auto">
+      <div className="flex items-baseline justify-between mb-3 gap-3 flex-wrap">
+        <h2 className="section-title mb-0">{t('home.atPlant', { plant: plantName })}</h2>
+        <span className="muted text-xs">{t('home.plantDevicesHint')}</span>
+      </div>
+      {groups.length === 0 ? (
+        <div className="card text-sm text-slate-500 text-center">{t('home.noDevices')}</div>
+      ) : (
+        <div className="flex flex-wrap gap-2">
+          {groups.map((g) => (
+            <button
+              key={g.name}
+              onClick={() => ask(g)}
+              className={`tap inline-flex items-center gap-2 rounded-xl border px-3.5 py-2 text-sm font-medium transition hover:border-brand-700 hover:shadow-sm ${g.domain === 'electronics' ? 'bg-amber-50/60 border-amber-200 text-slate-800' : 'bg-white border-slate-200 text-slate-800'}`}
+              title={[...new Set(g.list.map(deviceLabel))].join(' · ')}
+            >
+              <span>{g.name}</span>
+              <span className="text-xs text-slate-500">{g.list.length > 1 ? `${g.list.length} makes` : g.qty > 1 ? `× ${g.qty}` : ''}</span>
+              {g.list.some((d) => d.is_assumption) && <span className="w-1.5 h-1.5 rounded-full bg-amber-400" title="Contains a working assumption" />}
+            </button>
+          ))}
+        </div>
+      )}
+    </section>
   );
 }

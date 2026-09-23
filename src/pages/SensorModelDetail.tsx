@@ -28,7 +28,7 @@ export default function SensorModelDetail() {
   return (
     <div className="space-y-6">
       <PageHeader
-        eyebrow={m?.sensor_categories?.name ?? 'Sensor'}
+        eyebrow={m?.sensor_categories?.name ?? 'Device'}
         title={`${m?.sensor_makes?.name ?? ''} ${m?.model_no ?? ''}`.trim() || '…'}
         icon="🔧"
         subtitle={m?.name ?? undefined}

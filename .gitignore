@@ -13,3 +13,6 @@ data-backup-*.json
 
 # Unrelated separate project living in this directory — never track it here
 illuminati-estates-redesign/
+
+# scratch scripts (node needs project-root resolution for node_modules)
+/_*.mjs

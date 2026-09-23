@@ -11,6 +11,9 @@ import NotificationBell from './NotificationBell';
 import ChatDrawer from './ChatDrawer';
 import UserMenu from './UserMenu';
 import AccessibilityMenu from './AccessibilityMenu';
+import PlantSwitcher from './PlantSwitcher';
+import { PlantProvider } from '../lib/plant';
+import type { SeedScope } from './ChatDrawer';
 
 const navCls = ({ isActive }: { isActive: boolean }) =>
   `px-3 py-2 rounded-md text-sm font-medium transition ${
@@ -34,6 +37,8 @@ function Inner() {
   const upload = useUpload();
   const [chatOpen, setChatOpen] = useState(false);
   const [chatSeed, setChatSeed] = useState<string | null>(null);
+  // A device scope handed to the assistant (Home chips, plant register rows).
+  const [chatSeedScope, setChatSeedScope] = useState<SeedScope | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
 
   // Anywhere in the app can open the assistant via:
@@ -42,6 +47,7 @@ function Inner() {
     function onOpenChat(e: Event) {
       const detail = (e as CustomEvent).detail;
       setChatSeed(detail?.q ?? null);
+      setChatSeedScope(detail?.scope ?? null);
       setChatOpen(true);
     }
     window.addEventListener('dp:open-chat', onOpenChat);
@@ -70,10 +76,12 @@ function Inner() {
           <nav aria-label="Primary" className="hidden md:flex items-center gap-1">
             <NavLink to="/" end className={navCls}>{t('nav.search')}</NavLink>
             <NavLink to="/browse" className={navCls}>{t('nav.browse')}</NavLink>
-            <NavLink to="/sensors" className={navCls}>{t('nav.sensors')}</NavLink>
+            <NavLink to="/sensors" className={navCls}>{t('nav.devices')}</NavLink>
+            <NavLink to="/plants" className={navCls}>{t('nav.plants')}</NavLink>
             {canUpload(profile) && !isAdmin(profile) && <NavLink to="/my-submissions" className={navCls}>{t('nav.uploads')}</NavLink>}
             {isAdmin(profile) && <NavLink to="/admin" className={navCls}>{t('nav.admin')}</NavLink>}
           </nav>
+          <div className="hidden md:block ml-1"><PlantSwitcher /></div>
           <div className="ml-auto flex items-center gap-1.5 sm:gap-2">
             {canUpload(profile) && (
               <button
@@ -102,9 +110,11 @@ function Inner() {
         {/* Mobile nav drawer */}
         {menuOpen && (
           <nav className="md:hidden border-t border-white/10 bg-brand-800 px-4 py-2 flex flex-col gap-1" aria-label="Main">
+            <div className="px-1 pb-1"><PlantSwitcher variant="menu" /></div>
             <NavLink to="/" end onClick={() => setMenuOpen(false)} className={mobileNavCls}>{t('nav.search')}</NavLink>
             <NavLink to="/browse" onClick={() => setMenuOpen(false)} className={mobileNavCls}>{t('nav.browse')}</NavLink>
-            <NavLink to="/sensors" onClick={() => setMenuOpen(false)} className={mobileNavCls}>{t('nav.sensors')}</NavLink>
+            <NavLink to="/sensors" onClick={() => setMenuOpen(false)} className={mobileNavCls}>{t('nav.devices')}</NavLink>
+            <NavLink to="/plants" onClick={() => setMenuOpen(false)} className={mobileNavCls}>{t('nav.plants')}</NavLink>
             {canUpload(profile) && !isAdmin(profile) && <NavLink to="/my-submissions" onClick={() => setMenuOpen(false)} className={mobileNavCls}>{t('nav.uploads')}</NavLink>}
             {isAdmin(profile) && <NavLink to="/admin" onClick={() => setMenuOpen(false)} className={mobileNavCls}>{t('nav.admin')}</NavLink>}
           </nav>
@@ -114,7 +124,7 @@ function Inner() {
       <main className="flex-1"><div className="max-w-7xl mx-auto px-4 sm:px-5 py-6 sm:py-8"><Outlet /></div></main>
 
       <footer className="border-t border-slate-200 bg-white text-xs text-slate-500 py-4 text-center">
-        DigitalPaani · Sensor Troubleshooting Tool
+        DigitalPaani · Troubleshooting Tool
         <span className="mx-2 text-slate-300">·</span>
         <NavLink to="/privacy" className="hover:text-brand-700 hover:underline">Privacy</NavLink>
       </footer>
@@ -136,12 +146,13 @@ function Inner() {
         open={chatOpen}
         onClose={() => setChatOpen(false)}
         seed={chatSeed}
-        onSeedConsumed={() => setChatSeed(null)}
+        seedScope={chatSeedScope}
+        onSeedConsumed={() => { setChatSeed(null); setChatSeedScope(null); }}
       />
     </div>
   );
 }
 
 export default function Layout() {
-  return <ToastProvider><UploadProvider><Inner /></UploadProvider></ToastProvider>;
+  return <ToastProvider><UploadProvider><PlantProvider><Inner /></PlantProvider></UploadProvider></ToastProvider>;
 }

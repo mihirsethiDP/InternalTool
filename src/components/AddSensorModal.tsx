@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
+import CategoryOptions from './CategoryOptions';
 
 interface Props {
   onClose: () => void;
@@ -22,7 +23,7 @@ export default function AddSensorModal({ onClose, onCreated, defaultMakeName }: 
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  const cats = useQuery({ queryKey: ['cats'], queryFn: async () => (await supabase.from('sensor_categories').select('id,name').order('name')).data ?? [] });
+  const cats = useQuery({ queryKey: ['cats-domain'], queryFn: async () => (await supabase.from('sensor_categories').select('id,name,domain').order('name')).data ?? [] });
   const makes = useQuery({ queryKey: ['makes'], queryFn: async () => (await supabase.from('sensor_makes').select('id,name').order('name')).data ?? [] });
 
   async function submit(e: React.FormEvent) {
@@ -79,7 +80,7 @@ export default function AddSensorModal({ onClose, onCreated, defaultMakeName }: 
               <label className="label">Category</label>
               <select className="input" value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
                 <option value="">— Select —</option>
-                {cats.data?.map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                <CategoryOptions categories={cats.data as any} />
               </select>
             </div>
             <div>

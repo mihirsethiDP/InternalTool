@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useMemo, useRef, useState, ReactN
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useLocation } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
+import CategoryOptions from './CategoryOptions';
 import { extractPdfText, chunkPage, sanitizeText } from '../lib/pdf';
 import { analyzeUpload, AUTOFILL_CONFIDENCE, type UploadAnalysis } from '../lib/analyzeUpload';
 import { classifyDoc, MISMATCH_CONFIDENCE } from '../lib/classify';
@@ -129,7 +130,7 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
     queryFn: async () => makeId ? ((await supabase.from('sensor_models').select('id, model_no, name').eq('make_id', makeId).eq('is_general', false).order('model_no')).data ?? []) : [],
     enabled: Boolean(makeId),
   });
-  const categories = useQuery({ queryKey: ['cats'], queryFn: async () => (await supabase.from('sensor_categories').select('id,name').order('name')).data ?? [] });
+  const categories = useQuery({ queryKey: ['cats-domain'], queryFn: async () => (await supabase.from('sensor_categories').select('id,name,domain').order('name')).data ?? [] });
   // Map category -> its synthetic "general" sensor_model id
   const generalModels = useQuery({
     queryKey: ['general-models'],
@@ -771,7 +772,7 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
                 <label className="label">Sensor category <span className="text-red-500">*</span></label>
                 <select className="input" value={categoryId} onChange={(e) => setCategoryId(e.target.value)} required>
                   <option value="">— Select category —</option>
-                  {categories.data?.map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  <CategoryOptions categories={categories.data as any} />
                 </select>
                 <div className="text-xs text-slate-500 mt-1.5">This guidance will show on every sensor in the category, alongside model-specific content.</div>
               </div>

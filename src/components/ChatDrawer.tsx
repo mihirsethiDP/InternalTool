@@ -17,6 +17,7 @@ import { conversationalReply, isVagueQuery } from '../lib/chatIntent';
 import { matchRule, type RouteMatch } from '../lib/routing';
 import { matchFlow, getNode, failTarget, fetchContacts, contactsForSkill, type DiagnosticFlow, type FlowNode, type EscalationContact } from '../lib/flows';
 import { fetchIssues, matchIssueClient, issueQueueInfo, filterQueueForModel, type Issue, type IssueQueueInfo } from '../lib/issues';
+import { usePlant, devicesInCategory, deviceLabel } from '../lib/plant';
 import { correctSpelling } from '../lib/lexicon';
 import { useAuth } from '../lib/auth';
 import AnswerFeedback from './AnswerFeedback';
@@ -275,15 +276,24 @@ function probeText(scopeLabel?: string | null): string {
     : i18n.t('chat.probeVague');
 }
 
-export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
+// A scope handed in from outside (Home's plant chips, a plant register row):
+// the drawer opens already narrowed to that device, on the symptom probe.
+export interface SeedScope { modelId?: string | null; categoryId?: string | null; label: string; note?: string }
+type ScopeT = { modelId?: string | null; generalModelId?: string | null; categoryId?: string | null; label: string };
+
+export default function ChatDrawer({ open, onClose, seed, seedScope, onSeedConsumed }: {
   open: boolean;
   onClose: () => void;
   seed?: string | null;
+  seedScope?: SeedScope | null;
   onSeedConsumed?: () => void;
 }) {
   const nav = useNavigate();
   const { t, i18n } = useTranslation();
   const { email } = useAuth();
+  // Where the operator is standing. The register for that plant answers the
+  // "which make & model?" question before we ever ask it.
+  const { plant } = usePlant();
   const [input, setInput] = useState('');
   const [listening, setListening] = useState(false);
   const recogRef = useRef<any>(null);
@@ -292,7 +302,10 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
   const [ticket, setTicket] = useState<{ query?: string; description?: string } | null>(null);
   // Active sensor scope: once the operator picks a make & model, all following
   // questions are scoped to it (and shown as a persistent chip) until cleared.
-  const [scope, setScope] = useState<{ modelId?: string | null; generalModelId?: string | null; categoryId?: string | null; label: string } | null>(null);
+  const [scope, setScope] = useState<ScopeT | null>(null);
+  // Categories we've already consulted the plant register for in this
+  // conversation — so "not sure" isn't followed by the same question again.
+  const plantAskedRef = useRef<Set<string>>(new Set());
   // Ordered sensor-type ids from the last AI route call, used to order the
   // guided picker's type chips (most-likely first).
   const [routeOrder, setRouteOrder] = useState<string[]>([]);
@@ -312,6 +325,8 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
   const pendingRef = useRef<
     | { kind: 'issue'; issue: Issue; info: IssueQueueInfo; origQuery: string }
     | { kind: 'flow'; flow: DiagnosticFlow; origQuery: string }
+    
+    | { kind: 'plantpick'; origQuery: string; categoryId: string; categoryName: string; generalModelId: string | null }
     | null
   >(null);
   // Voice replies: which turn is being read aloud, whether the current message
@@ -452,7 +467,7 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
       if (t.role === 'user' && currentFlow) lines.push(`  user: ${t.text.slice(0, 100)}`);
     }
     const history = lines.length ? `\n\n— Troubleshooting history —${lines.join('\n')}` : '';
-    const scopeLine = scope?.label ? `Sensor: ${scope.label}\n` : '';
+    const scopeLine = (scope?.label ? `Device: ${scope.label}\n` : '') + (plant ? `Plant: ${plant.name}\n` : '');
     const desc =
       scopeLine +
       `Question: ${turn.query}\n\n` +
@@ -489,6 +504,29 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
     prevLen.current = turns.length;
   }, [turns]);
 
+  // A seed SCOPE (Home's "at your plant" chips, a register row): narrow the
+  // conversation and open straight on the symptom probe.
+  useEffect(() => {
+    if (!open || !seedScope) return;
+    const ss = seedScope;
+    (async () => {
+      const { data: gm } = ss.categoryId
+        ? await supabase.from('sensor_models').select('id').eq('is_general', true).eq('category_id', ss.categoryId).maybeSingle()
+        : { data: null as any };
+      const s: ScopeT = { modelId: ss.modelId ?? null, generalModelId: (gm as any)?.id ?? null, categoryId: ss.categoryId ?? null, label: ss.label };
+      setScope(s);
+      if (ss.categoryId) plantAskedRef.current.add(ss.categoryId);
+      const options = await symptomOptions(s);
+      setTurns((tt) => [
+        ...tt,
+        ...(ss.note ? [{ role: 'bot', query: '', loading: false, note: ss.note } as Turn] : []),
+        { role: 'bot', query: '', loading: false, narrowedLabel: s.label, probe: { text: probeText(s.label), options } } as Turn,
+      ]);
+      onSeedConsumed?.();
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, seedScope]);
+
   // A seed question (from the homepage CTA etc.) fires once on open
   useEffect(() => {
     if (open && seed) {
@@ -518,7 +556,43 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
     return () => { document.body.style.overflow = prev; };
   }, [open]);
 
-  async function send(query: string) {
+  // Slip a short bot note in ABOVE the pending loading bubble — used when the
+  // plant register answers a question we would otherwise have asked.
+  function insertNote(text: string) {
+    setTurns((tt) => {
+      const i = tt.length - 1;
+      const last = tt[i] as any;
+      if (i < 0 || !last?.loading) return [...tt, { role: 'bot', query: '', loading: false, note: text } as Turn];
+      return [...tt.slice(0, i), { role: 'bot', query: last.query, loading: false, note: text } as Turn, tt[i]];
+    });
+  }
+
+  // Consult the plant register for one category. Returns the scope to use, or
+  // null when it asked the operator to choose (the turn is already rendered).
+  async function scopeFromPlant(categoryId: string, categoryName: string, q: string): Promise<ScopeT | null | 'asked'> {
+    if (!plant || plantAskedRef.current.has(categoryId)) return null;
+    plantAskedRef.current.add(categoryId);
+    const devs = await devicesInCategory(plant.id, categoryId);
+    const distinct = new Map(devs.map((d) => [d.sensor_model_id, d]));
+    const { data: gm } = await supabase.from('sensor_models').select('id').eq('is_general', true).eq('category_id', categoryId).maybeSingle();
+    if (distinct.size === 1) {
+      const d = [...distinct.values()][0];
+      insertNote(t(d.is_assumption ? 'chat.plantAssumed' : 'chat.plantResolved', { plant: plant.name, category: categoryName, label: deviceLabel(d) }));
+      return { modelId: d.sensor_model_id, generalModelId: (gm as any)?.id ?? null, categoryId, label: deviceLabel(d) };
+    }
+    if (distinct.size > 1) {
+      pendingRef.current = { kind: 'plantpick', origQuery: q, categoryId, categoryName, generalModelId: (gm as any)?.id ?? null };
+      const chips: { label: string; act: 'start' | 'reject' | 'model' | 'unsure'; modelId?: string }[] =
+        [...distinct.values()].map((d) => ({ label: deviceLabel(d), act: 'model' as const, modelId: d.sensor_model_id }));
+      chips.push({ label: t('chat.modelUnsure'), act: 'unsure' });
+      setTurns((tt) => fillLoadingTurn(tt, { role: 'bot', query: q, loading: false, elicit: { text: t('chat.plantWhich', { plant: plant.name, category: categoryName }), chips } }));
+      return 'asked';
+    }
+    insertNote(t('chat.plantNone', { plant: plant.name, category: categoryName }));
+    return null;
+  }
+
+  async function send(query: string, opts?: { scope?: ScopeT | null; noEcho?: boolean }) {
     const q = query.trim();
     if (!q) return;
     if (sendingRef.current) return; // ignore concurrent sends (would swap answers under questions)
@@ -541,14 +615,14 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
     flowRef.current = null;
     queueRef.current = null;
     pendingRef.current = null;
-    let activeScope = scope;
+    let activeScope = opts?.scope !== undefined ? opts.scope : scope;
 
     // Echo the user's message + a loading placeholder IMMEDIATELY — before any
     // network work (routing/retrieval) — so the typed message never lags behind
     // the ~1s routing call. The label is filled in once routing resolves.
     setTurns((t) => [
       ...t,
-      { role: 'user', text: q },
+      ...(opts?.noEcho ? [] : [{ role: 'user', text: q } as Turn]),
       { role: 'bot', query: q, loading: true, narrowedLabel: activeScope?.label },
     ]);
     try {
@@ -593,11 +667,23 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
           }
         }
         if (!activeScope && r?.top && r.top.confidence >= 0.6) {
+          // The plant register may already know the make & model.
+          const fromPlant = await scopeFromPlant(r.top.id, r.top.name, q);
+          if (fromPlant === 'asked') return;
+          if (fromPlant) { activeScope = fromPlant; setScope(activeScope); }
+        }
+        if (!activeScope && r?.top && r.top.confidence >= 0.6) {
           // Resolve the category's general model so type-level routing rules apply.
           const { data: gm } = await supabase.from('sensor_models').select('id').eq('is_general', true).eq('category_id', r.top.id).maybeSingle();
-          activeScope = { categoryId: r.top.id, generalModelId: (gm as any)?.id ?? null, label: `${r.top.name} sensors` };
+          activeScope = { categoryId: r.top.id, generalModelId: (gm as any)?.id ?? null, label: `${r.top.name}` };
           setScope(activeScope);
         }
+      } else if (activeScope && !activeScope.modelId && activeScope.categoryId) {
+        // Category-only scope (a Home chip, or "not sure" earlier): the plant
+        // register can still narrow it to the installed make & model.
+        const fromPlant = await scopeFromPlant(activeScope.categoryId, activeScope.label, q);
+        if (fromPlant === 'asked') return;
+        if (fromPlant) { activeScope = fromPlant; setScope(activeScope); }
       }
 
       // ---- Priority 1: match the message to a curated ISSUE and run its
@@ -754,6 +840,22 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
   async function handleElicit(chip: { label: string; act: 'start' | 'reject' | 'model' | 'unsure'; modelId?: string }) {
     const p = pendingRef.current;
     if (!p || sendingRef.current) return;
+    if (p.kind === 'plantpick') {
+      // Their pick scopes the whole conversation; then the original question
+      // runs again against that device — without echoing it a second time.
+      pendingRef.current = null;
+      setTurns((tt) => [...tt, { role: 'user', text: chip.label } as Turn]);
+      let next: ScopeT | null = null;
+      if (chip.act === 'model' && chip.modelId) {
+        const { data: m } = await supabase.from('sensor_models').select('id, model_no, name, sensor_makes(name)').eq('id', chip.modelId).maybeSingle();
+        const mk = m ? (Array.isArray((m as any).sensor_makes) ? (m as any).sensor_makes[0] : (m as any).sensor_makes) : null;
+        if (m) next = { modelId: (m as any).id, generalModelId: p.generalModelId, categoryId: p.categoryId, label: `${mk?.name ?? ''} ${(m as any).model_no || (m as any).name}`.trim() };
+      }
+      if (!next) next = { categoryId: p.categoryId, generalModelId: p.generalModelId, label: p.categoryName };
+      setScope(next);
+      await send(p.origQuery, { scope: next, noEcho: true });
+      return;
+    }
     sendingRef.current = true;
     try {
       // Single matched flow: confirm, then run it (no queue, no model question
@@ -1043,7 +1145,7 @@ export default function ChatDrawer({ open, onClose, seed, onSeedConsumed }: {
           <div className="bg-brand-50 border-b border-brand-100 px-4 py-2 flex items-center gap-2">
             <Cpu size={14} className="text-brand-700 shrink-0" />
             <span className="text-xs text-brand-800 min-w-0 truncate">
-              Answering for <strong className="font-semibold">{scope.label}</strong>
+              Answering for <strong className="font-semibold">{scope.label}</strong>{plant && <span className="text-brand-700/70"> · {t('chat.plantChip', { plant: plant.code || plant.name })}</span>}
             </span>
             <button
               onClick={() => setScope(null)}
