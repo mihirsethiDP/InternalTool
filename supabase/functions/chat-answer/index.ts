@@ -692,7 +692,7 @@ Deno.serve(async (req) => {
     let target: URL;
     try { target = new URL(raw); } catch { return json({ error: 'not a valid link' }, 400); }
     if (!/^https?:$/.test(target.protocol)) return json({ error: 'only http(s) links' }, 400);
-    if (/^(localhost|127.|10.|192.168.|169.254.|0.)/.test(target.hostname)) return json({ error: 'that address is not allowed' }, 400);
+    if (/^(localhost|127\.|10\.|192\.168\.|169\.254\.|0\.)/.test(target.hostname)) return json({ error: 'that address is not allowed' }, 400);
 
     const ctl = new AbortController(); const timer = setTimeout(() => ctl.abort(), 40_000);
     let res: Response;
@@ -711,21 +711,18 @@ Deno.serve(async (req) => {
     const isPdf = head === '%PDF-' || ctype.includes('application/pdf');
     const lastSeg = decodeURIComponent((res.url || target.href).split('?')[0].split('/').pop() || '');
     if (isPdf) {
-      const safe = (lastSeg.replace(/.pdf$/i, '') || 'document').replace(/[^A-Za-z0-9._-]+/g, '_').slice(0, 80);
+      const safe = (lastSeg.replace(/\.pdf$/i, '') || 'document').replace(/[^A-Za-z0-9._-]+/g, '_').slice(0, 80);
       const storage_path = Date.now() + '_' + safe + '.pdf';
       const up = await supabase.storage.from('documents').upload(storage_path, bytes, { contentType: 'application/pdf', upsert: false });
       if (up.error) return json({ error: 'could not store the file: ' + up.error.message }, 500);
       return json({ kind: 'pdf', storage_path, size_bytes: bytes.byteLength, filename: safe + '.pdf', url: res.url || target.href });
     }
-    if (ctype.includes('text/html') || /^s*<(!doctype|html)/i.test(head)) {
+    if (ctype.includes('text/html') || /^\s*<(!doctype|html)/i.test(head)) {
       const html = new TextDecoder().decode(bytes);
-      const title = (html.match(/<title[^>]*>([^<]*)</title>/i)?.[1] ?? '').replace(/s+/g, ' ').trim();
-      const text = html.replace(/<script[^]*?</script>/gi, ' ').replace(/<style[^]*?</style>/gi, ' ').replace(/<(br|p|div|li|tr|h[1-6]|section|table)[^>]*>/gi, '
-').replace(/<[^>]+>/g, ' ')
+      const title = (html.match(/<title[^>]*>([^<]*)<\/title>/i)?.[1] ?? '').replace(/\s+/g, ' ').trim();
+      const text = html.replace(/<script[\s\S]*?<\/script>/gi, ' ').replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<(br|p|div|li|tr|h[1-6]|section|table)[^>]*>/gi, '\n').replace(/<[^>]+>/g, ' ')
         .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"')
-        .split('
-').map((l) => l.replace(/s+/g, ' ').trim()).filter((l) => l.length >= 40).join('
-').slice(0, 40_000);
+        .split('\n').map((l) => l.replace(/\s+/g, ' ').trim()).filter((l) => l.length >= 40).join('\n').slice(0, 40_000);
       return json({ kind: 'page', title, text, url: res.url || target.href });
     }
     return json({ error: 'that link is not a PDF or a web page (' + (ctype || 'unknown type') + ')' }, 415);
