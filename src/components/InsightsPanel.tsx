@@ -117,10 +117,15 @@ export default function InsightsPanel() {
   const undocumented = useQuery({
     queryKey: ['insights-undocumented'],
     queryFn: async () => {
+      // General (category-level) references count too — the UPS handbook lives on
+      // 'General — UPS' and covers every make; the viewer layers it in.
+      const { data: generals } = await supabase.from('consolidated_docs').select('content_markdown, sensor_models!inner(category_id, is_general, sensor_categories(domain))').eq('sensor_models.is_general', true).is('deleted_at', null);
+      const generalCovered = new Map<string, number>();
+      for (const g of (generals ?? []) as any[]) { const sm = Array.isArray(g.sensor_models) ? g.sensor_models[0] : g.sensor_models; const cat = Array.isArray(sm?.sensor_categories) ? sm.sensor_categories[0] : sm?.sensor_categories; if (sm?.category_id) generalCovered.set(sm.category_id, coverageOf(g.content_markdown, cat?.domain).covered); }
       const rows: any[] = [];
       for (let from = 0; ; from += 1000) {
         const { data } = await supabase.from('plant_sensors')
-          .select('plant_id, quantity, sensor_model_id, sensor_models(model_no, name, sensor_makes(name), sensor_categories(name, domain), consolidated_docs(content_markdown, deleted_at))')
+          .select('plant_id, quantity, sensor_model_id, sensor_models(model_no, name, category_id, sensor_makes(name), sensor_categories(name, domain), consolidated_docs(content_markdown, deleted_at))')
           .range(from, from + 999);
         rows.push(...(data ?? []));
         if (!data || data.length < 1000) break;
@@ -131,7 +136,7 @@ export default function InsightsPanel() {
         const mk = Array.isArray(sm.sensor_makes) ? sm.sensor_makes[0] : sm.sensor_makes;
         const cat = Array.isArray(sm.sensor_categories) ? sm.sensor_categories[0] : sm.sensor_categories;
         const cd = (Array.isArray(sm.consolidated_docs) ? sm.consolidated_docs : [sm.consolidated_docs]).filter((d: any) => d && !d.deleted_at)[0];
-        const e = byModel.get(r.sensor_model_id) ?? { id: r.sensor_model_id, label: `${mk?.name ?? ''} ${sm.model_no || sm.name}`.trim(), category: cat?.name ?? '', domain: cat?.domain ?? 'sensor', plants: new Set<string>(), sensors: 0, covered: coverageOf(cd?.content_markdown, cat?.domain).covered };
+        const e = byModel.get(r.sensor_model_id) ?? { id: r.sensor_model_id, label: `${mk?.name ?? ''} ${sm.model_no || sm.name}`.trim(), category: cat?.name ?? '', domain: cat?.domain ?? 'sensor', plants: new Set<string>(), sensors: 0, covered: coverageOf(cd?.content_markdown, cat?.domain).covered + (generalCovered.get(sm.category_id) ?? 0) };
         e.plants.add(r.plant_id); e.sensors += r.quantity ?? 1; byModel.set(r.sensor_model_id, e);
       }
       return [...byModel.values()].filter((m) => m.covered === 0).sort((a, b) => b.plants.size - a.plants.size || b.sensors - a.sensors);

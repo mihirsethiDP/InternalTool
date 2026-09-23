@@ -46,6 +46,19 @@ export default function PlantDetail() {
         const c = coverageOf(d.content_markdown, dom);
         m[d.sensor_model_id] = { docId: d.id, covered: c.covered, total: c.total };
       }
+      // A model with no reference of its own still has its category's general
+      // one (the UPS handbook covers all three makes) — show that instead.
+      const catIds = [...new Set((devices.data ?? []).filter((x) => !m[x.sensor_model_id] && x.category_id).map((x) => x.category_id as string))];
+      if (catIds.length) {
+        const { data: gen } = await supabase.from('consolidated_docs').select('id, content_markdown, sensor_models!inner(category_id, is_general)').eq('sensor_models.is_general', true).in('sensor_models.category_id', catIds).is('deleted_at', null);
+        for (const g of (gen ?? []) as any[]) {
+          const sm = Array.isArray(g.sensor_models) ? g.sensor_models[0] : g.sensor_models;
+          for (const x of (devices.data ?? []).filter((x) => !m[x.sensor_model_id] && x.category_id === sm?.category_id)) {
+            const c = coverageOf(g.content_markdown, x.domain);
+            if (c.covered > 0) m[x.sensor_model_id] = { docId: g.id, covered: c.covered, total: c.total };
+          }
+        }
+      }
       return m;
     },
   });
