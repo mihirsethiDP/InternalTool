@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 // @ts-expect-error — plain ESM shared with the node importer (no types on purpose)
-import { resolveCategory, isAssumption, deriveClient, upsMakeFor, plantCodeFromTags, splitModels, plantStatus, parseRegister, parseTags } from '../../../scripts/plant-register/rules.mjs';
+import { canonicalMake, canonicalModel, resolveCategory, isAssumption, deriveClient, upsMakeFor, plantCodeFromTags, splitModels, plantStatus, parseRegister, parseTags } from '../../../scripts/plant-register/rules.mjs';
 
 const cats = [
   { id: 'flow', name: 'Flow', aliases: ['Electromagnetic Flow Meter', 'Magmeter'] },
@@ -52,6 +52,12 @@ describe('plant register rules', () => {
     expect(plantCodeFromTags(['DO_OS_TANK_AT_1:GD, DO_OS_TANK_AT_2:GD ...', 'BOD_Pipe_SITJ_1:GD'])).toBe('GD');
     expect(plantCodeFromTags(['EMKWH_UGT5Pdd1_1:METL_METL, LT_ATdd1_1:METL_METL'])).toBe('METL');
     expect(plantCodeFromTags(['nothing here'])).toBeNull();
+  });
+  it('maps register spellings onto the catalogue spelling', () => {
+    expect(canonicalMake('UPC (Universal Process Controls)')).toBe('UPC');
+    expect(canonicalModel('UPC (Universal Process Controls)', 'UPCS-MAG-110')).toBe('MAG-110');
+    expect(canonicalModel('UPC (Universal Process Controls)', 'UPC-WA-202')).toBe('UPC-WA-202');
+    expect(canonicalMake('Danfoss')).toBe('Danfoss');
   });
   it('splits per-tag model pairs and nothing else', () => {
     expect(splitModels('LFT1 + LFT2 (per tag)')).toEqual(['LFT1', 'LFT2']);

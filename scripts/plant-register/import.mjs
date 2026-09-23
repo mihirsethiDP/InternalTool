@@ -19,7 +19,7 @@
 import fs from 'node:fs';
 import XLSX from 'xlsx';
 import { createClient } from '@supabase/supabase-js';
-import { parseRegister, resolveCategory, isAssumption, upsMakeFor, splitModels, norm } from './rules.mjs';
+import { parseRegister, resolveCategory, isAssumption, upsMakeFor, splitModels, norm, canonicalMake, canonicalModel } from './rules.mjs';
 
 const args = process.argv.slice(2);
 const APPLY = args.includes('--apply');
@@ -50,7 +50,7 @@ const [cats, makes, models, dbPlants, dbRows] = await Promise.all([
   must(sb.from('sensor_makes').select('id, name'), 'makes'),
   must(sb.from('sensor_models').select('id, make_id, category_id, model_no, name, is_general'), 'models'),
   must(sb.from('plants').select('id, name, code, client, status'), 'plants'),
-  must(sb.from('plant_sensors').select('id, plant_id, sensor_model_id, source'), 'plant_sensors'),
+  must(sb.from('plant_sensors').select('id, plant_id, sensor_model_id, category_id, source'), 'plant_sensors'),
 ]);
 if (!cats.some((c) => c.domain === 'electronics')) die('Migration 051 has not been applied (no electronics categories). Run it first.');
 
@@ -70,13 +70,16 @@ const modelKey = (makeId, modelNo) => `${makeId}::${norm(modelNo)}`;
 const modelByKey = new Map(models.filter((m) => !m.is_general).map((m) => [modelKey(m.make_id, m.model_no), m]));
 const newModels = new Map(); // key -> { make, model_no, category }
 
-function planMake(name) {
+function planMake(rawName) {
+  const name = canonicalMake(rawName);
   const k = norm(name);
   if (makeByNorm.has(k)) return { id: makeByNorm.get(k).id, name: makeByNorm.get(k).name, isNew: false };
   if (!newMakes.has(k)) newMakes.set(k, name);
   return { id: null, name, isNew: true, normKey: k };
 }
-function planModel(make, modelNo, category) {
+function planModel(rawMake, rawModel, category) {
+  const make = canonicalMake(rawMake);
+  const modelNo = canonicalModel(rawMake, rawModel);
   const mk = planMake(make);
   const k = mk.id ? modelKey(mk.id, modelNo) : `new:${mk.normKey}::${norm(modelNo)}`;
   if (mk.id && modelByKey.has(k)) return { ...modelByKey.get(k), isNew: false };
@@ -98,6 +101,8 @@ const plantByName = new Map(dbPlants.map((p) => [norm(p.name), p]));
 const plantsNew = plants.filter((p) => !plantByName.has(norm(p.name)));
 const disc = plants.filter((p) => p.status === 'discontinued');
 console.log(`\nPlants: ${plantsNew.length} new, ${plants.length - plantsNew.length} existing · ${disc.length} discontinued (${disc.map((p) => p.name).join(', ') || '—'})`);
+const aliased = rows.flatMap((r) => r.pairs).filter(([mk, mo]) => canonicalMake(mk) !== mk || canonicalModel(mk, mo) !== mo).length;
+console.log(`Alias hits (linked to existing catalogue spelling): ${aliased}`);
 console.log(`Makes: ${newMakes.size} new → ${[...newMakes.values()].join(' | ') || '—'}`);
 console.log(`Models: ${newModels.size} new →`);
 for (const m of newModels.values()) console.log(`   + ${m.make} ${m.model_no}  [${m.category.name}]`);
@@ -133,16 +138,22 @@ for (const m of newModels.values()) {
     .select('id, make_id, category_id, model_no, name, is_general').single(), `model ${m.make} ${m.model_no}`);
   modelByKey.set(modelKey(mk.id, m.model_no), ins);
 }
-const findModel = (make, modelNo) => modelByKey.get(modelKey(makeByNorm.get(norm(make)).id, modelNo));
+const findModel = (make, modelNo) => modelByKey.get(modelKey(makeByNorm.get(norm(canonicalMake(make))).id, canonicalModel(make, modelNo)));
 
 // register rows
-const existing = new Map(dbRows.map((r) => [`${r.plant_id}::${r.sensor_model_id}`, r]));
+// Grain is (plant, model, category): one analyser can be the BOD and the COD sensor.
+const existing = new Map(dbRows.map((r) => [`${r.plant_id}::${r.sensor_model_id}::${r.category_id}`, r]));
 let ins = 0, upd = 0;
 async function upsertDevice(plant, model, fields) {
-  const k = `${plant.id}::${model.id}`;
+  const k = `${plant.id}::${model.id}::${fields.category_id}`;
   const ex = existing.get(k);
   if (ex) { await must(sb.from('plant_sensors').update({ ...fields, updated_at: new Date().toISOString() }).eq('id', ex.id), `row ${plant.name}/${model.model_no}`); upd++; }
-  else { const row = await must(sb.from('plant_sensors').insert({ plant_id: plant.id, sensor_model_id: model.id, ...fields }).select('id, plant_id, sensor_model_id, source').single(), `row ${plant.name}/${model.model_no}`); existing.set(k, row); ins++; }
+  else {
+    const { data: row, error } = await sb.from('plant_sensors').insert({ plant_id: plant.id, sensor_model_id: model.id, ...fields }).select('id, plant_id, sensor_model_id, category_id, source').single();
+    if (error?.code === '23505') die(`${plant.name} / ${model.model_no}: a second category for the same device needs migration 052 (one row per plant × model × category). Apply it and re-run.`);
+    if (error) die(`row ${plant.name}/${model.model_no}: ${error.message}`);
+    existing.set(k, row); ins++;
+  }
 }
 for (const r of rows) {
   const plant = plantByName.get(norm(r.plant));

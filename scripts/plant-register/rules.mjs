@@ -28,6 +28,24 @@ export const CATEGORY_MAP = {
   'Airflow Meter': 'Air Flow',
 };
 
+// The fill sheet and the catalogue sometimes name the same thing differently.
+// Map register spelling → catalogue spelling so the plant links to the model
+// that already carries the documentation (UPC MAG-110 has a full reference).
+export const MAKE_ALIASES = {
+  'UPC (Universal Process Controls)': 'UPC',
+  'Universal Process Controls': 'UPC',
+};
+export const MODEL_ALIASES = {
+  'UPC::UPCS-MAG-110': 'MAG-110',
+};
+export function canonicalMake(make) {
+  return MAKE_ALIASES[String(make ?? '').trim()] ?? String(make ?? '').trim();
+}
+export function canonicalModel(make, model) {
+  const mk = canonicalMake(make);
+  return MODEL_ALIASES[mk + '::' + String(model ?? '').trim()] ?? String(model ?? '').trim();
+}
+
 export function norm(s) {
   return String(s ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '');
 }
