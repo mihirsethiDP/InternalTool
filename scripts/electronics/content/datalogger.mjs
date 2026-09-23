@@ -227,7 +227,7 @@ export const flows = [
 ];
 
 export const issues = [
-  { label: 'Plant not reporting / datalogger offline', aliases: ['data not coming', 'no data', 'readings stopped', 'plant offline', 'logger down', 'pi offline', 'data band'], flows: ['Plant stopped reporting — datalogger offline'] },
+  { label: 'Plant not reporting / datalogger offline', aliases: ['data not coming', 'no data', 'readings stopped', 'plant offline', 'logger down', 'pi offline', 'data band', 'plant stopped sending data', 'dashboard not updating', 'site offline', 'data nahi aa raha', 'plant ka data nahi aa raha', 'not reporting', 'stopped reporting', 'values not updating'], flows: ['Plant stopped reporting — datalogger offline'] },
   { label: 'Datalogger not booting (blink code)', aliases: ['green light blinking', 'blink pattern', 'pi not booting', 'act led blinking'], flows: ['Datalogger green light blinking a repeating pattern', 'Plant stopped reporting — datalogger offline'] },
 ];
 

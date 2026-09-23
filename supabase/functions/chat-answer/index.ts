@@ -42,7 +42,7 @@ interface Chunk {
 // Ask for it with { mode: "ping" }: guessing which copy of this file is
 // deployed cost us a debugging cycle when a stale paste kept routing spec
 // sheets to "other".
-const FN_BUILD = '2026-09-23-route-electronics';
+const FN_BUILD = '2026-09-23-route-menu';
 
 const SECTION_LABEL: Record<string, string> = {
   install_commission: 'Install & Commission', configure: 'Configure', inspect: 'Inspect',
@@ -273,6 +273,19 @@ Deno.serve(async (req) => {
       '',
       'Return strict JSON: {"index": <catalog number that best matches the document, or 0 if none is a good match>, "confidence": <number 0 to 1>, "reason": "<one short sentence on the deciding evidence>"}',
     ].join('\n');
+
+    // Deterministic pre-router for the site electronics. Operators describe
+    // these by effect ("plant stopped sending data", "site offline"), and the
+    // model keeps reading "plant" as process equipment however the prompt is
+    // worded. A hit is forced to the top; the model still supplies intent,
+    // vagueness and the normalized restatement.
+    const q = query.toLowerCase();
+    const RULES: { name: string; re: RegExp }[] = [
+      { name: 'Datalogger', re: /(datalogger|data logger|raspberry|rpi|gateway|telemetry|((plant|site|station)[^.]{0,20}offline)|offline since|((plant|site|station|dashboard|portal|cloud)[^.]{0,40}(not|no|stopped|stop|nahi|band)[^.]{0,30}(report|send|updat|data|value|reading|show))|((data|values|readings)[^.]{0,30}(not|no|nahi|stopped)[^.]{0,20}(coming|arriv|updat|show|aa rah|report|send)))/ },
+      { name: 'UPS', re: /(ups|battery backup|power backup|inverter|backup time|beeping)/ },
+      { name: 'Camera', re: /(camera|cctv|ezviz|live view|live feed)/ },
+    ];
+    const forced = RULES.map((r) => (r.re.test(q) ? [...catMap.entries()].find(([, v]) => v.name === r.name) : null)).find(Boolean) ?? null;
 
     const raw = await fastComplete(sys, user, true);
     // extractJson (not raw JSON.parse) because the Claude fallback has no
@@ -1176,10 +1189,16 @@ Deno.serve(async (req) => {
     // presence — so a sensor added ahead of its document being approved put
     // its category on the menu, and every answer scoped there could only be a
     // refusal. Route to what we can actually answer from.
+    // One row per LIVE reference with content (34 today), not per search chunk:
+    // PostgREST caps any response at 1,000 rows regardless of .limit(), and once
+    // the chunk table passed 1,000 the categories whose chunks sorted last —
+    // Datalogger, Turbidity, DO … — silently fell off the menu.
     const { data: chunkRows, error: rErr } = await supabase
-      .from('consolidated_doc_chunks')
-      .select('sensor_models(category_id, sensor_categories(id, name, aliases))')
-      .limit(5000);
+      .from('consolidated_docs')
+      .select('content_markdown, sensor_models(category_id, sensor_categories(id, name, aliases))')
+      .is('deleted_at', null)
+      .neq('content_markdown', '')
+      .limit(1000);
     if (rErr) { console.error('route catalog error', rErr); return json({ error: 'catalog lookup failed' }, 500); }
     const catMap = new Map<string, { name: string; aliases: string[] }>();
     for (const row of (chunkRows ?? []) as any[]) {
@@ -1218,10 +1237,11 @@ Deno.serve(async (req) => {
     // response_format and may wrap the object in prose or fences.
     const parsed: any = extractJson(raw);
     const ranking: number[] = Array.isArray(parsed.ranking) ? parsed.ranking : [];
-    const ordered = ranking.map((n) => cats.find((c) => c.idx === Number(n))).filter(Boolean) as { id: string; name: string }[];
+    let ordered = ranking.map((n) => cats.find((c) => c.idx === Number(n))).filter(Boolean) as { id: string; name: string }[];
+    if (forced) ordered = [{ id: forced[0], name: forced[1].name }, ...ordered.filter((c) => c.id !== forced[0])];
     // Append any categories the model didn't rank, so the full set is still offered.
     for (const c of cats) if (!ordered.find((o) => o.id === c.id)) ordered.push({ id: c.id, name: c.name });
-    const confidence = Math.max(0, Math.min(1, Number(parsed.confidence) || 0));
+    const confidence = forced ? Math.max(0.9, Math.min(1, Number(parsed.confidence) || 0)) : Math.max(0, Math.min(1, Number(parsed.confidence) || 0));
     const VALID_INTENTS = ['troubleshoot', 'howto', 'info', 'other'];
     return json({
       categories: ordered.map((c) => ({ id: c.id, name: c.name })),
