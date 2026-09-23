@@ -804,7 +804,7 @@ export default function ChatDrawer({ open, onClose, seed, seedScope, onSeedConsu
   function buildElicit(
     issue: Issue,
     info: IssueQueueInfo,
-    sc: { modelId?: string | null; label?: string } | null,
+    sc: { modelId?: string | null; categoryId?: string | null; label?: string } | null,
   ): NonNullable<Extract<Turn, { role: 'bot' }>['elicit']> | null {
     // Already scoped to a model → just confirm the issue.
     if (sc?.modelId) {
@@ -839,7 +839,9 @@ export default function ChatDrawer({ open, onClose, seed, seedScope, onSeedConsu
     }
     // Fixes differ by model → the model is NECESSARY, ask before starting.
     return {
-      text: t('chat.whichModel', { issue: issue.label }),
+      text: sc?.categoryId && !sc.modelId
+        ? t('chat.whichDevice', { issue: issue.label, category: sc.label })
+        : t('chat.whichModel', { issue: issue.label }),
       chips: [
         ...info.models.map((m) => ({ label: m.label, act: 'model' as const, modelId: m.id })),
         ...(info.hasGeneral
