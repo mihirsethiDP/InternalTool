@@ -12,14 +12,35 @@ export default function PlantSwitcher({ variant = 'header' }: { variant?: 'heade
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
   const ref = useRef<HTMLDivElement>(null);
+  const btnRef = useRef<HTMLButtonElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  // The 'light' variant lives inside scroll containers (the chat drawer), so
+  // its menu is fixed-positioned and clamped to the viewport instead of
+  // hanging off whichever edge the button happens to be near.
+  const [menuStyle, setMenuStyle] = useState<React.CSSProperties | undefined>(undefined);
 
   useEffect(() => {
     function onClick(e: MouseEvent) { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); }
     function onKey(e: KeyboardEvent) { if (e.key === 'Escape') setOpen(false); }
-    if (open) { document.addEventListener('mousedown', onClick); document.addEventListener('keydown', onKey); setTimeout(() => inputRef.current?.focus(), 0); }
+    // preventScroll: inside the chat drawer a plain focus() scrolled the
+    // message list sideways to bring the search box into view.
+    if (open) { document.addEventListener('mousedown', onClick); document.addEventListener('keydown', onKey); setTimeout(() => inputRef.current?.focus({ preventScroll: true }), 0); }
     return () => { document.removeEventListener('mousedown', onClick); document.removeEventListener('keydown', onKey); };
   }, [open]);
+
+  useEffect(() => {
+    if (!open || variant !== 'light' || !btnRef.current) { setMenuStyle(undefined); return; }
+    const place = () => {
+      const r = btnRef.current!.getBoundingClientRect();
+      const width = Math.min(352, window.innerWidth - 16);
+      const left = Math.max(8, Math.min(r.right - width, window.innerWidth - width - 8));
+      const below = window.innerHeight - r.bottom - 12;
+      setMenuStyle({ position: 'fixed', top: r.bottom + 6, left, width, maxHeight: Math.max(220, Math.min(380, below)) });
+    };
+    place();
+    window.addEventListener('resize', place); window.addEventListener('scroll', place, true);
+    return () => { window.removeEventListener('resize', place); window.removeEventListener('scroll', place, true); };
+  }, [open, variant]);
 
   const filtered = useMemo(() => {
     const n = q.trim().toLowerCase();
@@ -39,14 +60,14 @@ export default function PlantSwitcher({ variant = 'header' }: { variant?: 'heade
 
   return (
     <div ref={ref} className="relative">
-      <button onClick={() => setOpen((o) => !o)} className={btnCls} aria-haspopup="listbox" aria-expanded={open} aria-label={plant ? `Plant: ${plant.name}` : t('home.pickPlant')}>
+      <button ref={btnRef} onClick={() => setOpen((o) => !o)} className={btnCls} aria-haspopup="listbox" aria-expanded={open} aria-label={plant ? `Plant: ${plant.name}` : t('home.pickPlant')}>
         <MapPin size={15} strokeWidth={2.25} className="shrink-0" />
         <span className="truncate">{label}</span>
         <ChevronDown size={13} className="shrink-0 opacity-70" />
       </button>
 
       {open && (
-        <div className={`absolute ${variant === 'header' ? 'right-0 sm:left-0 sm:right-auto' : 'left-0'} mt-2 w-[min(92vw,22rem)] rounded-xl bg-white text-slate-900 shadow-xl border border-slate-200 overflow-hidden z-50`}>
+        <div style={menuStyle} className={`${menuStyle ? 'flex flex-col' : `absolute ${variant === 'header' ? 'right-0 sm:left-0 sm:right-auto' : 'left-0'} mt-2 w-[min(92vw,22rem)]`} rounded-xl bg-white text-slate-900 shadow-xl border border-slate-200 overflow-hidden z-50`}>
           <div className="p-2 border-b border-slate-100">
             <div className="relative">
               <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -60,7 +81,7 @@ export default function PlantSwitcher({ variant = 'header' }: { variant?: 'heade
               />
             </div>
           </div>
-          <ul role="listbox" className="max-h-72 overflow-y-auto scrollbar-thin py-1">
+          <ul role="listbox" className={`${menuStyle ? 'flex-1 min-h-0' : 'max-h-72'} overflow-y-auto scrollbar-thin py-1`}>
             {plant && (
               <li>
                 <button onClick={() => { setPlant(null); setOpen(false); }} className="flex w-full items-center gap-2 px-3 py-2 text-sm text-slate-600 hover:bg-slate-50">
