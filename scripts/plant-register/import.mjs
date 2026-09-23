@@ -35,6 +35,16 @@ const ELECTRONICS = [
   { category: 'Datalogger', make: 'Raspberry Pi',      model_no: 'Pi 4 Model B (4 GB)', note: 'Fleet standard: the PLC-to-cloud bridge at every plant (Mihir, 2026-09-23).' },
 ];
 
+// PostgREST caps a select at 1000 rows; the register is bigger than that.
+async function fetchAll(table, select) {
+  const out = []; const page = 1000;
+  for (let from = 0; ; from += page) {
+    const { data, error } = await sb.from(table).select(select).range(from, from + page - 1);
+    if (error) die(`${table}: ${error.message}`);
+    out.push(...(data ?? []));
+    if (!data || data.length < page) return out;
+  }
+}
 function die(msg) { console.error('\n✗ ' + msg); process.exit(1); }
 async function must(p, what) { const { data, error } = await p; if (error) die(`${what}: ${error.message}`); return data; }
 
@@ -48,9 +58,9 @@ console.log(`Workbook: ${plants.length} plants, ${rows.length} category rows, ${
 const [cats, makes, models, dbPlants, dbRows] = await Promise.all([
   must(sb.from('sensor_categories').select('id, name, aliases, domain'), 'categories'),
   must(sb.from('sensor_makes').select('id, name'), 'makes'),
-  must(sb.from('sensor_models').select('id, make_id, category_id, model_no, name, is_general'), 'models'),
-  must(sb.from('plants').select('id, name, code, client, status'), 'plants'),
-  must(sb.from('plant_sensors').select('id, plant_id, sensor_model_id, category_id, source'), 'plant_sensors'),
+  fetchAll('sensor_models', 'id, make_id, category_id, model_no, name, is_general'),
+  fetchAll('plants', 'id, name, code, client, status'),
+  fetchAll('plant_sensors', 'id, plant_id, sensor_model_id, category_id, source'),
 ]);
 if (!cats.some((c) => c.domain === 'electronics')) die('Migration 051 has not been applied (no electronics categories). Run it first.');
 
@@ -150,7 +160,7 @@ async function upsertDevice(plant, model, fields) {
   if (ex) { await must(sb.from('plant_sensors').update({ ...fields, updated_at: new Date().toISOString() }).eq('id', ex.id), `row ${plant.name}/${model.model_no}`); upd++; }
   else {
     const { data: row, error } = await sb.from('plant_sensors').insert({ plant_id: plant.id, sensor_model_id: model.id, ...fields }).select('id, plant_id, sensor_model_id, category_id, source').single();
-    if (error?.code === '23505') die(`${plant.name} / ${model.model_no}: a second category for the same device needs migration 052 (one row per plant × model × category). Apply it and re-run.`);
+    if (error?.code === '23505') die(`${plant.name} / ${model.model_no}: duplicate (plant, model, category) — is migration 052 applied? Re-run; the import is idempotent.`);
     if (error) die(`row ${plant.name}/${model.model_no}: ${error.message}`);
     existing.set(k, row); ins++;
   }

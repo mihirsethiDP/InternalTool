@@ -33,10 +33,16 @@ export default function PlantList() {
   const totals = useQuery({
     queryKey: ['plant-device-totals'],
     queryFn: async () => {
-      const { data, error } = await supabase.from('plant_sensors').select('plant_id, quantity, sensor_categories(domain)');
-      if (error) throw error;
+      // The register is >1000 rows and PostgREST caps a select at 1000 — page it.
+      const data: any[] = [];
+      for (let from = 0; ; from += 1000) {
+        const { data: page, error } = await supabase.from('plant_sensors').select('plant_id, quantity, sensor_categories(domain)').range(from, from + 999);
+        if (error) throw error;
+        data.push(...(page ?? []));
+        if (!page || page.length < 1000) break;
+      }
       const m: Record<string, { rows: number; sensors: number; electronics: number }> = {};
-      for (const r of (data ?? []) as any[]) {
+      for (const r of data) {
         const dom = (Array.isArray(r.sensor_categories) ? r.sensor_categories[0] : r.sensor_categories)?.domain === 'electronics' ? 'electronics' : 'sensors';
         const e = (m[r.plant_id] ??= { rows: 0, sensors: 0, electronics: 0 });
         e.rows += 1; e[dom] += r.quantity ?? 1;

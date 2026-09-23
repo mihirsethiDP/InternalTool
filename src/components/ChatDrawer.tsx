@@ -504,6 +504,18 @@ export default function ChatDrawer({ open, onClose, seed, seedScope, onSeedConsu
     prevLen.current = turns.length;
   }, [turns]);
 
+  // Moving to another plant invalidates a scope the register chose for the
+  // previous one — and lets the register be consulted again.
+  const lastPlantRef = useRef<string | null | undefined>(undefined);
+  useEffect(() => {
+    const id = plant?.id ?? null;
+    if (lastPlantRef.current !== undefined && lastPlantRef.current !== id) {
+      setScope(null);
+      plantAskedRef.current.clear();
+    }
+    lastPlantRef.current = id;
+  }, [plant?.id]);
+
   // A seed SCOPE (Home's "at your plant" chips, a register row): narrow the
   // conversation and open straight on the symptom probe.
   useEffect(() => {
@@ -1343,7 +1355,7 @@ export default function ChatDrawer({ open, onClose, seed, seedScope, onSeedConsu
               {/* Guided sensor picker — shown until narrowed to a specific model.
                   When a TYPE is already inferred/scoped it jumps to the make step.
                   Hidden during a flow run — the flow's own chips drive the turn. */}
-              {!turn.loading && !turn.note && !turn.flowNode && !flowRun && i === turns.length - 1 && !scope?.modelId && (
+              {!turn.loading && !turn.note && !turn.elicit && !turn.flowNode && !flowRun && i === turns.length - 1 && !scope?.modelId && (
                 <GuidedNarrow
                   key={`gn-${i}-${scope?.categoryId ?? 'none'}`}
                   initialCategoryId={scope?.categoryId ?? undefined}
