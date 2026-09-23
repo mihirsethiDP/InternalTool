@@ -1202,7 +1202,7 @@ Deno.serve(async (req) => {
       'Respond with strict JSON only.',
     ].join('\n');
     const user = [
-      `Sensor types (numbered):\n${cats.map((c) => `${c.idx}. ${c.name}${c.aliases.length ? ` (also called: ${c.aliases.slice(0, 8).join(', ')})` : ''}`).join('\n')}`,
+      `Device types (numbered):\n${cats.map((c) => `${c.idx}. ${c.name}${c.aliases.length ? ` (also called: ${c.aliases.slice(0, 14).join(', ')})` : ''}`).join('\n')}`,
       '',
       `Technician's message: ${query}`,
       '',
