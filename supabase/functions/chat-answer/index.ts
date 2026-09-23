@@ -1197,7 +1197,8 @@ Deno.serve(async (req) => {
     // make/model actually mentioned, so the client can scope without re-asking.
     const sys = [
       'You interpret a water/wastewater technician\'s free-text message. The writer may be non-technical, vague, use Hinglish, or misspell words — interpret charitably.',
-      'Map it to the most likely sensor TYPE (choosing only from the numbered list), classify the INTENT, and extract any sensor make/model the message itself mentions.',
+      'Map it to the most likely DEVICE TYPE (choosing only from the numbered list — it mixes sensors with site electronics such as the UPS, the camera and the datalogger), classify the INTENT, and extract any make/model the message itself mentions.',
+      'The datalogger is the PLC-to-cloud bridge: a message that the plant, site or dashboard has stopped reporting, or that data is not coming or not updating, is about the Datalogger — not about a sensor.',
       'Respond with strict JSON only.',
     ].join('\n');
     const user = [
