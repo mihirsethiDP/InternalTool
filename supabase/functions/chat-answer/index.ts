@@ -42,7 +42,7 @@ interface Chunk {
 // Ask for it with { mode: "ping" }: guessing which copy of this file is
 // deployed cost us a debugging cycle when a stale paste kept routing spec
 // sheets to "other".
-const FN_BUILD = '2026-09-23-fetch-url';
+const FN_BUILD = '2026-09-23-route-electronics';
 
 const SECTION_LABEL: Record<string, string> = {
   install_commission: 'Install & Commission', configure: 'Configure', inspect: 'Inspect',
