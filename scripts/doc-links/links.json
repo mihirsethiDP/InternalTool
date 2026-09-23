@@ -1,0 +1,602 @@
+[
+ {
+  "make": "HACH",
+  "model": "UVAS plus sc",
+  "kind": "datasheet",
+  "url": "https://www.hach.com/p-uvas-plus-sc-uv-sensor-50-mm-path-length-with-automatic-cleaning/LXV418.99.90002"
+ },
+ {
+  "make": "HACH",
+  "model": "UVAS plus sc",
+  "kind": "manual",
+  "url": "https://cdn.hach.com/7FYZVWYB/at/fjbvf6cgqfxf4psnm25n5h/DOC0235403230_5ed.pdf"
+ },
+ {
+  "make": "HACH",
+  "model": "UVAS plus sc",
+  "kind": "catalog",
+  "url": "https://cdn.hach.com/7FYZVWYB/at/37bjpxcsnbr9468ngpgxvpn4/LIT2485.pdf"
+ },
+ {
+  "make": "Aquadax",
+  "model": "ODO 20S",
+  "kind": "datasheet",
+  "url": "https://www.aquadaxasia.in/do-analyzer-7397844.html"
+ },
+ {
+  "make": "Krohne Marshall",
+  "model": "Optiflux 2000",
+  "kind": "datasheet",
+  "url": "https://cdn.krohne.com/pick2/tagged_docs/TD_OPTIFLUX_2000_en_171123_4000086806_R10___1000444985_1__.pdf"
+ },
+ {
+  "make": "Krohne Marshall",
+  "model": "Optiflux 2000",
+  "kind": "manual",
+  "url": "https://krohne.com/en/products/flow-measurement/components-and-peripheral-equipment-for-flow-measurement/flow-sensors/optiflux-2000/"
+ },
+ {
+  "make": "Krohne Marshall",
+  "model": "Optiflux 2000",
+  "kind": "catalog",
+  "url": "https://cdn.krohne.com/dlc/CA_OVERVIEW_FLOW_en_200813.pdf"
+ },
+ {
+  "make": "Siemens",
+  "model": "7MF1572-3FA10",
+  "kind": "datasheet",
+  "url": "https://assets.ctfassets.net/17si5cpawjzf/4X2cAPyxt0wyFWL6xcU25X/49577308218d46f1988df36064993c86/sitransp_lh100_fi01_en.pdf"
+ },
+ {
+  "make": "Siemens",
+  "model": "7MF1572-3FA10",
+  "kind": "manual",
+  "url": "https://www.manualslib.com/manual/1581043/Siemens-Sitrans-Lh100.html"
+ },
+ {
+  "make": "HACH",
+  "model": "DPC1R1A",
+  "kind": "datasheet",
+  "url": "https://in.hach.com/digital-3-4-combination-ph-sensor-convertible-sensor-style-pps-body-material-general-purpose-glass-ph-electrode/product?id=15500127680"
+ },
+ {
+  "make": "HACH",
+  "model": "DPC1R1A",
+  "kind": "manual",
+  "url": "https://in.hach.com/asset-get.download.jsa?id=7639983079"
+ },
+ {
+  "make": "HACH",
+  "model": "DPC1R1A",
+  "kind": "catalog",
+  "url": "https://in.hach.com/family-print.pdf.jsa?productCategoryId=22216264438"
+ },
+ {
+  "make": "Danfoss",
+  "model": "MBS3000",
+  "kind": "datasheet",
+  "url": "https://assets.danfoss.com/documents/latest/156946/AI308930736185en-000201.pdf"
+ },
+ {
+  "make": "Danfoss",
+  "model": "MBS3000",
+  "kind": "manual",
+  "url": "https://assets.danfoss.com/documents/latest/244546/AQ396750846454en-000102.pdf"
+ },
+ {
+  "make": "Danfoss",
+  "model": "MBS3000",
+  "kind": "catalog",
+  "url": "https://assets.danfoss.com/documents/latest/91620/AD000086413939en-000101.pdf"
+ },
+ {
+  "make": "HACH",
+  "model": "TSS sc",
+  "kind": "datasheet",
+  "url": "https://www.hach.com/p-tss-sc-turbidity-and-suspended-solids-immersion-probe-stainless-steel/LXV323.99.10002"
+ },
+ {
+  "make": "HACH",
+  "model": "TSS sc",
+  "kind": "manual",
+  "url": "https://in.hach.com/tss-sc-suspended-solids-insitu-sensor/product-downloads?id=15500291123"
+ },
+ {
+  "make": "HACH",
+  "model": "TSS sc",
+  "kind": "catalog",
+  "url": "https://in.hach.com/asset-get.download.jsa?id=56900958151"
+ },
+ {
+  "make": "UPC (Universal Process Controls)",
+  "model": "UPCS-MAG-110",
+  "kind": "datasheet",
+  "url": "https://5.imimg.com/data5/SELLER/Doc/2024/4/406497302/XI/TA/OY/7106292/electromagnetic-flow-meter.pdf"
+ },
+ {
+  "make": "UPC (Universal Process Controls)",
+  "model": "UPCS-MAG-110",
+  "kind": "catalog",
+  "url": "https://www.unitechmeter.com/storage/product-files/01K3WR11ZQS7R9WD1S4HN2NXJG.pdf"
+ },
+ {
+  "make": "Selec",
+  "model": "EM306",
+  "kind": "datasheet",
+  "url": "https://www.selec.com/product-details/energy-meter-ct-em306"
+ },
+ {
+  "make": "Selec",
+  "model": "EM306",
+  "kind": "manual",
+  "url": "https://www.manualslib.com/manual/3214332/Selec-Em306.html"
+ },
+ {
+  "make": "Selec",
+  "model": "EM306",
+  "kind": "catalog",
+  "url": "https://www.selec.com/viewdocument?page=catalog&path=formsStorage%2F587e624c02aacf23a2f7b135c3b3f1d8%2Fattachment%2F2026-06-24-15-45-51%2F6983324e4481e81ce0ad7e0b780a648c_Selec_Electrical_Measurement__Protection_Catalog.pdf"
+ },
+ {
+  "make": "Pune Techtrol",
+  "model": "FGSO- J12DMC1WW",
+  "kind": "datasheet",
+  "url": "https://www.punetechtrol.com/upload/catalog/FGSI_FGSO.pdf"
+ },
+ {
+  "make": "Pune Techtrol",
+  "model": "FGSO- J12DMC1WW",
+  "kind": "manual",
+  "url": "https://www.punetechtrol.com/upload/manual/FGSI-FGSO%20Manual.pdf"
+ },
+ {
+  "make": "Pune Techtrol",
+  "model": "FGSO- J12DMC1WW",
+  "kind": "catalog",
+  "url": "https://www.punetechtrol.com/upload/catalog/FGSO_FGSI.pdf"
+ },
+ {
+  "make": "Forbes Marshall",
+  "model": "Aqua2trans",
+  "kind": "datasheet",
+  "url": "https://www.forbesmarshall.com/product/aqua2trans/"
+ },
+ {
+  "make": "Forbes Marshall",
+  "model": "Aqua2trans",
+  "kind": "manual",
+  "url": "https://www.forbesmarshall.com/wp-content/uploads/2025/05/Aqua2trans-Brochure.pdf"
+ },
+ {
+  "make": "Forbes Marshall",
+  "model": "Aqua2trans",
+  "kind": "catalog",
+  "url": "https://www.forbesmarshall.com/downloads/"
+ },
+ {
+  "make": "Siemens",
+  "model": "7MF0320-1PE01-5AM2-Z E00+H01",
+  "kind": "datasheet",
+  "url": "https://www.siemens.com/en-us/products/sitrans/p320-p420/"
+ },
+ {
+  "make": "Siemens",
+  "model": "7MF0320-1PE01-5AM2-Z E00+H01",
+  "kind": "manual",
+  "url": "https://cache.industry.siemens.com/dl/files/474/109758474/att_954672/v1/A5E44852162AAen_P320P420_HART_OI_en-US.pdf"
+ },
+ {
+  "make": "Forbes Marshall",
+  "model": "FMTC100",
+  "kind": "datasheet",
+  "url": "https://www.forbesmarshall.com/product/turbidity-analyser-fmtc-mi100/"
+ },
+ {
+  "make": "Forbes Marshall",
+  "model": "FMTC100",
+  "kind": "catalog",
+  "url": "https://www.forbesmarshall.com/product-category/process-analytics/"
+ },
+ {
+  "make": "Horiba",
+  "model": "OPSA-150",
+  "kind": "datasheet",
+  "url": "https://www.horiba.com/usa/products/detail/action/show/Product/opsa-150-419/"
+ },
+ {
+  "make": "Horiba",
+  "model": "OPSA-150",
+  "kind": "manual",
+  "url": "https://www.manualslib.com/products/Horiba-Opsa-150-11561530.html"
+ },
+ {
+  "make": "Horiba",
+  "model": "OPSA-150",
+  "kind": "catalog",
+  "url": "https://static.horiba.com/fileadmin/Horiba/Company/About_HORIBA/Readout/R10E/RE10-11-052.pdf"
+ },
+ {
+  "make": "Forbes Marshall",
+  "model": "AquaMax",
+  "kind": "datasheet",
+  "url": "https://www.forbesmarshall.com/product/aquamax-the-aeration-control-system/"
+ },
+ {
+  "make": "Forbes Marshall",
+  "model": "AquaMax",
+  "kind": "catalog",
+  "url": "https://www.forbesmarshall.com/product-category/process-analytics/"
+ },
+ {
+  "make": "L&T",
+  "model": "WL400011OOOO",
+  "kind": "datasheet",
+  "url": "https://electrihub.in/lnt-meter-WL400011OOOO"
+ },
+ {
+  "make": "L&T",
+  "model": "WL400011OOOO",
+  "kind": "manual",
+  "url": "https://web.archive.org/web/20240627001010/https://www.lntebg.com/ems/pdf/2.%20WL%20-%20WC%204000%20Energy%20Meter.pdf"
+ },
+ {
+  "make": "L&T",
+  "model": "WL400011OOOO",
+  "kind": "catalog",
+  "url": "https://www.jaysalescorporation.com/L&Switchgear/Energy%20Meters.pdf"
+ },
+ {
+  "make": "Pune Techtrol",
+  "model": "Ultratrol 1 (5m)",
+  "kind": "datasheet",
+  "url": "https://www.punetechtrol.com/product/ultrasonic-level-system-for-liquid-ultratrol"
+ },
+ {
+  "make": "Pune Techtrol",
+  "model": "Ultratrol 1 (5m)",
+  "kind": "manual",
+  "url": "https://www.punetechtrol.com/upload/manual/Ultratrol%20Manual.pdf"
+ },
+ {
+  "make": "Pune Techtrol",
+  "model": "Ultratrol 1 (5m)",
+  "kind": "catalog",
+  "url": "http://www.sme.in/punetechtrol/pdf%20products/ultratrol.pdf"
+ },
+ {
+  "make": "Advance Analytik",
+  "model": "VizSens-ODO",
+  "kind": "datasheet",
+  "url": "https://www.advanceanalytik.com/products/sensors/vizsens-odo.html"
+ },
+ {
+  "make": "Advance Analytik",
+  "model": "VizSens-ODO",
+  "kind": "catalog",
+  "url": "https://www.advanceanalytik.com/products/sensors.html"
+ },
+ {
+  "make": "Siemens",
+  "model": "SITRANS FM520 (FMS500)",
+  "kind": "datasheet",
+  "url": "https://support.industry.siemens.com/cs/attachments/109847424/sitransf_fms500_fi01_en.pdf"
+ },
+ {
+  "make": "Siemens",
+  "model": "SITRANS FM520 (FMS500)",
+  "kind": "manual",
+  "url": "https://support.industry.siemens.com/cs/attachments/109994456/A5E52677520en_SITRANS_FMS500_OI_en-US.pdf"
+ },
+ {
+  "make": "Siemens",
+  "model": "SITRANS FM520 (FMS500)",
+  "kind": "catalog",
+  "url": "https://www.siemens.com/en-us/products/sitrans/fms500/"
+ },
+ {
+  "make": "Tethys",
+  "model": "UV-300",
+  "kind": "datasheet",
+  "url": "https://www.environmental-expert.com/products/tethys-instruments-model-uv300-online-water-analyser-332043"
+ },
+ {
+  "make": "Tethys",
+  "model": "UV-300",
+  "kind": "catalog",
+  "url": "https://web.archive.org/web/20190417213019if_/http://tethys-instruments.com/pdf/uv300/Brochure.pdf"
+ },
+ {
+  "make": "Aquadax",
+  "model": "ADVIT PRO PHO",
+  "kind": "datasheet",
+  "url": "https://www.aquadaxasia.in/ph14-ph-analyzer-7397854.html"
+ },
+ {
+  "make": "Advance Analytik",
+  "model": "VizSens-SS",
+  "kind": "datasheet",
+  "url": "https://www.advanceanalytik.com/products/sensors/vizsens-ss.html"
+ },
+ {
+  "make": "Advance Analytik",
+  "model": "VizSens-SS",
+  "kind": "catalog",
+  "url": "https://www.advanceanalytik.com/products/sensors.html"
+ },
+ {
+  "make": "Brotek",
+  "model": "BT-UL",
+  "kind": "datasheet",
+  "url": "https://www.brotekswitch.com/ultrasonic-level-transmitter-with-4-to-20-ma-output/"
+ },
+ {
+  "make": "Brotek",
+  "model": "BT-UL",
+  "kind": "catalog",
+  "url": "https://www.brotekswitch.com/ultrasonic-level-transmitter/"
+ },
+ {
+  "make": "LFIA",
+  "model": "LFT2",
+  "kind": "datasheet",
+  "url": "https://img3.exportersindia.com/product_images/bc-full/2021/11/8284038/tbl_spec_1636095398_206812_p_6050857.pdf"
+ },
+ {
+  "make": "LFIA",
+  "model": "LFT2",
+  "kind": "catalog",
+  "url": "https://www.lfia.in/ultrasonic-level-transmitter-10523381.html"
+ },
+ {
+  "make": "Blueseas",
+  "model": "Blueseas Cable Float Switch",
+  "kind": "datasheet",
+  "url": "https://blueseas.co.in/product.html"
+ },
+ {
+  "make": "Blueseas",
+  "model": "Blueseas Cable Float Switch",
+  "kind": "catalog",
+  "url": "https://blueseas.co.in/product.html"
+ },
+ {
+  "make": "Nishka",
+  "model": "NIHLT-S-C-F-2MTR",
+  "kind": "datasheet",
+  "url": "https://nishkainstruments.com/wp-content/uploads/2022/05/HLT-data-sheet-20.5.22.pdf"
+ },
+ {
+  "make": "Nishka",
+  "model": "NIHLT-S-C-F-2MTR",
+  "kind": "catalog",
+  "url": "https://nishkainstruments.com/product/hydrostatic-level-transmitter/"
+ },
+ {
+  "make": "Trumen",
+  "model": "TLU-N-05-G2-I2-S1-E2",
+  "kind": "datasheet",
+  "url": "https://trumen.in/wp-content/uploads/2024/01/Trumen_TLU_Data_Sheet.pdf"
+ },
+ {
+  "make": "Trumen",
+  "model": "TLU-N-05-G2-I2-S1-E2",
+  "kind": "manual",
+  "url": "http://trumen.in/wp-content/uploads/2019/03/Instruction-Manual-TLU-New.pdf"
+ },
+ {
+  "make": "Rockwin",
+  "model": "EFM-1040-I-S2-N/P-SS-EFA1-MX1-CH1-ER0-OM",
+  "kind": "datasheet",
+  "url": "https://rockwin.com/electromagnetic-flowmeter/"
+ },
+ {
+  "make": "Rockwin",
+  "model": "EFM-1040-I-S2-N/P-SS-EFA1-MX1-CH1-ER0-OM",
+  "kind": "catalog",
+  "url": "https://rockwin.com/electromagnetic-flowmeter/"
+ },
+ {
+  "make": "Hemera",
+  "model": "Hemera L800",
+  "kind": "catalog",
+  "url": "https://irp.cdn-website.com/7cbecdd1/files/uploaded/Hemera-General-Brochure.pdf"
+ },
+ {
+  "make": "Brix Axis",
+  "model": "ABDO",
+  "kind": "datasheet",
+  "url": "https://axisindia.in/products/manufacturing/water/w-brix/water-analyzer/dissolved-oxygen-sensor/"
+ },
+ {
+  "make": "Brix Axis",
+  "model": "ABDO",
+  "kind": "catalog",
+  "url": "https://axisindia.in/products/manufacturing/water/w-brix/water-analyzer/dissolved-oxygen-sensor/"
+ },
+ {
+  "make": "IOTA",
+  "model": "MF-PRO",
+  "kind": "datasheet",
+  "url": "https://iotaflow.com/product-detail/detail7"
+ },
+ {
+  "make": "IOTA",
+  "model": "MF-PRO",
+  "kind": "catalog",
+  "url": "https://iotaflow.com/"
+ },
+ {
+  "make": "LFIA",
+  "model": "LFT1",
+  "kind": "datasheet",
+  "url": "https://img3.exportersindia.com/product_images/bc-full/2021/11/8284038/tbl_spec_1636094866_206808_p_6049949.pdf"
+ },
+ {
+  "make": "LFIA",
+  "model": "LFT1",
+  "kind": "catalog",
+  "url": "https://www.levelandflow.in/level-transmitters.html"
+ },
+ {
+  "make": "Adept/Yokogawa",
+  "model": "MagFlow 6410",
+  "kind": "datasheet",
+  "url": "https://adeptfluidyne.com/products-magflow-6410-inline-mains-operated/"
+ },
+ {
+  "make": "Adept/Yokogawa",
+  "model": "MagFlow 6410",
+  "kind": "manual",
+  "url": "https://www.adeptfluidyne.com/downloads/"
+ },
+ {
+  "make": "Adept/Yokogawa",
+  "model": "MagFlow 6410",
+  "kind": "catalog",
+  "url": "https://www.environmental-expert.com/downloads/magflow-model-6410-inline-mains-operated-electromagnetic-flowmeter-brochure-1049494"
+ },
+ {
+  "make": "EIP Enviro",
+  "model": "CW59C-P-A-C-GD-B-D-B-10",
+  "kind": "datasheet",
+  "url": "https://eipenviroindia.com/wp-content/uploads/2022/03/EIP-Radar-Level-Transmitter-Catalogue-and-Data-Sheet-Series.pdf"
+ },
+ {
+  "make": "EIP Enviro",
+  "model": "CW59C-P-A-C-GD-B-D-B-10",
+  "kind": "catalog",
+  "url": "https://eipenviroindia.com/wp-content/uploads/2022/03/EIP-Enviro-Product-Catalogue.pdf"
+ },
+ {
+  "make": "Advance Analytik",
+  "model": "VizSens-pH(A)",
+  "kind": "datasheet",
+  "url": "https://www.advanceanalytik.com/products/sensors/vizsens-ph-analog.html"
+ },
+ {
+  "make": "Advance Analytik",
+  "model": "VizSens-pH(A)",
+  "kind": "catalog",
+  "url": "https://www.advanceanalytik.com/products/sensors/vizsens-ph-analog.html"
+ },
+ {
+  "make": "Trios",
+  "model": "Trios LISA - UV",
+  "kind": "datasheet",
+  "url": "https://trios.de/en/lisa/"
+ },
+ {
+  "make": "Trios",
+  "model": "Trios LISA - UV",
+  "kind": "manual",
+  "url": "https://trios.de/wp-content/uploads/2026/02/D01-047en202602-LISA-UV-Manual_web.pdf"
+ },
+ {
+  "make": "Trios",
+  "model": "Trios LISA - UV",
+  "kind": "catalog",
+  "url": "https://trios.de/wp-content/uploads/2025/05/2024_Produktkatalog_EN_complete.pdf"
+ },
+ {
+  "make": "Bhoomi",
+  "model": "BI 1370",
+  "kind": "datasheet",
+  "url": "https://www.bhoomiltd.com/product/sensors/turbidity-sensor/"
+ },
+ {
+  "make": "Bhoomi",
+  "model": "BI 1370",
+  "kind": "catalog",
+  "url": "https://www.bhoomiltd.com/products/"
+ },
+ {
+  "make": "WIKA",
+  "model": "ILT C01",
+  "kind": "datasheet",
+  "url": "https://www.wika.com/media/Data-sheets/Level/Radar-sensors/ds_lm5017_en_co.pdf"
+ },
+ {
+  "make": "WIKA",
+  "model": "ILT C01",
+  "kind": "manual",
+  "url": "https://www.wika.com/media/Operating-instructions/Operating-instructions/Level/Radar-sensors/oi_ilt_c01_ilt_c05_en_de_fr_es.pdf"
+ },
+ {
+  "make": "WIKA",
+  "model": "ILT C01",
+  "kind": "catalog",
+  "url": "https://www.wika.com/en-en/ilt_c01.WIKA"
+ },
+ {
+  "make": "Aquadax",
+  "model": "LUCIA II + iDAX8000",
+  "kind": "catalog",
+  "url": "https://www.aquadaxasia.in/water-analyzer-controller.html"
+ },
+ {
+  "make": "UPC (Universal Process Controls)",
+  "model": "UPC-WA-202",
+  "kind": "datasheet",
+  "url": "https://www.unitechmeter.com/product/analytical-instruments/water-analyzer"
+ },
+ {
+  "make": "UPC (Universal Process Controls)",
+  "model": "UPC-WA-202",
+  "kind": "catalog",
+  "url": "https://www.unitechmeter.com/storage/product-files/01K3WSRY3ZCWXB94NT30XCSSSD.pdf"
+ },
+ {
+  "make": "Bhoomi",
+  "model": "BI 1360",
+  "kind": "datasheet",
+  "url": "https://www.bhoomiltd.com/product/sensors/dissolved-oxygen-sensor/"
+ },
+ {
+  "make": "Bhoomi",
+  "model": "BI 1360",
+  "kind": "catalog",
+  "url": "https://www.bhoomiltd.com/wp-content/uploads/2026/01/Bhoomi-Brochure-2026.pdf"
+ },
+ {
+  "make": "P&F",
+  "model": "UC6000-30GM-IUR2-V15",
+  "kind": "datasheet",
+  "url": "https://www.pepperl-fuchs.com/en-us/products-gp25581/4223"
+ },
+ {
+  "make": "P&F",
+  "model": "UC6000-30GM-IUR2-V15",
+  "kind": "manual",
+  "url": "https://www.wolfautomation.com/content/pf-uc6000-30gm-iur2-v15-datasheet.pdf"
+ },
+ {
+  "make": "P&F",
+  "model": "UC6000-30GM-IUR2-V15",
+  "kind": "catalog",
+  "url": "https://files.pepperl-fuchs.com/webcat/navi/productInfo/doct/tdoct8719b_eng.pdf"
+ },
+ {
+  "make": "Blueseas",
+  "model": "Blueseas-FS",
+  "kind": "datasheet",
+  "url": "https://blueseas.co.in/product.html"
+ },
+ {
+  "make": "Blueseas",
+  "model": "Blueseas-FS",
+  "kind": "catalog",
+  "url": "https://blueseas.co.in/product.html"
+ },
+ {
+  "make": "UPC (Universal Process Controls)",
+  "model": "UPC-VFM-310",
+  "kind": "datasheet",
+  "url": "https://pneucons.com/50-mm-vortex-flow-meter-wafer-type-with-temperature-pressure-compensation-upc-24-vdc-upc-vfm-310-hydraulic-accessories.html"
+ },
+ {
+  "make": "UPC (Universal Process Controls)",
+  "model": "UPC-VFM-310",
+  "kind": "catalog",
+  "url": "https://pneucons.com/50-mm-vortex-flow-meter-wafer-type-with-temperature-pressure-compensation-upc-24-vdc-upc-vfm-310-hydraulic-accessories.html"
+ }
+]

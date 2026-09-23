@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { ThumbsUp, ThumbsDown, SearchX, ShieldCheck, FileWarning, ArrowRight, Globe2, Award, PhoneOff, Plus, Check, Loader2 } from 'lucide-react';
+import { ThumbsUp, ThumbsDown, SearchX, ShieldCheck, FileWarning, ArrowRight, Globe2, Award, PhoneOff, Plus, Check, Loader2, AlertTriangle } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { coverageOf } from '../lib/consolidated';
 import { fetchLeaderboard } from '../lib/contributions';
@@ -110,6 +110,32 @@ export default function InsightsPanel() {
       .from('sensor_models')
       .select('id, consolidated_docs(content_markdown)').is('consolidated_docs.deleted_at', null)
       .eq('is_general', false)).data ?? [],
+  });
+
+  // The register knows what is installed where; the references know what is
+  // documented. The difference, weighted by plants, is the procurement list.
+  const undocumented = useQuery({
+    queryKey: ['insights-undocumented'],
+    queryFn: async () => {
+      const rows: any[] = [];
+      for (let from = 0; ; from += 1000) {
+        const { data } = await supabase.from('plant_sensors')
+          .select('plant_id, quantity, sensor_model_id, sensor_models(model_no, name, sensor_makes(name), sensor_categories(name, domain), consolidated_docs(content_markdown, deleted_at))')
+          .range(from, from + 999);
+        rows.push(...(data ?? []));
+        if (!data || data.length < 1000) break;
+      }
+      const byModel = new Map<string, { id: string; label: string; category: string; domain: string; plants: Set<string>; sensors: number; covered: number }>();
+      for (const r of rows) {
+        const sm = Array.isArray(r.sensor_models) ? r.sensor_models[0] : r.sensor_models; if (!sm) continue;
+        const mk = Array.isArray(sm.sensor_makes) ? sm.sensor_makes[0] : sm.sensor_makes;
+        const cat = Array.isArray(sm.sensor_categories) ? sm.sensor_categories[0] : sm.sensor_categories;
+        const cd = (Array.isArray(sm.consolidated_docs) ? sm.consolidated_docs : [sm.consolidated_docs]).filter((d: any) => d && !d.deleted_at)[0];
+        const e = byModel.get(r.sensor_model_id) ?? { id: r.sensor_model_id, label: `${mk?.name ?? ''} ${sm.model_no || sm.name}`.trim(), category: cat?.name ?? '', domain: cat?.domain ?? 'sensor', plants: new Set<string>(), sensors: 0, covered: coverageOf(cd?.content_markdown, cat?.domain).covered };
+        e.plants.add(r.plant_id); e.sensors += r.quantity ?? 1; byModel.set(r.sensor_model_id, e);
+      }
+      return [...byModel.values()].filter((m) => m.covered === 0).sort((a, b) => b.plants.size - a.plants.size || b.sensors - a.sensors);
+    },
   });
 
   const leaderboard = useQuery({
@@ -314,6 +340,28 @@ export default function InsightsPanel() {
           </button>
         </div>
       </section>
+
+      {/* Installed but undocumented — the procurement list, weighted by reach */}
+      {(undocumented.data ?? []).length > 0 && (
+        <section className="bg-white rounded-xl border border-red-200 overflow-hidden">
+          <div className="px-5 py-3 border-b border-red-100 bg-red-50/60 flex items-center gap-2">
+            <AlertTriangle size={15} className="text-red-600" />
+            <h3 className="text-sm font-semibold text-slate-900">Installed, but no documentation at all</h3>
+            <span className="muted text-xs ml-auto">{undocumented.data!.length} make/model{undocumented.data!.length === 1 ? '' : 's'} · sorted by how many plants depend on them</span>
+          </div>
+          <ul className="divide-y divide-slate-50">
+            {undocumented.data!.slice(0, 12).map((m) => (
+              <li key={m.id} className="px-5 py-2.5 flex items-center gap-3">
+                <button onClick={() => nav(`/sensors/${m.id}`)} className="text-sm text-slate-800 font-medium hover:text-brand-700 hover:underline truncate text-left flex-1">{m.label}</button>
+                <span className="badge shrink-0">{m.category}</span>
+                <span className="text-xs text-slate-500 shrink-0 w-20 text-right">{m.plants.size} plant{m.plants.size === 1 ? '' : 's'}</span>
+                <span className="text-xs text-slate-400 shrink-0 w-24 text-right">{m.sensors.toLocaleString()} device{m.sensors === 1 ? '' : 's'}</span>
+              </li>
+            ))}
+          </ul>
+          {undocumented.data!.length > 12 && <div className="px-5 py-2 text-xs text-slate-500 border-t border-slate-100">+{undocumented.data!.length - 12} more — open Devices → "Incomplete only".</div>}
+        </section>
+      )}
 
       {/* Top contributors — who's building the knowledge base */}
       <section className="bg-white rounded-xl border border-slate-200 overflow-hidden">

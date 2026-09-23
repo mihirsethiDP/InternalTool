@@ -73,6 +73,11 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
   const toast = useToast();
   const qc = useQueryClient();
   const [file, setFile] = useState<File | null>(null);
+  // "Add from link": the edge function fetched the PDF into storage already;
+  // submit() reuses that object instead of uploading the bytes a second time.
+  const [linkUrl, setLinkUrl] = useState('');
+  const [linkBusy, setLinkBusy] = useState(false);
+  const [prestored, setPrestored] = useState<{ path: string; url: string } | null>(null);
   const [title, setTitle] = useState('');
   const [titleTouched, setTitleTouched] = useState(false);
   const [typeId, setTypeId] = useState('');
@@ -176,7 +181,7 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
   }, [defaults.sensor_model_id]); // eslint-disable-line
 
   function pickFile(f: File | null) {
-    setFile(f); setError(null); setExtracted(null); setAnalysis(null);
+    setFile(f); setError(null); setExtracted(null); setAnalysis(null); setPrestored(null);
     if (f && (/\.pdf$/i.test(f.name) || /pdf/i.test(f.type))) {
       setReading(true);
       extractPdfText(f)
@@ -190,6 +195,43 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
         .catch((e) => { console.warn('pdf extract failed', e); setExtracted(null); })
         .finally(() => setReading(false));
     }
+  }
+
+  // Paste a vendor link: the edge function downloads it server-side (the
+  // browser can't, cross-origin) and the form continues as if the file had
+  // been dropped in — same text extraction, same detection, same review.
+  async function addFromLink() {
+    const url = linkUrl.trim();
+    if (!url) return;
+    setLinkBusy(true); setError(null); setStatus('Fetching the link…');
+    try {
+      const { data, error } = await supabase.functions.invoke('chat-answer', { body: { mode: 'fetch-url', url } });
+      const err = error ? (await (error as any).context?.json?.().catch(() => null))?.error || error.message : (data as any)?.error;
+      if (err) { setError(err); return; }
+      if ((data as any).kind === 'pdf') {
+        const dl = await supabase.storage.from('documents').download((data as any).storage_path);
+        if (dl.error || !dl.data) { setError('Fetched, but could not read the stored file: ' + (dl.error?.message ?? '')); return; }
+        const f = new File([dl.data], (data as any).filename, { type: 'application/pdf' });
+        pickFile(f);
+        setPrestored({ path: (data as any).storage_path, url: (data as any).url });
+        setVendorUrl((data as any).url);
+        setStatus(null);
+      } else {
+        // A web page: keep its text as a link-only source document.
+        const text = ((data as any).text ?? '').toString();
+        if (text.length < 300) { setError('That page has too little readable text to file — download its PDF and upload that instead.'); return; }
+        const name = (((data as any).title || url.replace(/^https?:\/\//, '')).slice(0, 80)).replace(/[\\/:*?"<>|]+/g, '-') + '.txt';
+        const f = new File([text], name, { type: 'text/plain' });
+        setFile(f); setError(null); setAnalysis(null); setPrestored(null);
+        setExtracted({ text, pages: 1 });
+        setVendorUrl((data as any).url);
+        if (!title) setTitle((data as any).title || '');
+        runAnalysis(text, (data as any).title || name);
+        setStatus(null);
+      }
+    } catch (e: any) {
+      setError(e?.message ?? 'Could not fetch that link.');
+    } finally { setLinkBusy(false); }
   }
 
   // Entry point for the file input / drop zone. One file keeps the classic
@@ -481,12 +523,16 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
 
     setProgress(10); setStatus('Uploading file…');
     const safeName = file.name.replace(/[^a-zA-Z0-9._-]+/g, '_');
-    const storagePath = `${Date.now()}_${safeName}`;
-    const up = await supabase.storage.from('documents').upload(storagePath, file, {
-      contentType: file.type || 'application/octet-stream',
-      upsert: false,
-    });
-    if (up.error) { setBusy(false); setError('Upload failed: ' + up.error.message); return; }
+    let storagePath = `${Date.now()}_${safeName}`;
+    if (prestored) {
+      storagePath = prestored.path; // already in the bucket — fetched by link
+    } else {
+      const up = await supabase.storage.from('documents').upload(storagePath, file, {
+        contentType: file.type || 'application/octet-stream',
+        upsert: false,
+      });
+      if (up.error) { setBusy(false); setError('Upload failed: ' + up.error.message); return; }
+    }
     setProgress(55); setStatus('Creating document record…');
 
     // Output work-type section is decided by the checker at approval — the
@@ -554,6 +600,23 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
         </div>
 
         <form onSubmit={submit} className="px-7 py-6 space-y-6">
+          {/* Add from link — a vendor datasheet URL instead of a downloaded file */}
+          {!batch && (
+            <div className="flex items-center gap-2">
+              <input
+                type="url"
+                value={linkUrl}
+                onChange={(e) => setLinkUrl(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addFromLink(); } }}
+                placeholder="Paste a link to a vendor PDF or product page…"
+                className="input flex-1 text-sm"
+                aria-label="Document link"
+              />
+              <button type="button" onClick={addFromLink} disabled={linkBusy || !linkUrl.trim()} className="btn-secondary btn-sm shrink-0">
+                {linkBusy ? 'Fetching…' : 'Add from link'}
+              </button>
+            </div>
+          )}
           <label
             onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
             onDragLeave={() => setDragOver(false)}

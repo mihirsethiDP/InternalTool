@@ -42,7 +42,7 @@ interface Chunk {
 // Ask for it with { mode: "ping" }: guessing which copy of this file is
 // deployed cost us a debugging cycle when a stale paste kept routing spec
 // sheets to "other".
-const FN_BUILD = '2026-08-20-detect-new-sensors';
+const FN_BUILD = '2026-09-23-fetch-url';
 
 const SECTION_LABEL: Record<string, string> = {
   install_commission: 'Install & Commission', configure: 'Configure', inspect: 'Inspect',
@@ -199,6 +199,7 @@ Deno.serve(async (req) => {
     : payload.mode === 'analyze-upload' ? 'analyze-upload'
     : payload.mode === 'translate' ? 'translate'
     : payload.mode === 'transcribe' ? 'transcribe'
+    : payload.mode === 'fetch-url' ? 'fetch-url'
     : payload.mode === 'ping' ? 'ping'
     : 'docs';
 
@@ -673,6 +674,63 @@ Deno.serve(async (req) => {
   // manual usually covers several) and which catalogued sensor it belongs to.
   // Returns catalog IDs so the form can select them directly. Everything it
   // returns is a SUGGESTION — the uploader can override every field.
+  // ---------- FETCH-URL MODE: pull a vendor document in by link ----------
+  // The browser cannot download a cross-origin PDF (CORS), so the function
+  // fetches it server-side into the documents bucket and the upload form
+  // carries on exactly as if the file had been dropped in. A web page comes
+  // back as its readable text so the form can file it as a link-only source.
+  // Uploaders and admins only — this writes to storage.
+  if (mode === 'fetch-url') {
+    const supabase = createClient(SUPABASE_URL, SERVICE_KEY);
+    const token = (req.headers.get('Authorization') ?? '').replace(new RegExp('^Bearer' + String.fromCharCode(92) + 's+', 'i'), '');
+    const { data: who } = await supabase.auth.getUser(token);
+    if (!who?.user) return json({ error: 'unauthorized' }, 401);
+    const { data: prof } = await supabase.from('profiles').select('role').eq('id', who.user.id).maybeSingle();
+    if (!['uploader', 'admin'].includes((prof as any)?.role)) return json({ error: 'uploaders and admins only' }, 403);
+
+    const raw = ((payload as any).url ?? '').toString().trim();
+    let target: URL;
+    try { target = new URL(raw); } catch { return json({ error: 'not a valid link' }, 400); }
+    if (!/^https?:$/.test(target.protocol)) return json({ error: 'only http(s) links' }, 400);
+    if (/^(localhost|127.|10.|192.168.|169.254.|0.)/.test(target.hostname)) return json({ error: 'that address is not allowed' }, 400);
+
+    const ctl = new AbortController(); const timer = setTimeout(() => ctl.abort(), 40_000);
+    let res: Response;
+    try {
+      res = await fetch(target.href, { redirect: 'follow', signal: ctl.signal, headers: { 'User-Agent': 'Mozilla/5.0 (compatible; DigitalPaani-DocBot/1.0)', 'Accept': 'application/pdf,text/html;q=0.9,*/*;q=0.8' } });
+    } catch (e) { clearTimeout(timer); return json({ error: (e as Error).name === 'AbortError' ? 'the site took too long to respond' : 'could not reach that link' }, 502); }
+    clearTimeout(timer);
+    if (!res.ok) return json({ error: 'the site answered ' + res.status + ' — open the link in a browser and upload the file instead' }, 502);
+    const MAX = 30 * 1024 * 1024;
+    const len = Number(res.headers.get('content-length') ?? 0);
+    if (len > MAX) return json({ error: 'file is larger than 30 MB' }, 413);
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    if (bytes.byteLength > MAX) return json({ error: 'file is larger than 30 MB' }, 413);
+    const ctype = (res.headers.get('content-type') ?? '').toLowerCase();
+    const head = new TextDecoder().decode(bytes.subarray(0, 5));
+    const isPdf = head === '%PDF-' || ctype.includes('application/pdf');
+    const lastSeg = decodeURIComponent((res.url || target.href).split('?')[0].split('/').pop() || '');
+    if (isPdf) {
+      const safe = (lastSeg.replace(/.pdf$/i, '') || 'document').replace(/[^A-Za-z0-9._-]+/g, '_').slice(0, 80);
+      const storage_path = Date.now() + '_' + safe + '.pdf';
+      const up = await supabase.storage.from('documents').upload(storage_path, bytes, { contentType: 'application/pdf', upsert: false });
+      if (up.error) return json({ error: 'could not store the file: ' + up.error.message }, 500);
+      return json({ kind: 'pdf', storage_path, size_bytes: bytes.byteLength, filename: safe + '.pdf', url: res.url || target.href });
+    }
+    if (ctype.includes('text/html') || /^s*<(!doctype|html)/i.test(head)) {
+      const html = new TextDecoder().decode(bytes);
+      const title = (html.match(/<title[^>]*>([^<]*)</title>/i)?.[1] ?? '').replace(/s+/g, ' ').trim();
+      const text = html.replace(/<script[^]*?</script>/gi, ' ').replace(/<style[^]*?</style>/gi, ' ').replace(/<(br|p|div|li|tr|h[1-6]|section|table)[^>]*>/gi, '
+').replace(/<[^>]+>/g, ' ')
+        .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"')
+        .split('
+').map((l) => l.replace(/s+/g, ' ').trim()).filter((l) => l.length >= 40).join('
+').slice(0, 40_000);
+      return json({ kind: 'page', title, text, url: res.url || target.href });
+    }
+    return json({ error: 'that link is not a PDF or a web page (' + (ctype || 'unknown type') + ')' }, 415);
+  }
+
   if (mode === 'analyze-upload') {
     const supabase = createClient(SUPABASE_URL, SERVICE_KEY);
     const token = (req.headers.get('Authorization') ?? '').replace(/^Bearer\s+/i, '');
