@@ -99,7 +99,7 @@ const en = {
     answeredAbove: 'Answered above',
   },
   viewer: {
-    eyebrow: 'Sensor documentation',
+    eyebrow: 'Device documentation',
     documents: 'Documents',
     consolidated: 'Full reference',
     highlight: 'Highlight in document…',

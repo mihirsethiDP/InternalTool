@@ -261,9 +261,15 @@ async function symptomOptions(scope: { categoryId?: string | null; modelId?: str
     const rq = ids.length
       ? supabase.from('routing_rules').select('problem').in('sensor_model_id', ids).eq('status', 'approved').limit(6)
       : null;
-    const [flows, rules] = await Promise.all([fq, rq]);
+    // "No reading / shows zero" is a sensor symptom; under a UPS or camera the
+    // generic top-up would only mislead, so electronics get their flows alone.
+    const dq = scope?.categoryId ? supabase.from('sensor_categories').select('domain').eq('id', scope.categoryId).maybeSingle() : null;
+    const [flows, rules, dom] = await Promise.all([fq, rq, dq]);
     opts.push(...(((flows as any)?.data ?? []) as any[]).map((f) => f.title));
     opts.push(...(((rules as any)?.data ?? []) as any[]).map((r) => r.problem));
+    if ((dom as any)?.data?.domain === 'electronics') {
+      return [...new Set(opts.map((x) => (x ?? '').trim()).filter(Boolean))].slice(0, 6);
+    }
   } catch { /* fall through to generic */ }
   return [...new Set([...opts.map((s) => (s ?? '').trim()).filter(Boolean), ...GENERIC_SYMPTOMS])].slice(0, 6);
 }
