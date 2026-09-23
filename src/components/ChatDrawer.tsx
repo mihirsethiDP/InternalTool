@@ -590,7 +590,7 @@ export default function ChatDrawer({ open, onClose, seed, seedScope, onSeedConsu
     if (!plant || devs.length === 0) return [...SUGGESTIONS, 'UPS is beeping continuously', 'Camera shows offline in the app'];
     const byCat = new Map<string, { name: string; domain: string; qty: number }>();
     for (const d of devs) { const e = byCat.get(d.category_name) ?? { name: d.category_name, domain: d.domain, qty: 0 }; e.qty += d.quantity; byCat.set(d.category_name, e); }
-    const sensors = [...byCat.values()].filter((c) => c.domain === 'sensor').sort((a, b) => b.qty - a.qty).slice(0, 3).map((c) => `My ${deviceNoun(c.name)} is giving trouble`);
+    const sensors = [...byCat.values()].filter((c) => c.domain === 'sensor').sort((a, b) => b.qty - a.qty).slice(0, 3).map((c) => t('chat.suggestTrouble', { device: deviceNoun(c.name) }));
     const electronics: string[] = [];
     if (byCat.has('UPS')) electronics.push('UPS is beeping continuously');
     if (byCat.has('Datalogger')) electronics.push('Plant has stopped reporting data');
