@@ -42,7 +42,7 @@ interface Chunk {
 // Ask for it with { mode: "ping" }: guessing which copy of this file is
 // deployed cost us a debugging cycle when a stale paste kept routing spec
 // sheets to "other".
-const FN_BUILD = '2026-09-23-route-menu';
+const FN_BUILD = '2026-09-23-route-menu-2';
 
 const SECTION_LABEL: Record<string, string> = {
   install_commission: 'Install & Commission', configure: 'Configure', inspect: 'Inspect',
@@ -273,19 +273,6 @@ Deno.serve(async (req) => {
       '',
       'Return strict JSON: {"index": <catalog number that best matches the document, or 0 if none is a good match>, "confidence": <number 0 to 1>, "reason": "<one short sentence on the deciding evidence>"}',
     ].join('\n');
-
-    // Deterministic pre-router for the site electronics. Operators describe
-    // these by effect ("plant stopped sending data", "site offline"), and the
-    // model keeps reading "plant" as process equipment however the prompt is
-    // worded. A hit is forced to the top; the model still supplies intent,
-    // vagueness and the normalized restatement.
-    const q = query.toLowerCase();
-    const RULES: { name: string; re: RegExp }[] = [
-      { name: 'Datalogger', re: /(datalogger|data logger|raspberry|rpi|gateway|telemetry|((plant|site|station)[^.]{0,20}offline)|offline since|((plant|site|station|dashboard|portal|cloud)[^.]{0,40}(not|no|stopped|stop|nahi|band)[^.]{0,30}(report|send|updat|data|value|reading|show))|((data|values|readings)[^.]{0,30}(not|no|nahi|stopped)[^.]{0,20}(coming|arriv|updat|show|aa rah|report|send)))/ },
-      { name: 'UPS', re: /(ups|battery backup|power backup|inverter|backup time|beeping)/ },
-      { name: 'Camera', re: /(camera|cctv|ezviz|live view|live feed)/ },
-    ];
-    const forced = RULES.map((r) => (r.re.test(q) ? [...catMap.entries()].find(([, v]) => v.name === r.name) : null)).find(Boolean) ?? null;
 
     const raw = await fastComplete(sys, user, true);
     // extractJson (not raw JSON.parse) because the Claude fallback has no
@@ -1232,6 +1219,19 @@ Deno.serve(async (req) => {
       ' "make": "<manufacturer name if the message mentions one, else empty string>",',
       ' "model": "<model number/name if the message mentions one, else empty string>"}',
     ].join('\n');
+    // Deterministic pre-router for the site electronics. Operators describe
+    // these by effect ("plant stopped sending data", "site offline"), and the
+    // model keeps reading "plant" as process equipment however the prompt is
+    // worded. A hit is forced to the top; the model still supplies intent,
+    // vagueness and the normalized restatement.
+    const qLower = query.toLowerCase();
+    const RULES: { name: string; re: RegExp }[] = [
+      { name: 'Datalogger', re: /(datalogger|data logger|raspberry|\brpi\b|\bgateway\b|telemetry|((plant|site|station)[^.]{0,20}offline)|offline since|((plant|site|station|dashboard|portal|cloud)[^.]{0,40}(not|no|stopped|stop|nahi|band)[^.]{0,30}(report|send|updat|data|value|reading|show))|((data|values|readings)[^.]{0,30}(not|no|nahi|stopped)[^.]{0,20}(coming|arriv|updat|show|aa rah|report|send)))/ },
+      { name: 'UPS', re: /(\bups\b|battery backup|power backup|\binverter\b|backup time|beeping)/ },
+      { name: 'Camera', re: /(\bcamera\b|\bcctv\b|ezviz|live view|live feed)/ },
+    ];
+    const forced = RULES.map((r) => (r.re.test(qLower) ? [...catMap.entries()].find(([, v]) => v.name === r.name) : null)).find(Boolean) ?? null;
+
     const raw = await fastComplete(sys, user, true);
     // extractJson (not raw JSON.parse) because the Claude fallback has no
     // response_format and may wrap the object in prose or fences.
