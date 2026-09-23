@@ -127,3 +127,23 @@ export async function devicesInCategory(plantId: string, categoryId: string): Pr
   if (error) return [];
   return (data ?? []).map(normalizeDevice);
 }
+
+// The master list names categories tersely ("Flow", "Level"); an operator says
+// "flow meter" and "level transmitter". Used for suggestions and plant notes.
+const NOUNS: Record<string, string> = {
+  'Flow': 'flow meter', 'Level': 'level transmitter', 'Pressure': 'pressure transmitter', 'pH': 'pH sensor',
+  'Turbidity': 'turbidity sensor', 'Energy Meter': 'energy meter', 'Temperature': 'temperature sensor',
+  'Dissolved Oxygen (DO)': 'DO sensor', 'TSS / MLSS': 'MLSS sensor', 'BOD': 'BOD analyser', 'COD': 'COD analyser',
+  'Biomass Health': 'biomass health tracker', 'Bar Screen Level': 'bar screen sensor',
+  'Switches (Float / Level / Pressure / Flow)': 'level switch', 'Chlorine': 'chlorine analyser', 'ORP': 'ORP sensor',
+  'TDS': 'TDS sensor', 'Conductivity / EC': 'EC sensor', 'Proximity': 'proximity sensor', 'Air Flow': 'air flow meter',
+  'UPS': 'UPS', 'Camera': 'camera', 'Datalogger': 'datalogger', 'PLC': 'PLC', 'VFD': 'VFD', 'HMI': 'HMI',
+};
+export function deviceNoun(categoryName: string | null | undefined): string {
+  const n = (categoryName ?? '').trim();
+  if (!n) return 'device';
+  if (NOUNS[n]) return NOUNS[n];
+  const bare = n.replace(/s*(.*)$/, '');
+  return /sensor|meter|transmitter|analy|switch|camera|logger|ups/i.test(bare) ? bare.toLowerCase() : bare.toLowerCase() + ' sensor';
+}
+

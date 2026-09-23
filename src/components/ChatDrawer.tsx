@@ -17,7 +17,7 @@ import { conversationalReply, isVagueQuery } from '../lib/chatIntent';
 import { matchRule, type RouteMatch } from '../lib/routing';
 import { matchFlow, getNode, failTarget, fetchContacts, contactsForSkill, type DiagnosticFlow, type FlowNode, type EscalationContact } from '../lib/flows';
 import { fetchIssues, matchIssueClient, issueQueueInfo, filterQueueForModel, type Issue, type IssueQueueInfo } from '../lib/issues';
-import { usePlant, usePlantDevices, devicesInCategory, deviceLabel } from '../lib/plant';
+import { usePlant, usePlantDevices, devicesInCategory, deviceLabel, deviceNoun } from '../lib/plant';
 import PlantSwitcher from './PlantSwitcher';
 import { correctSpelling } from '../lib/lexicon';
 import { useAuth } from '../lib/auth';
@@ -590,7 +590,7 @@ export default function ChatDrawer({ open, onClose, seed, seedScope, onSeedConsu
     if (!plant || devs.length === 0) return [...SUGGESTIONS, 'UPS is beeping continuously', 'Camera shows offline in the app'];
     const byCat = new Map<string, { name: string; domain: string; qty: number }>();
     for (const d of devs) { const e = byCat.get(d.category_name) ?? { name: d.category_name, domain: d.domain, qty: 0 }; e.qty += d.quantity; byCat.set(d.category_name, e); }
-    const sensors = [...byCat.values()].filter((c) => c.domain === 'sensor').sort((a, b) => b.qty - a.qty).slice(0, 3).map((c) => `My ${c.name.replace(/\s*\(.*\)$/, '').toLowerCase()} is giving trouble`);
+    const sensors = [...byCat.values()].filter((c) => c.domain === 'sensor').sort((a, b) => b.qty - a.qty).slice(0, 3).map((c) => `My ${deviceNoun(c.name)} is giving trouble`);
     const electronics: string[] = [];
     if (byCat.has('UPS')) electronics.push('UPS is beeping continuously');
     if (byCat.has('Datalogger')) electronics.push('Plant has stopped reporting data');
@@ -619,7 +619,7 @@ export default function ChatDrawer({ open, onClose, seed, seedScope, onSeedConsu
     const { data: gm } = await supabase.from('sensor_models').select('id').eq('is_general', true).eq('category_id', categoryId).maybeSingle();
     if (distinct.size === 1) {
       const d = [...distinct.values()][0];
-      insertNote(t(d.is_assumption ? 'chat.plantAssumed' : 'chat.plantResolved', { plant: plant.name, category: categoryName, label: deviceLabel(d) }));
+      insertNote(t(d.is_assumption ? 'chat.plantAssumed' : 'chat.plantResolved', { plant: plant.name, category: deviceNoun(categoryName), label: deviceLabel(d) }));
       return { modelId: d.sensor_model_id, generalModelId: (gm as any)?.id ?? null, categoryId, label: deviceLabel(d) };
     }
     if (distinct.size > 1) {
@@ -627,10 +627,10 @@ export default function ChatDrawer({ open, onClose, seed, seedScope, onSeedConsu
       const chips: { label: string; act: 'start' | 'reject' | 'model' | 'unsure'; modelId?: string }[] =
         [...distinct.values()].map((d) => ({ label: deviceLabel(d), act: 'model' as const, modelId: d.sensor_model_id }));
       chips.push({ label: t('chat.modelUnsure'), act: 'unsure' });
-      setTurns((tt) => fillLoadingTurn(tt, { role: 'bot', query: q, loading: false, elicit: { text: t('chat.plantWhich', { plant: plant.name, category: categoryName }), chips } }));
+      setTurns((tt) => fillLoadingTurn(tt, { role: 'bot', query: q, loading: false, elicit: { text: t('chat.plantWhich', { plant: plant.name, category: deviceNoun(categoryName) }), chips } }));
       return 'asked';
     }
-    insertNote(t('chat.plantNone', { plant: plant.name, category: categoryName }));
+    insertNote(t('chat.plantNone', { plant: plant.name, category: deviceNoun(categoryName) }));
     return null;
   }
 

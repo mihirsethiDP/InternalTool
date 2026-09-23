@@ -12,7 +12,7 @@ import { runSearch } from '../lib/search';
 import { supabase } from '../lib/supabase';
 import { openDocument } from '../lib/openDoc';
 import { useAuth, isAdmin } from '../lib/auth';
-import { usePlant, usePlantDevices, deviceLabel } from '../lib/plant';
+import { usePlant, usePlantDevices, deviceLabel, deviceNoun } from '../lib/plant';
 import PlantSwitcher from '../components/PlantSwitcher';
 import type { PlantDevice } from '../lib/types';
 
@@ -370,7 +370,7 @@ function PlantDevicesStrip({ plantId, plantName }: { plantId: string; plantName:
     const distinct = [...new Map(g.list.map((d) => [d.sensor_model_id, d])).values()];
     const scope = distinct.length === 1
       ? { modelId: distinct[0].sensor_model_id, categoryId: distinct[0].category_id, label: deviceLabel(distinct[0]),
-          note: t(distinct[0].is_assumption ? 'chat.plantAssumed' : 'chat.plantResolved', { plant: plantName, category: g.name, label: deviceLabel(distinct[0]) }) }
+          note: t(distinct[0].is_assumption ? 'chat.plantAssumed' : 'chat.plantResolved', { plant: plantName, category: deviceNoun(g.name), label: deviceLabel(distinct[0]) }) }
       : { categoryId: g.list[0].category_id, label: g.name };
     window.dispatchEvent(new CustomEvent('dp:open-chat', { detail: { scope } }));
   }
