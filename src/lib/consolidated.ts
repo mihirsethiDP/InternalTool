@@ -111,6 +111,17 @@ export function coverageOf(markdown: string | null | undefined, domain?: string 
   return { covered: checklist.length - missing.length, total: checklist.length, missing, complete: missing.length === 0 };
 }
 
+/** Coverage as the READER sees it: the model's own content layered over its
+ *  category's general reference (the UPS handbook lives on 'General — UPS'
+ *  and covers every make). A section counts if either has it. */
+export function coverageWithGeneral(ownMd: string | null | undefined, generalMd: string | null | undefined, domain?: string | null): Coverage & { viaGeneral: boolean } {
+  const own = parseSections(ownMd), gen = parseSections(generalMd);
+  const checklist = checklistSections(domain);
+  const missing = checklist.filter((x) => !own[x] && !gen[x]);
+  const ownCovered = checklist.filter((x) => own[x]).length;
+  return { covered: checklist.length - missing.length, total: checklist.length, missing, complete: missing.length === 0, viaGeneral: ownCovered === 0 && missing.length < checklist.length };
+}
+
 // Keyed by string, not the built-in union: sections are data now, so a
 // document can legitimately carry a key added in Admin.
 export type Sections = Record<string, string>;

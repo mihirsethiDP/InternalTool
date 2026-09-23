@@ -76,7 +76,8 @@ function Inner() {
           <nav aria-label="Primary" className="hidden md:flex items-center gap-1">
             <NavLink to="/" end className={navCls}>{t('nav.search')}</NavLink>
             <NavLink to="/browse" className={navCls}>{t('nav.browse')}</NavLink>
-            <NavLink to="/sensors" className={navCls}>{t('nav.devices')}</NavLink>
+            <NavLink to="/sensors" className={navCls}>{t('nav.sensors')}</NavLink>
+            <NavLink to="/electronics" className={navCls}>{t('nav.electronics')}</NavLink>
             <NavLink to="/plants" className={navCls}>{t('nav.plants')}</NavLink>
             {canUpload(profile) && !isAdmin(profile) && <NavLink to="/my-submissions" className={navCls}>{t('nav.uploads')}</NavLink>}
             {isAdmin(profile) && <NavLink to="/admin" className={navCls}>{t('nav.admin')}</NavLink>}
@@ -113,7 +114,8 @@ function Inner() {
             <div className="px-1 pb-1"><PlantSwitcher variant="menu" /></div>
             <NavLink to="/" end onClick={() => setMenuOpen(false)} className={mobileNavCls}>{t('nav.search')}</NavLink>
             <NavLink to="/browse" onClick={() => setMenuOpen(false)} className={mobileNavCls}>{t('nav.browse')}</NavLink>
-            <NavLink to="/sensors" onClick={() => setMenuOpen(false)} className={mobileNavCls}>{t('nav.devices')}</NavLink>
+            <NavLink to="/sensors" onClick={() => setMenuOpen(false)} className={mobileNavCls}>{t('nav.sensors')}</NavLink>
+            <NavLink to="/electronics" onClick={() => setMenuOpen(false)} className={mobileNavCls}>{t('nav.electronics')}</NavLink>
             <NavLink to="/plants" onClick={() => setMenuOpen(false)} className={mobileNavCls}>{t('nav.plants')}</NavLink>
             {canUpload(profile) && !isAdmin(profile) && <NavLink to="/my-submissions" onClick={() => setMenuOpen(false)} className={mobileNavCls}>{t('nav.uploads')}</NavLink>}
             {isAdmin(profile) && <NavLink to="/admin" onClick={() => setMenuOpen(false)} className={mobileNavCls}>{t('nav.admin')}</NavLink>}

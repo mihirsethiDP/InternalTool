@@ -13,7 +13,7 @@ export const LANGUAGES: { code: string; native: string }[] = [
 ];
 
 const en = {
-  nav: { search: 'Search', browse: 'Browse', sensors: 'Sensors', devices: 'Devices', plants: 'Plants', uploads: 'Uploads', admin: 'Admin', upload: 'Upload', signOut: 'Sign out', editProfile: 'Edit profile', language: 'Language' },
+  nav: { search: 'Search', browse: 'Browse', sensors: 'Sensors', devices: 'Devices', electronics: 'Electronics', plants: 'Plants', uploads: 'Uploads', admin: 'Admin', upload: 'Upload', signOut: 'Sign out', editProfile: 'Edit profile', language: 'Language' },
   home: {
     eyebrow: 'Troubleshooting hub',
     title1: 'Something acting up?',
@@ -97,6 +97,19 @@ const en = {
     needHelp: 'Needs outside help',
     logTicket: 'Log a support ticket',
     answeredAbove: 'Answered above',
+    whereAreYou: 'Where are you? (optional)',
+    whereHint: 'Pick your plant and I already know which make & model is installed — no questions asked.',
+    howTitle: 'How I narrow it down',
+    howPlant: 'Plant picked → I look up what is installed there and go straight to the steps.',
+    howMake: 'Make picked → I stay within that make and only ask which model if two are installed.',
+    howModel: 'Model picked → I answer from that model’s own manual plus the general guidance for its type.',
+    howElectronics: 'Not only sensors — ask me about the UPS, the camera or the datalogger too.',
+    askAbout: 'Ask about',
+    serviceDown: 'I couldn’t reach the documentation service just now. Try again in a moment, or search the documentation directly.',
+    offline: 'You look offline. I need a connection to search the documentation — try again when you are back on the network.',
+    tryAgain: 'Try again',
+    searchInstead: 'Search the documentation instead',
+    slow: 'Taking longer than usual — still working…',
   },
   viewer: {
     eyebrow: 'Device documentation',
@@ -119,7 +132,7 @@ const en = {
 };
 
 const hi: typeof en = {
-  nav: { search: 'खोज', browse: 'ब्राउज़', sensors: 'सेंसर', devices: 'डिवाइस', plants: 'प्लांट', uploads: 'अपलोड', admin: 'एडमिन', upload: 'अपलोड', signOut: 'साइन आउट', editProfile: 'प्रोफ़ाइल संपादित करें', language: 'भाषा' },
+  nav: { search: 'खोज', browse: 'ब्राउज़', sensors: 'सेंसर', devices: 'डिवाइस', electronics: 'इलेक्ट्रॉनिक्स', plants: 'प्लांट', uploads: 'अपलोड', admin: 'एडमिन', upload: 'अपलोड', signOut: 'साइन आउट', editProfile: 'प्रोफ़ाइल संपादित करें', language: 'भाषा' },
   home: {
     eyebrow: 'सेंसर समस्या-समाधान केंद्र',
     title1: 'सेंसर में दिक्कत?',
@@ -201,6 +214,19 @@ const hi: typeof en = {
     needHelp: 'बाहरी मदद चाहिए',
     logTicket: 'सपोर्ट टिकट दर्ज करें',
     answeredAbove: 'ऊपर उत्तर दिया',
+    whereAreYou: 'आप कहाँ हैं? (वैकल्पिक)',
+    whereHint: 'अपना प्लांट चुनें — वहाँ कौन सा मेक और मॉडल लगा है, मुझे पहले से पता है; कोई सवाल नहीं पूछूँगा।',
+    howTitle: 'मैं कैसे सटीक जवाब तक पहुँचता हूँ',
+    howPlant: 'प्लांट चुना → वहाँ क्या लगा है देखकर सीधे स्टेप्स पर जाता हूँ।',
+    howMake: 'मेक चुना → उसी मेक में रहता हूँ; दो मॉडल लगे हों तभी पूछता हूँ।',
+    howModel: 'मॉडल चुना → उस मॉडल के मैनुअल और उसके प्रकार के सामान्य मार्गदर्शन से जवाब देता हूँ।',
+    howElectronics: 'सिर्फ़ सेंसर नहीं — UPS, कैमरा या डेटालॉगर के बारे में भी पूछें।',
+    askAbout: 'इसके बारे में पूछें',
+    serviceDown: 'अभी डॉक्यूमेंटेशन सेवा से संपर्क नहीं हो पाया। थोड़ी देर में फिर कोशिश करें, या सीधे डॉक्यूमेंटेशन खोजें।',
+    offline: 'लगता है आप ऑफ़लाइन हैं। डॉक्यूमेंटेशन खोजने के लिए कनेक्शन चाहिए — नेटवर्क आने पर फिर कोशिश करें।',
+    tryAgain: 'फिर कोशिश करें',
+    searchInstead: 'इसके बजाय डॉक्यूमेंटेशन खोजें',
+    slow: 'सामान्य से ज़्यादा समय लग रहा है — काम जारी है…',
   },
   viewer: {
     eyebrow: 'सेंसर दस्तावेज़',
@@ -223,7 +249,7 @@ const hi: typeof en = {
 };
 
 const mr: typeof en = {
-  nav: { search: 'शोध', browse: 'ब्राउझ', sensors: 'सेन्सर', devices: 'डिव्हाइस', plants: 'प्लांट', uploads: 'अपलोड', admin: 'अ‍ॅडमिन', upload: 'अपलोड', signOut: 'साइन आउट', editProfile: 'प्रोफाइल संपादित करा', language: 'भाषा' },
+  nav: { search: 'शोध', browse: 'ब्राउझ', sensors: 'सेन्सर', devices: 'डिव्हाइस', electronics: 'इलेक्ट्रॉनिक्स', plants: 'प्लांट', uploads: 'अपलोड', admin: 'अ‍ॅडमिन', upload: 'अपलोड', signOut: 'साइन आउट', editProfile: 'प्रोफाइल संपादित करा', language: 'भाषा' },
   home: {
     eyebrow: 'सेन्सर समस्या-निवारण केंद्र',
     title1: 'सेन्सरमध्ये बिघाड?',
@@ -305,6 +331,19 @@ const mr: typeof en = {
     needHelp: 'बाहेरील मदत हवी',
     logTicket: 'सपोर्ट तिकीट नोंदवा',
     answeredAbove: 'वर उत्तर दिले',
+    whereAreYou: 'तुम्ही कुठे आहात? (ऐच्छिक)',
+    whereHint: 'तुमचा प्लांट निवडा — तिथे कोणता मेक आणि मॉडेल आहे हे मला आधीच माहीत आहे; प्रश्न विचारणार नाही.',
+    howTitle: 'मी नेमक्या उत्तरापर्यंत कसा पोहोचतो',
+    howPlant: 'प्लांट निवडला → तिथे काय बसवले आहे पाहून थेट पायऱ्यांवर जातो.',
+    howMake: 'मेक निवडला → त्याच मेकमध्ये राहतो; दोन मॉडेल असतील तरच विचारतो.',
+    howModel: 'मॉडेल निवडले → त्या मॉडेलच्या मॅन्युअल आणि प्रकाराच्या सामान्य मार्गदर्शनातून उत्तर देतो.',
+    howElectronics: 'फक्त सेन्सर नाही — UPS, कॅमेरा किंवा डेटालॉगरबद्दलही विचारा.',
+    askAbout: 'याबद्दल विचारा',
+    serviceDown: 'सध्या डॉक्युमेंटेशन सेवेशी संपर्क होऊ शकला नाही. थोड्या वेळाने पुन्हा प्रयत्न करा, किंवा थेट डॉक्युमेंटेशन शोधा.',
+    offline: 'तुम्ही ऑफलाइन दिसता. शोधण्यासाठी कनेक्शन हवे — नेटवर्क आल्यावर पुन्हा प्रयत्न करा.',
+    tryAgain: 'पुन्हा प्रयत्न करा',
+    searchInstead: 'त्याऐवजी डॉक्युमेंटेशन शोधा',
+    slow: 'नेहमीपेक्षा जास्त वेळ लागतोय — काम सुरू आहे…',
   },
   viewer: {
     eyebrow: 'सेन्सर दस्तऐवज',
@@ -327,7 +366,7 @@ const mr: typeof en = {
 };
 
 const bn: typeof en = {
-  nav: { search: 'খুঁজুন', browse: 'ব্রাউজ', sensors: 'সেন্সর', devices: 'ডিভাইস', plants: 'প্ল্যান্ট', uploads: 'আপলোড', admin: 'অ্যাডমিন', upload: 'আপলোড', signOut: 'সাইন আউট', editProfile: 'প্রোফাইল সম্পাদনা', language: 'ভাষা' },
+  nav: { search: 'খুঁজুন', browse: 'ব্রাউজ', sensors: 'সেন্সর', devices: 'ডিভাইস', electronics: 'ইলেকট্রনিক্স', plants: 'প্ল্যান্ট', uploads: 'আপলোড', admin: 'অ্যাডমিন', upload: 'আপলোড', signOut: 'সাইন আউট', editProfile: 'প্রোফাইল সম্পাদনা', language: 'ভাষা' },
   home: {
     eyebrow: 'সেন্সর ত্রুটি-সমাধান কেন্দ্র',
     title1: 'সেন্সরে সমস্যা?',
@@ -409,6 +448,19 @@ const bn: typeof en = {
     needHelp: 'বাইরের সাহায্য দরকার',
     logTicket: 'সাপোর্ট টিকিট জমা দিন',
     answeredAbove: 'উপরে উত্তর দেওয়া',
+    whereAreYou: 'আপনি কোথায়? (ঐচ্ছিক)',
+    whereHint: 'প্ল্যান্ট বেছে নিন — সেখানে কোন মেক ও মডেল আছে তা আমি আগেই জানি; কোনো প্রশ্ন নয়।',
+    howTitle: 'আমি কীভাবে সঠিক উত্তরে পৌঁছাই',
+    howPlant: 'প্ল্যান্ট বাছাই → সেখানে কী বসানো আছে দেখে সরাসরি ধাপে যাই।',
+    howMake: 'মেক বাছাই → সেই মেকেই থাকি; দুটি মডেল থাকলে তবেই জিজ্ঞাসা করি।',
+    howModel: 'মডেল বাছাই → সেই মডেলের ম্যানুয়াল ও তার ধরনের সাধারণ নির্দেশিকা থেকে উত্তর দিই।',
+    howElectronics: 'শুধু সেন্সর নয় — UPS, ক্যামেরা বা ডেটালগার নিয়েও জিজ্ঞাসা করুন।',
+    askAbout: 'এ বিষয়ে জিজ্ঞাসা করুন',
+    serviceDown: 'এই মুহূর্তে ডকুমেন্টেশন পরিষেবায় পৌঁছানো গেল না। একটু পরে আবার চেষ্টা করুন, বা সরাসরি ডকুমেন্টেশন খুঁজুন।',
+    offline: 'আপনি অফলাইন মনে হচ্ছে। খুঁজতে সংযোগ দরকার — নেটওয়ার্ক ফিরলে আবার চেষ্টা করুন।',
+    tryAgain: 'আবার চেষ্টা করুন',
+    searchInstead: 'বরং ডকুমেন্টেশন খুঁজুন',
+    slow: 'স্বাভাবিকের চেয়ে বেশি সময় লাগছে — কাজ চলছে…',
   },
   viewer: {
     eyebrow: 'সেন্সর ডকুমেন্টেশন',
@@ -431,7 +483,7 @@ const bn: typeof en = {
 };
 
 const te: typeof en = {
-  nav: { search: 'శోధన', browse: 'బ్రౌజ్', sensors: 'సెన్సర్లు', devices: 'పరికరాలు', plants: 'ప్లాంట్లు', uploads: 'అప్‌లోడ్‌లు', admin: 'అడ్మిన్', upload: 'అప్‌లోడ్', signOut: 'సైన్ అవుట్', editProfile: 'ప్రొఫైల్ సవరించండి', language: 'భాష' },
+  nav: { search: 'శోధన', browse: 'బ్రౌజ్', sensors: 'సెన్సర్లు', devices: 'పరికరాలు', electronics: 'ఎలక్ట్రానిక్స్', plants: 'ప్లాంట్లు', uploads: 'అప్‌లోడ్‌లు', admin: 'అడ్మిన్', upload: 'అప్‌లోడ్', signOut: 'సైన్ అవుట్', editProfile: 'ప్రొఫైల్ సవరించండి', language: 'భాష' },
   home: {
     eyebrow: 'సెన్సర్ ట్రబుల్‌షూటింగ్ హబ్',
     title1: 'సెన్సర్ సరిగా పనిచేయడం లేదా?',
@@ -513,6 +565,19 @@ const te: typeof en = {
     needHelp: 'బయటి సహాయం కావాలి',
     logTicket: 'సపోర్ట్ టికెట్ నమోదు చేయండి',
     answeredAbove: 'పైన సమాధానం ఇచ్చారు',
+    whereAreYou: 'మీరు ఎక్కడ ఉన్నారు? (ఐచ్ఛికం)',
+    whereHint: 'మీ ప్లాంట్‌ను ఎంచుకోండి — అక్కడ ఏ మేక్ & మోడల్ ఉందో నాకు ముందే తెలుసు; ప్రశ్నలు అడగను.',
+    howTitle: 'నేను సరైన సమాధానానికి ఎలా చేరుకుంటాను',
+    howPlant: 'ప్లాంట్ ఎంచుకున్నారు → అక్కడ ఏముందో చూసి నేరుగా దశలకు వెళ్తాను.',
+    howMake: 'మేక్ ఎంచుకున్నారు → ఆ మేక్‌లోనే ఉంటాను; రెండు మోడల్‌లు ఉంటేనే అడుగుతాను.',
+    howModel: 'మోడల్ ఎంచుకున్నారు → ఆ మోడల్ మాన్యువల్ మరియు దాని రకపు సాధారణ మార్గదర్శకత్వం నుంచి సమాధానం ఇస్తాను.',
+    howElectronics: 'సెన్సర్లే కాదు — UPS, కెమెరా లేదా డేటాలాగర్ గురించి కూడా అడగండి.',
+    askAbout: 'దీని గురించి అడగండి',
+    serviceDown: 'ఇప్పుడు డాక్యుమెంటేషన్ సేవను చేరుకోలేకపోయాను. కాసేపటి తర్వాత మళ్లీ ప్రయత్నించండి, లేదా నేరుగా డాక్యుమెంటేషన్‌లో వెతకండి.',
+    offline: 'మీరు ఆఫ్‌లైన్‌లో ఉన్నట్టున్నారు. వెతకడానికి కనెక్షన్ కావాలి — నెట్‌వర్క్ వచ్చాక మళ్లీ ప్రయత్నించండి.',
+    tryAgain: 'మళ్లీ ప్రయత్నించండి',
+    searchInstead: 'బదులుగా డాక్యుమెంటేషన్ వెతకండి',
+    slow: 'మామూలు కంటే ఎక్కువ సమయం పడుతోంది — పని జరుగుతోంది…',
   },
   viewer: {
     eyebrow: 'సెన్సర్ డాక్యుమెంటేషన్',
@@ -535,7 +600,7 @@ const te: typeof en = {
 };
 
 const ta: typeof en = {
-  nav: { search: 'தேடல்', browse: 'உலாவு', sensors: 'சென்சார்கள்', devices: 'சாதனங்கள்', plants: 'ஆலைகள்', uploads: 'பதிவேற்றங்கள்', admin: 'நிர்வாகம்', upload: 'பதிவேற்று', signOut: 'வெளியேறு', editProfile: 'சுயவிவரம் திருத்து', language: 'மொழி' },
+  nav: { search: 'தேடல்', browse: 'உலாவு', sensors: 'சென்சார்கள்', devices: 'சாதனங்கள்', electronics: 'எலக்ட்ரானிக்ஸ்', plants: 'ஆலைகள்', uploads: 'பதிவேற்றங்கள்', admin: 'நிர்வாகம்', upload: 'பதிவேற்று', signOut: 'வெளியேறு', editProfile: 'சுயவிவரம் திருத்து', language: 'மொழி' },
   home: {
     eyebrow: 'சென்சார் சிக்கல் தீர்வு மையம்',
     title1: 'சென்சார் சரியாக வேலை செய்யவில்லையா?',
@@ -617,6 +682,19 @@ const ta: typeof en = {
     needHelp: 'வெளி உதவி தேவை',
     logTicket: 'ஆதரவு டிக்கெட் பதிவு செய்யுங்கள்',
     answeredAbove: 'மேலே பதிலளிக்கப்பட்டது',
+    whereAreYou: 'நீங்கள் எங்கே இருக்கிறீர்கள்? (விருப்பம்)',
+    whereHint: 'உங்கள் ஆலையைத் தேர்வு செய்யுங்கள் — அங்கு எந்த மேக் & மாடல் உள்ளது என்பது எனக்கு முன்பே தெரியும்; கேள்விகள் இல்லை.',
+    howTitle: 'நான் எப்படி துல்லியமான பதிலுக்கு வருகிறேன்',
+    howPlant: 'ஆலை தேர்வு → அங்கு என்ன உள்ளது எனப் பார்த்து நேரடியாகப் படிகளுக்குச் செல்கிறேன்.',
+    howMake: 'மேக் தேர்வு → அந்த மேக்கிலேயே இருக்கிறேன்; இரண்டு மாடல்கள் இருந்தால் மட்டுமே கேட்கிறேன்.',
+    howModel: 'மாடல் தேர்வு → அந்த மாடலின் கையேடு மற்றும் அதன் வகையின் பொது வழிகாட்டுதலிலிருந்து பதிலளிக்கிறேன்.',
+    howElectronics: 'சென்சார்கள் மட்டுமல்ல — UPS, கேமரா அல்லது டேட்டாலாகர் பற்றியும் கேளுங்கள்.',
+    askAbout: 'இதைப் பற்றிக் கேளுங்கள்',
+    serviceDown: 'இப்போது ஆவணச் சேவையை அணுக முடியவில்லை. சிறிது நேரம் கழித்து மீண்டும் முயலுங்கள், அல்லது நேரடியாக ஆவணங்களைத் தேடுங்கள்.',
+    offline: 'நீங்கள் ஆஃப்லைனில் இருப்பது போல் தெரிகிறது. தேட இணைப்பு தேவை — நெட்வொர்க் வந்ததும் மீண்டும் முயலுங்கள்.',
+    tryAgain: 'மீண்டும் முயலவும்',
+    searchInstead: 'மாறாக ஆவணங்களைத் தேடுங்கள்',
+    slow: 'வழக்கத்தை விட நேரம் ஆகிறது — வேலை நடக்கிறது…',
   },
   viewer: {
     eyebrow: 'சென்சார் ஆவணங்கள்',
@@ -639,7 +717,7 @@ const ta: typeof en = {
 };
 
 const gu: typeof en = {
-  nav: { search: 'શોધ', browse: 'બ્રાઉઝ', sensors: 'સેન્સર', devices: 'ડિવાઇસ', plants: 'પ્લાન્ટ', uploads: 'અપલોડ', admin: 'એડમિન', upload: 'અપલોડ', signOut: 'સાઇન આઉટ', editProfile: 'પ્રોફાઇલ સંપાદિત કરો', language: 'ભાષા' },
+  nav: { search: 'શોધ', browse: 'બ્રાઉઝ', sensors: 'સેન્સર', devices: 'ડિવાઇસ', electronics: 'ઇલેક્ટ્રોનિક્સ', plants: 'પ્લાન્ટ', uploads: 'અપલોડ', admin: 'એડમિન', upload: 'અપલોડ', signOut: 'સાઇન આઉટ', editProfile: 'પ્રોફાઇલ સંપાદિત કરો', language: 'ભાષા' },
   home: {
     eyebrow: 'સેન્સર ટ્રબલશૂટિંગ હબ',
     title1: 'સેન્સરમાં તકલીફ?',
@@ -721,6 +799,19 @@ const gu: typeof en = {
     needHelp: 'બહારની મદદ જોઈએ',
     logTicket: 'સપોર્ટ ટિકિટ નોંધાવો',
     answeredAbove: 'ઉપર જવાબ આપ્યો',
+    whereAreYou: 'તમે ક્યાં છો? (વૈકલ્પિક)',
+    whereHint: 'તમારો પ્લાન્ટ પસંદ કરો — ત્યાં કયો મેક અને મૉડલ છે તે મને પહેલેથી ખબર છે; કોઈ પ્રશ્ન નહીં.',
+    howTitle: 'હું સાચા જવાબ સુધી કેવી રીતે પહોંચું છું',
+    howPlant: 'પ્લાન્ટ પસંદ → ત્યાં શું લગાવેલું છે તે જોઈને સીધો પગલાં પર જાઉં છું.',
+    howMake: 'મેક પસંદ → એ જ મેકમાં રહું છું; બે મૉડલ હોય તો જ પૂછું છું.',
+    howModel: 'મૉડલ પસંદ → એ મૉડલના મેન્યુઅલ અને એના પ્રકારના સામાન્ય માર્ગદર્શનમાંથી જવાબ આપું છું.',
+    howElectronics: 'માત્ર સેન્સર નહીં — UPS, કૅમેરા કે ડેટાલોગર વિશે પણ પૂછો.',
+    askAbout: 'આ વિશે પૂછો',
+    serviceDown: 'હમણાં ડોક્યુમેન્ટેશન સેવા સુધી પહોંચી શકાયું નહીં. થોડી વારમાં ફરી પ્રયાસ કરો, અથવા સીધા ડોક્યુમેન્ટેશન શોધો.',
+    offline: 'તમે ઑફલાઇન લાગો છો. શોધવા માટે કનેક્શન જોઈએ — નેટવર્ક આવે ત્યારે ફરી પ્રયાસ કરો.',
+    tryAgain: 'ફરી પ્રયાસ કરો',
+    searchInstead: 'તેના બદલે ડોક્યુમેન્ટેશન શોધો',
+    slow: 'સામાન્ય કરતાં વધુ સમય લાગે છે — કામ ચાલુ છે…',
   },
   viewer: {
     eyebrow: 'સેન્સર દસ્તાવેજીકરણ',
@@ -743,7 +834,7 @@ const gu: typeof en = {
 };
 
 const kn: typeof en = {
-  nav: { search: 'ಹುಡುಕು', browse: 'ಬ್ರೌಸ್', sensors: 'ಸೆನ್ಸರ್‌ಗಳು', devices: 'ಸಾಧನಗಳು', plants: 'ಘಟಕಗಳು', uploads: 'ಅಪ್‌ಲೋಡ್‌ಗಳು', admin: 'ಅಡ್ಮಿನ್', upload: 'ಅಪ್‌ಲೋಡ್', signOut: 'ಸೈನ್ ಔಟ್', editProfile: 'ಪ್ರೊಫೈಲ್ ಸಂಪಾದಿಸಿ', language: 'ಭಾಷೆ' },
+  nav: { search: 'ಹುಡುಕು', browse: 'ಬ್ರೌಸ್', sensors: 'ಸೆನ್ಸರ್‌ಗಳು', devices: 'ಸಾಧನಗಳು', electronics: 'ಎಲೆಕ್ಟ್ರಾನಿಕ್ಸ್', plants: 'ಘಟಕಗಳು', uploads: 'ಅಪ್‌ಲೋಡ್‌ಗಳು', admin: 'ಅಡ್ಮಿನ್', upload: 'ಅಪ್‌ಲೋಡ್', signOut: 'ಸೈನ್ ಔಟ್', editProfile: 'ಪ್ರೊಫೈಲ್ ಸಂಪಾದಿಸಿ', language: 'ಭಾಷೆ' },
   home: {
     eyebrow: 'ಸೆನ್ಸರ್ ದೋಷನಿವಾರಣಾ ಕೇಂದ್ರ',
     title1: 'ಸೆನ್ಸರ್ ಸರಿಯಾಗಿ ಕೆಲಸ ಮಾಡುತ್ತಿಲ್ಲವೇ?',
@@ -825,6 +916,19 @@ const kn: typeof en = {
     needHelp: 'ಹೊರಗಿನ ಸಹಾಯ ಬೇಕು',
     logTicket: 'ಸಪೋರ್ಟ್ ಟಿಕೆಟ್ ದಾಖಲಿಸಿ',
     answeredAbove: 'ಮೇಲೆ ಉತ್ತರಿಸಲಾಗಿದೆ',
+    whereAreYou: 'ನೀವು ಎಲ್ಲಿದ್ದೀರಿ? (ಐಚ್ಛಿಕ)',
+    whereHint: 'ನಿಮ್ಮ ಘಟಕವನ್ನು ಆರಿಸಿ — ಅಲ್ಲಿ ಯಾವ ಮೇಕ್ & ಮಾಡೆಲ್ ಇದೆ ಎಂದು ನನಗೆ ಮೊದಲೇ ತಿಳಿದಿದೆ; ಪ್ರಶ್ನೆಗಳಿಲ್ಲ.',
+    howTitle: 'ನಾನು ಸರಿಯಾದ ಉತ್ತರಕ್ಕೆ ಹೇಗೆ ತಲುಪುತ್ತೇನೆ',
+    howPlant: 'ಘಟಕ ಆರಿಸಿದರೆ → ಅಲ್ಲಿ ಏನಿದೆ ನೋಡಿ ನೇರವಾಗಿ ಹಂತಗಳಿಗೆ ಹೋಗುತ್ತೇನೆ.',
+    howMake: 'ಮೇಕ್ ಆರಿಸಿದರೆ → ಅದೇ ಮೇಕ್‌ನಲ್ಲಿ ಇರುತ್ತೇನೆ; ಎರಡು ಮಾಡೆಲ್ ಇದ್ದರೆ ಮಾತ್ರ ಕೇಳುತ್ತೇನೆ.',
+    howModel: 'ಮಾಡೆಲ್ ಆರಿಸಿದರೆ → ಆ ಮಾಡೆಲ್‌ನ ಕೈಪಿಡಿ ಮತ್ತು ಅದರ ಪ್ರಕಾರದ ಸಾಮಾನ್ಯ ಮಾರ್ಗದರ್ಶನದಿಂದ ಉತ್ತರಿಸುತ್ತೇನೆ.',
+    howElectronics: 'ಸೆನ್ಸರ್ ಮಾತ್ರವಲ್ಲ — UPS, ಕ್ಯಾಮೆರಾ ಅಥವಾ ಡೇಟಾಲಾಗರ್ ಬಗ್ಗೆಯೂ ಕೇಳಿ.',
+    askAbout: 'ಇದರ ಬಗ್ಗೆ ಕೇಳಿ',
+    serviceDown: 'ಈಗ ದಾಖಲೆ ಸೇವೆಯನ್ನು ತಲುಪಲಾಗಲಿಲ್ಲ. ಸ್ವಲ್ಪ ಸಮಯದ ನಂತರ ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ, ಅಥವಾ ನೇರವಾಗಿ ದಾಖಲೆಗಳಲ್ಲಿ ಹುಡುಕಿ.',
+    offline: 'ನೀವು ಆಫ್‌ಲೈನ್‌ನಲ್ಲಿ ಇದ್ದಂತಿದೆ. ಹುಡುಕಲು ಸಂಪರ್ಕ ಬೇಕು — ನೆಟ್‌ವರ್ಕ್ ಬಂದ ಮೇಲೆ ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.',
+    tryAgain: 'ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ',
+    searchInstead: 'ಬದಲಿಗೆ ದಾಖಲೆಗಳನ್ನು ಹುಡುಕಿ',
+    slow: 'ಸಾಮಾನ್ಯಕ್ಕಿಂತ ಹೆಚ್ಚು ಸಮಯ — ಕೆಲಸ ನಡೆಯುತ್ತಿದೆ…',
   },
   viewer: {
     eyebrow: 'ಸೆನ್ಸರ್ ದಾಖಲೆ',

@@ -8,12 +8,17 @@ import { useAuth, canUpload } from '../lib/auth';
 import PageHeader from '../components/PageHeader';
 import CategoryOptions from '../components/CategoryOptions';
 import AddSensorModal from '../components/AddSensorModal';
-import { coverageOf, SECTION_LABEL, sectionLabel } from '../lib/consolidated';
+import { coverageOf, coverageWithGeneral, SECTION_LABEL, sectionLabel } from '../lib/consolidated';
+import type { DeviceDomain } from '../lib/types';
 
 const PAGE_SIZE = 24;
 
-export default function SensorModelList() {
+// One page, two doors: /sensors and /electronics. Same catalogue table, split
+// by the category's domain — a UPS never sits between two pH probes.
+export default function SensorModelList({ domain = 'sensor' }: { domain?: DeviceDomain }) {
   const { profile } = useAuth();
+  const isElectronics = domain === 'electronics';
+  const noun = isElectronics ? 'device' : 'sensor';
   const showCoverage = canUpload(profile);
   const [params] = useSearchParams();
   const docsParam = params.get('docs'); // 'incomplete' arrives from the Insights "View all" link
@@ -27,16 +32,18 @@ export default function SensorModelList() {
   const [sortMode, setSortMode] = useState<'category' | 'gap'>(docsParam === 'incomplete' ? 'gap' : 'category');
   const [incompleteOnly, setIncompleteOnly] = useState(docsParam === 'incomplete');
 
-  const cats = useQuery({ queryKey: ['cats-domain'], queryFn: async () => (await supabase.from('sensor_categories').select('id,name,domain').order('name')).data ?? [] });
-  const makes = useQuery({ queryKey: ['makes'], queryFn: async () => (await supabase.from('sensor_makes').select('id,name').order('name')).data ?? [] });
+  const allCats = useQuery({ queryKey: ['cats-domain'], queryFn: async () => (await supabase.from('sensor_categories').select('id,name,domain').order('name')).data ?? [] });
+  const cats = { ...allCats, data: (allCats.data ?? []).filter((c: any) => (c.domain ?? 'sensor') === domain) };
+  const allMakes = useQuery({ queryKey: ['makes'], queryFn: async () => (await supabase.from('sensor_makes').select('id,name').order('name')).data ?? [] });
 
   const models = useQuery({
-    queryKey: ['sensor-models', cat, makeId],
+    queryKey: ['sensor-models', domain, cat, makeId],
     queryFn: async () => {
       let qb = supabase
         .from('sensor_models')
-        .select('id, model_no, name, sensor_makes(name), sensor_categories(name, domain))')
+        .select('id, model_no, name, category_id, sensor_makes(name), sensor_categories!inner(name, domain))')
         .eq('is_general', false)
+        .eq('sensor_categories.domain', domain)
         .order('model_no')
         .limit(2000);
       if (cat) qb = qb.eq('category_id', cat);
@@ -50,31 +57,43 @@ export default function SensorModelList() {
     queryKey: ['coverage-map'],
     enabled: showCoverage,
     queryFn: async () => {
-      const { data } = await supabase.from('consolidated_docs').select('sensor_model_id, content_markdown, sensor_models(sensor_categories(domain))').is('deleted_at', null);
-      const map: Record<string, ReturnType<typeof coverageOf>> = {};
-      for (const d of data ?? []) {
-        const sm = Array.isArray((d as any).sensor_models) ? (d as any).sensor_models[0] : (d as any).sensor_models;
+      const { data } = await supabase.from('consolidated_docs').select('sensor_model_id, content_markdown, sensor_models(category_id, is_general, sensor_categories(domain))').is('deleted_at', null);
+      const own: Record<string, string> = {}; const general: Record<string, string> = {}; const domOf: Record<string, string> = {};
+      for (const d of (data ?? []) as any[]) {
+        const sm = Array.isArray(d.sensor_models) ? d.sensor_models[0] : d.sensor_models;
         const cat = Array.isArray(sm?.sensor_categories) ? sm.sensor_categories[0] : sm?.sensor_categories;
-        map[(d as any).sensor_model_id] = coverageOf((d as any).content_markdown, cat?.domain);
+        if (sm?.is_general) general[sm.category_id] = d.content_markdown; else { own[d.sensor_model_id] = d.content_markdown; domOf[d.sensor_model_id] = cat?.domain; }
       }
-      return map;
+      return { own, general, domOf };
     },
   });
-  const covOf = (id: string) => coverage.data?.[id] ?? coverageOf('');
+  // Coverage as the READER sees it (own + category-general), so a Microtek UPS
+  // whose handbook lives on 'General — UPS' is not shown as 0/8.
+  const covOf = (id: string, categoryId?: string | null) => {
+    const c = coverage.data;
+    if (!c) return { ...coverageOf(''), viaGeneral: false };
+    return coverageWithGeneral(c.own[id], categoryId ? c.general[categoryId] : undefined, domain);
+  };
+
+  const makes = useMemo(() => {
+    const present = new Set(((models.data ?? []) as any[]).map((m) => m.sensor_makes?.name));
+    const list = (allMakes.data ?? []).filter((mk: any) => present.has(mk.name));
+    return { data: makeId && !list.some((mk: any) => mk.id === makeId) ? allMakes.data ?? [] : list } as { data: any[] };
+  }, [allMakes.data, models.data, makeId]);
 
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
     let list = (models.data ?? []) as any[];
     if (modelId) list = list.filter((m) => m.id === modelId);
     if (needle) list = list.filter((m) => [m.model_no, m.name, m.sensor_makes?.name, m.sensor_categories?.name].filter(Boolean).some((s: string) => s.toLowerCase().includes(needle)));
-    if (showCoverage && incompleteOnly) list = list.filter((m) => !covOf(m.id).complete);
+    if (showCoverage && incompleteOnly) list = list.filter((m) => !covOf(m.id, m.category_id).complete);
     return list;
   }, [q, models.data, modelId, incompleteOnly, showCoverage, coverage.data]);
 
   // Gap view (uploaders/admins): one flat list ranked least-documented first.
   const ranked = useMemo(() => {
     if (!(showCoverage && sortMode === 'gap')) return [];
-    return [...filtered].sort((a, b) => covOf(a.id).covered - covOf(b.id).covered);
+    return [...filtered].sort((a, b) => covOf(a.id, a.category_id).covered - covOf(b.id, b.category_id).covered);
   }, [filtered, sortMode, showCoverage, coverage.data]);
 
   const useGapView = showCoverage && sortMode === 'gap';
@@ -91,18 +110,18 @@ export default function SensorModelList() {
     const e: Record<string, any[]> = {};
     for (const m of visible as any[]) {
       const k = m.sensor_categories?.name || 'Uncategorised';
-      ((m.sensor_categories?.domain === 'electronics' ? e : g)[k] ??= []).push(m);
+      (g[k] ??= []).push(m);
     }
-    // Electronics categories sit after the sensors, under their own heading.
-    return { ...g, ...Object.fromEntries(Object.entries(e).map(([k, v]) => [`Electronics · ${k}`, v])) };
+    void e;
+    return g;
   }, [visible]);
 
   return (
     <div className="space-y-6">
       <PageHeader
         eyebrow="Catalog"
-        title="Device catalog"
-        subtitle={`${models.data?.length ?? 0} models across ${makes.data?.length ?? 0} makes`}
+        title={isElectronics ? 'Electronics catalog' : 'Sensor catalog'}
+        subtitle={isElectronics ? `${models.data?.length ?? 0} devices — UPS, cameras, dataloggers and whatever comes next` : `${models.data?.length ?? 0} models across ${makes.data?.length ?? 0} makes`}
         stats={[
           { label: 'Total models', value: models.data?.length ?? 0 },
           { label: 'Showing', value: pageList.length },
@@ -110,7 +129,7 @@ export default function SensorModelList() {
         ]}
         action={canUpload(profile) && (
           <button onClick={() => setShowAdd(true)} className="bg-white text-brand-700 hover:bg-slate-100 rounded-lg px-4 py-2 font-semibold text-sm shadow-sm">
-            + New device
+            + New {noun}
           </button>
         )}
       />
@@ -156,7 +175,7 @@ export default function SensorModelList() {
       {useGapView && pageList.length > 0 && (
         <div className="space-y-2">
           {visible.map((m: any) => {
-            const c = covOf(m.id);
+            const c = covOf(m.id, m.category_id);
             return (
               <Link to={`/sensors/${m.id}`} key={m.id} className="card-tight flex items-center gap-3 hover:border-brand-700 transition group">
                 <div className="bg-brand-50 text-brand-700 rounded-md w-9 h-9 flex items-center justify-center shrink-0"><Cpu size={16} strokeWidth={2} /></div>
@@ -195,7 +214,7 @@ export default function SensorModelList() {
                     <div className="text-xs text-slate-500">{m.sensor_makes?.name ?? '—'}</div>
                     <div className="font-semibold text-slate-900 truncate">{m.model_no || m.name || 'Untitled'}</div>
                     {m.name && m.model_no && <div className="text-xs text-slate-500 truncate mt-0.5">{m.name}</div>}
-                    {showCoverage && <CoverageChip cov={coverage.data?.[m.id]} />}
+                    {showCoverage && <CoverageChip cov={covOf(m.id, m.category_id)} />}
                   </div>
                 </div>
               </Link>
@@ -219,14 +238,17 @@ export default function SensorModelList() {
   );
 }
 
-function CoverageChip({ cov }: { cov?: { covered: number; total: number; complete: boolean } }) {
+function CoverageChip({ cov }: { cov?: { covered: number; total: number; complete: boolean; viaGeneral?: boolean } }) {
   const c = cov ?? { covered: 0, total: 8, complete: false };
   if (c.complete) {
-    return <span className="inline-block mt-1.5 badge-green text-[10px]">Docs complete</span>;
+    return <span className="inline-block mt-1.5 badge-green text-[10px]">Docs complete{c.viaGeneral ? ' · general guidance' : ''}</span>;
+  }
+  if (c.covered === 0) {
+    return <span className="inline-block mt-1.5 rounded-full bg-red-50 text-red-700 text-[10px] font-medium px-2 py-0.5">No documentation</span>;
   }
   return (
-    <span className="inline-block mt-1.5 rounded-full bg-amber-100 text-amber-800 text-[10px] font-medium px-2 py-0.5">
-      Docs {c.covered}/{c.total}
+    <span className="inline-block mt-1.5 rounded-full bg-amber-100 text-amber-800 text-[10px] font-medium px-2 py-0.5" title={c.viaGeneral ? 'From the category’s general reference' : undefined}>
+      Docs {c.covered}/{c.total}{c.viaGeneral ? ' · general' : ''}
     </span>
   );
 }

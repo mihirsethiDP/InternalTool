@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import i18n from '../i18n';
-import { X, Send, ArrowRight, ExternalLink, ChevronDown, Sparkles, Bot, Trash2, Wrench, Cpu, Globe, Compass, CheckCircle2, PhoneCall, GitBranch, Phone, Mic, Undo2, Volume2, VolumeX, Loader2 } from 'lucide-react';
+import { X, Send, ArrowRight, MapPin, Layers, Zap, ExternalLink, ChevronDown, Sparkles, Bot, Trash2, Wrench, Cpu, Globe, Compass, CheckCircle2, PhoneCall, GitBranch, Phone, Mic, Undo2, Volume2, VolumeX, Loader2 } from 'lucide-react';
 import { speak, stopSpeaking, ttsSupported } from '../lib/tts';
 import { translateFlowDefinition } from '../lib/translateFlow';
 import { startRecording, recordingSupported, MAX_RECORDING_MS, type Recorder } from '../lib/speech';
@@ -17,7 +17,8 @@ import { conversationalReply, isVagueQuery } from '../lib/chatIntent';
 import { matchRule, type RouteMatch } from '../lib/routing';
 import { matchFlow, getNode, failTarget, fetchContacts, contactsForSkill, type DiagnosticFlow, type FlowNode, type EscalationContact } from '../lib/flows';
 import { fetchIssues, matchIssueClient, issueQueueInfo, filterQueueForModel, type Issue, type IssueQueueInfo } from '../lib/issues';
-import { usePlant, devicesInCategory, deviceLabel } from '../lib/plant';
+import { usePlant, usePlantDevices, devicesInCategory, deviceLabel } from '../lib/plant';
+import PlantSwitcher from './PlantSwitcher';
 import { correctSpelling } from '../lib/lexicon';
 import { useAuth } from '../lib/auth';
 import AnswerFeedback from './AnswerFeedback';
@@ -48,6 +49,8 @@ type Turn =
       // Plain conversational reply (greeting / thanks / "move on" etc.) — no
       // doc search, no answer card, no feedback/sources.
       note?: string;
+      // The service could not be reached: the note explains, this re-sends.
+      retry?: string;
       // AI mode (Gemini RAG via the chat-answer Edge Function):
       answer?: string | null;
       citations?: Citation[];
@@ -296,10 +299,15 @@ export default function ChatDrawer({ open, onClose, seed, seedScope, onSeedConsu
 }) {
   const nav = useNavigate();
   const { t, i18n } = useTranslation();
+  const t2 = t; // same function; a distinct name for use inside setTurns updaters whose `t` param shadows it
   const { email } = useAuth();
   // Where the operator is standing. The register for that plant answers the
   // "which make & model?" question before we ever ask it.
   const { plant } = usePlant();
+  const plantDevices = usePlantDevices(plant?.id);
+  // Loading for longer than usual: say so instead of leaving the dots blinking.
+  const [slow, setSlow] = useState(false);
+  const slowTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [input, setInput] = useState('');
   const [listening, setListening] = useState(false);
   const recogRef = useRef<any>(null);
@@ -574,6 +582,22 @@ export default function ChatDrawer({ open, onClose, seed, seedScope, onSeedConsu
     return () => { document.body.style.overflow = prev; };
   }, [open]);
 
+  // What to suggest on the empty screen: with a plant, its most-installed
+  // sensor types plus its electronics, phrased the way an operator would say
+  // it; otherwise the generic examples plus one electronics prompt.
+  const introSuggestions = useMemo<string[]>(() => {
+    const devs = plantDevices.data ?? [];
+    if (!plant || devs.length === 0) return [...SUGGESTIONS, 'UPS is beeping continuously', 'Camera shows offline in the app'];
+    const byCat = new Map<string, { name: string; domain: string; qty: number }>();
+    for (const d of devs) { const e = byCat.get(d.category_name) ?? { name: d.category_name, domain: d.domain, qty: 0 }; e.qty += d.quantity; byCat.set(d.category_name, e); }
+    const sensors = [...byCat.values()].filter((c) => c.domain === 'sensor').sort((a, b) => b.qty - a.qty).slice(0, 3).map((c) => `My ${c.name.replace(/\s*\(.*\)$/, '').toLowerCase()} is giving trouble`);
+    const electronics: string[] = [];
+    if (byCat.has('UPS')) electronics.push('UPS is beeping continuously');
+    if (byCat.has('Datalogger')) electronics.push('Plant has stopped reporting data');
+    if (byCat.has('Camera')) electronics.push('Camera shows offline in the app');
+    return [...sensors, ...electronics].slice(0, 6);
+  }, [plant, plantDevices.data]);
+
   // Slip a short bot note in ABOVE the pending loading bubble — used when the
   // plant register answers a question we would otherwise have asked.
   function insertNote(text: string) {
@@ -623,8 +647,17 @@ export default function ChatDrawer({ open, onClose, seed, seedScope, onSeedConsu
       return;
     }
 
+    // No network at all: say so now rather than after a 30-second timeout.
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      setInput('');
+      setTurns((t) => [...t, { role: 'user', text: q }, { role: 'bot', query: q, loading: false, note: t2('chat.offline'), retry: q }]);
+      return;
+    }
     sendingRef.current = true;
     setInput('');
+    setSlow(false);
+    if (slowTimer.current) clearTimeout(slowTimer.current);
+    slowTimer.current = setTimeout(() => setSlow(true), 9000);
     // Question asked by voice → answer comes back by voice too.
     if (voiceAskedRef.current) { autoSpeakRef.current = true; voiceAskedRef.current = false; }
     stopSpeaking();
@@ -788,18 +821,24 @@ export default function ChatDrawer({ open, onClose, seed, seedScope, onSeedConsu
               const { data } = await supabase.rpc('chat_search', { q: mq, p_limit: 5 });
               return enrichHits((data as Hit[]) ?? []);
             };
-      // ---- Priority 3: grounded RAG answer.
-      const result = await askAssistant(mq, { sensorModelId: activeScope?.modelId ?? null, categoryId: activeScope?.categoryId ?? null }, fallback);
+      // ---- Priority 3: grounded RAG answer (with a deadline — a hung function
+      // must not leave the operator staring at three dots).
+      const result = await Promise.race([
+        askAssistant(mq, { sensorModelId: activeScope?.modelId ?? null, categoryId: activeScope?.categoryId ?? null }, fallback),
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), 40_000)),
+      ]);
       if (!result.answer && result.hits.length === 0) {
         logUnanswered({ query: q, source: 'chat', sensorModelId: activeScope?.modelId ?? null });
       }
       setTurns((t) => fillLoadingTurn(t, { role: 'bot', query: q, loading: false, narrowedLabel: activeScope?.label, answer: result.answer, citations: result.citations, hits: result.hits, routed }));
     } catch (e) {
-      // Never leave the chat frozen — surface a recoverable not-found turn.
+      // Never leave the chat frozen — say what happened and offer a retry.
       console.warn('chat send failed', e);
-      setTurns((t) => fillLoadingTurn(t, { role: 'bot', query: q, loading: false, narrowedLabel: activeScope?.label, answer: null, citations: [], hits: [] }));
+      setTurns((t) => fillLoadingTurn(t, { role: 'bot', query: q, loading: false, narrowedLabel: activeScope?.label, note: t2('chat.serviceDown'), retry: q }));
     } finally {
       sendingRef.current = false;
+      if (slowTimer.current) { clearTimeout(slowTimer.current); slowTimer.current = null; }
+      setSlow(false);
     }
   }
 
@@ -1190,11 +1229,31 @@ export default function ChatDrawer({ open, onClose, seed, seedScope, onSeedConsu
                   <div className="text-xs text-slate-500 mt-1.5">{t('chat.note')}</div>
                 </div>
               </div>
-              {/* Suggestion chips */}
+              {/* Where are you? — optional, and the single biggest shortcut */}
+              <div className="pl-10 space-y-2">
+                <div className="rounded-xl border border-brand-100 bg-brand-50/60 px-3 py-2.5">
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <div className="text-xs font-semibold text-brand-900">{t('chat.whereAreYou')}</div>
+                    <PlantSwitcher variant="light" />
+                  </div>
+                  <div className="text-[11px] text-slate-600 mt-1.5">{t('chat.whereHint')}</div>
+                </div>
+                {/* How the assistant narrows down — plant → make → model, and electronics too */}
+                <details className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">
+                  <summary className="cursor-pointer font-semibold text-slate-700">{t('chat.howTitle')}</summary>
+                  <ul className="mt-2 space-y-1.5">
+                    <li className="flex gap-2"><MapPin size={13} className="text-brand-700 shrink-0 mt-0.5" /><span>{t('chat.howPlant')}</span></li>
+                    <li className="flex gap-2"><Layers size={13} className="text-brand-700 shrink-0 mt-0.5" /><span>{t('chat.howMake')}</span></li>
+                    <li className="flex gap-2"><Cpu size={13} className="text-brand-700 shrink-0 mt-0.5" /><span>{t('chat.howModel')}</span></li>
+                    <li className="flex gap-2"><Zap size={13} className="text-amber-600 shrink-0 mt-0.5" /><span>{t('chat.howElectronics')}</span></li>
+                  </ul>
+                </details>
+              </div>
+              {/* Suggestion chips — from the plant's own register when one is picked */}
               <div className="pl-10">
-                <div className="text-[11px] uppercase tracking-wide font-semibold text-slate-400 mb-2">{t('chat.tryOne')}</div>
+                <div className="text-[11px] uppercase tracking-wide font-semibold text-slate-400 mb-2">{plant ? `${t('chat.askAbout')} ${plant.name}` : t('chat.tryOne')}</div>
                 <div className="flex flex-col gap-2">
-                  {SUGGESTIONS.map((s) => (
+                  {introSuggestions.map((s) => (
                     <button key={s} onClick={() => send(s)}
                       className="tap group text-left text-sm bg-white border border-slate-200 hover:border-brand-700 rounded-xl px-3 py-2.5 transition shadow-sm flex items-center gap-2.5">
                       <span className="w-7 h-7 rounded-lg bg-brand-50 text-brand-700 flex items-center justify-center shrink-0 group-hover:bg-brand-700 group-hover:text-white transition">
@@ -1227,11 +1286,17 @@ export default function ChatDrawer({ open, onClose, seed, seedScope, onSeedConsu
               {turn.loading ? (
                 <div className="inline-flex items-center gap-2 rounded-2xl rounded-tl-md bg-white border border-slate-200 shadow-sm px-3.5 py-3">
                   <span className="dp-typing"><span></span><span></span><span></span></span>
-                  <span className="text-xs text-slate-400">{t('chat.title')} is thinking…</span>
+                  <span className="text-xs text-slate-400">{slow ? t('chat.slow') : `${t('chat.title')} is thinking…`}</span>
                 </div>
               ) : turn.note ? (
-                <div className="rounded-2xl rounded-tl-md bg-white border border-slate-200 shadow-sm px-3.5 py-3 text-sm text-slate-700 leading-relaxed">
-                  {turn.note}
+                <div className="rounded-2xl rounded-tl-md bg-white border border-slate-200 shadow-sm px-3.5 py-3 text-sm text-slate-700 leading-relaxed space-y-2.5">
+                  <div>{turn.note}</div>
+                  {turn.retry && i === turns.length - 1 && (
+                    <div className="flex flex-col gap-1.5">
+                      <button onClick={() => send(turn.retry!)} className={CHIP_CLS}>{t('chat.tryAgain')}</button>
+                      <button onClick={() => { onClose(); nav('/browse'); }} className={CHIP_CLS}>{t('chat.searchInstead')}</button>
+                    </div>
+                  )}
                 </div>
               ) : turn.probe ? (
                 <div className="rounded-2xl rounded-tl-md bg-white border border-slate-200 shadow-sm px-3.5 py-3 space-y-2.5">
@@ -1528,7 +1593,7 @@ function GuidedNarrow({ onPick, initialCategoryId, orderedCategoryIds }: {
     <div className="bg-gradient-to-br from-brand-50 to-white border border-brand-100 rounded-xl px-3 py-3 space-y-2.5 shadow-sm">
       <div className="text-xs text-brand-800 font-semibold inline-flex items-center gap-1.5">
         <Cpu size={13} />
-        {step === 'category' && 'Which kind of sensor is this?'}
+        {step === 'category' && 'Which kind of device is this?'}
         {step === 'make' && `Which make? (${catName(catId)})`}
         {step === 'model' && `Which model? (${makeName(makeId)})`}
       </div>

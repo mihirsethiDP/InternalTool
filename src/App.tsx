@@ -38,7 +38,8 @@ export default function App() {
         <Route path="browse" element={<Browse />} />
         <Route path="plants" element={<PlantList />} />
         <Route path="plants/:id" element={<PlantDetail />} />
-        <Route path="sensors" element={<SensorModelList />} />
+        <Route path="sensors" element={<SensorModelList domain="sensor" />} />
+        <Route path="electronics" element={<SensorModelList domain="electronics" />} />
         <Route path="sensors/:id" element={<SensorModelDetail />} />
         <Route path="upload" element={<Navigate to="/" replace />} />
         <Route path="view/:id" element={<Viewer />} />
