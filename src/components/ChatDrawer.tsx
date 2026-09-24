@@ -73,6 +73,9 @@ type Turn =
       flowNode?: FlowNode;
       flowTitle?: string; // set on the first node so the user sees which flow started
       flowTerminal?: boolean; // resolve/escalate — end of the run (feedback shows here)
+      // An escalation whose contact depends on the make we do not know yet:
+      // the makes that HAVE a contact for this skill, offered as chips.
+      escalateMakeChoices?: { makeId: string; makeName: string; modelId: string | null; categoryName: string }[];
       queuePos?: { index: number; total: number; issueLabel: string }; // "Fix k of N" when an issue queue is running
       escalateContacts?: EscalationContact[]; // resolved directory entries (make/global/per-plant)
     };
@@ -995,6 +998,7 @@ export default function ChatDrawer({ open, onClose, seed, seedScope, onSeedConsu
   async function nodeTurn(flow: DiagnosticFlow, node: FlowNode, opts?: { first?: boolean; scopeLabel?: string }): Promise<Extract<Turn, { role: 'bot' }>> {
     const terminal = node.kind === 'resolve' || node.kind === 'escalate';
     let contacts: EscalationContact[] = [];
+    let makeChoices: NonNullable<Extract<Turn, { role: 'bot' }>['escalateMakeChoices']> = [];
     if (node.kind === 'escalate' && node.skill) {
       try {
         // The right person differs by plant and (for vendor support) by make
@@ -1005,7 +1009,28 @@ export default function ChatDrawer({ open, onClose, seed, seedScope, onSeedConsu
           const { data: m } = await supabase.from('sensor_models').select('make_id').eq('id', modelId).maybeSingle();
           makeId = (m as any)?.make_id ?? null;
         }
-        contacts = contactsForSkill(await fetchContacts(), node.skill, { makeId, modelId });
+        const all = await fetchContacts();
+        contacts = contactsForSkill(all, node.skill, { makeId, modelId });
+        // Category-level run (no plant, no model): a vendor number depends on
+        // the make, so instead of "no contact on file" ask which make it is —
+        // offering only the makes that actually have a contact for this skill
+        // and a model in this category.
+        if (!makeId && !contacts.some((c) => c.person_name || c.contact)) {
+          const byMake = new Map<string, string>();
+          for (const c of all) if (c.skill_key === node.skill && c.active !== false && c.make_id && (c.person_name || c.contact)) byMake.set(c.make_id, c.make_name ?? '');
+          if (byMake.size > 0) {
+            const [{ data: models }, { data: cat }] = await Promise.all([
+              supabase.from('sensor_models').select('id, make_id').eq('category_id', flow.sensor_category_id).eq('is_general', false).in('make_id', [...byMake.keys()]),
+              supabase.from('sensor_categories').select('name').eq('id', flow.sensor_category_id).maybeSingle(),
+            ]);
+            const perMake = new Map<string, string[]>();
+            for (const m of (models ?? []) as any[]) (perMake.get(m.make_id) ?? perMake.set(m.make_id, []).get(m.make_id)!).push(m.id);
+            makeChoices = [...byMake.entries()]
+              .filter(([id]) => perMake.has(id))
+              .map(([id, name]) => ({ makeId: id, makeName: name, modelId: perMake.get(id)!.length === 1 ? perMake.get(id)![0] : null, categoryName: (cat as any)?.name ?? '' }))
+              .sort((a, b) => a.makeName.localeCompare(b.makeName));
+          }
+        }
       } catch { contacts = []; }
     }
     const q = queueRef.current;
@@ -1018,8 +1043,27 @@ export default function ChatDrawer({ open, onClose, seed, seedScope, onSeedConsu
       flowTitle: opts?.first ? flow.title : undefined,
       flowTerminal: terminal,
       escalateContacts: contacts,
+      escalateMakeChoices: makeChoices.length ? makeChoices : undefined,
       queuePos: opts?.first && q && q.flows.length > 1 ? { index: q.index + 1, total: q.flows.length, issueLabel: q.issueLabel } : undefined,
     };
+  }
+
+  // The operator told us the make at the escalation step: show that make's
+  // contact in place, and scope the rest of the conversation to it.
+  async function pickEscalationMake(turnIndex: number, choice: { makeId: string; makeName: string; modelId: string | null }) {
+    const turn = turns[turnIndex] as Extract<Turn, { role: 'bot' }> | undefined;
+    const skill = turn?.flowNode?.skill; if (!skill) return;
+    const contacts = contactsForSkill(await fetchContacts(), skill, { makeId: choice.makeId, modelId: choice.modelId });
+    let label = choice.makeName;
+    if (choice.modelId) {
+      const { data: m } = await supabase.from('sensor_models').select('id, model_no, name, category_id').eq('id', choice.modelId).maybeSingle();
+      if (m) {
+        label = `${choice.makeName} ${(m as any).model_no || (m as any).name}`.trim();
+        const { data: gm } = await supabase.from('sensor_models').select('id').eq('is_general', true).eq('category_id', (m as any).category_id).maybeSingle();
+        setScope({ modelId: (m as any).id, generalModelId: (gm as any)?.id ?? null, categoryId: (m as any).category_id, label });
+      }
+    }
+    setTurns((tt) => tt.map((x, i) => (i === turnIndex && x.role === 'bot') ? { ...x, escalateContacts: contacts, escalateMakeChoices: undefined, narrowedLabel: label } : x));
   }
 
   async function startFlow(rawFlow: DiagnosticFlow, scopeLabel?: string) {
@@ -1335,6 +1379,7 @@ export default function ChatDrawer({ open, onClose, seed, seedScope, onSeedConsu
                   hasEscalation={(flowRef.current?.definition.nodes.filter((n) => n.kind === 'escalate').length ?? 0) === 1}
                   hasNextFix={queueHasNext()}
                   onNextFix={queueHasNext() ? advanceQueue : undefined}
+                  onPickMake={(choice) => pickEscalationMake(i, choice)}
                 />
               ) : turn.answer ? (
                 <AnswerCard
@@ -1723,7 +1768,7 @@ function RoutedCard({ routed, onOpen }: { routed: RouteMatch; onOpen: (docId: st
 // One node of a diagnostic flow run. Question nodes show tappable option
 // chips, action nodes a step with Done / Didn't-work, resolve and escalate
 // nodes are terminal (escalate resolves the contact from the directory).
-function FlowNodeCard({ turn, active, isLast, failNext, onChoose, onTicket, onBack, onStillStuck, hasEscalation, hasNextFix, onNextFix }: {
+function FlowNodeCard({ turn, active, isLast, failNext, onChoose, onTicket, onBack, onStillStuck, hasEscalation, hasNextFix, onNextFix, onPickMake }: {
   turn: Extract<Turn, { role: 'bot' }>;
   active: boolean;
   isLast: boolean;
@@ -1735,6 +1780,7 @@ function FlowNodeCard({ turn, active, isLast, failNext, onChoose, onTicket, onBa
   hasEscalation: boolean;
   hasNextFix: boolean;
   onNextFix?: () => void;
+  onPickMake?: (choice: { makeId: string; makeName: string; modelId: string | null }) => void;
 }) {
   const { t } = useTranslation();
   const n = turn.flowNode!;
@@ -1800,6 +1846,15 @@ function FlowNodeCard({ turn, active, isLast, failNext, onChoose, onTicket, onBa
               {withInfo.some((c) => c.plant_name) && (
                 <div className="text-[10px] text-slate-400">Pick the person for your plant.</div>
               )}
+            </div>
+          ) : (turn.escalateMakeChoices?.length ?? 0) > 0 ? (
+            <div className="rounded-lg border border-brand-100 bg-brand-50/60 px-3 py-2.5 space-y-2">
+              <div className="text-xs text-slate-700">{t('chat.whichMake', { category: deviceNoun(turn.escalateMakeChoices![0].categoryName) })}</div>
+              <div className="flex flex-col gap-1.5">
+                {turn.escalateMakeChoices!.map((c) => (
+                  <button key={c.makeId} onClick={() => onPickMake?.(c)} className={chip}>{c.makeName}</button>
+                ))}
+              </div>
             </div>
           ) : (
             <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] text-slate-400">
