@@ -42,7 +42,7 @@ interface Chunk {
 // Ask for it with { mode: "ping" }: guessing which copy of this file is
 // deployed cost us a debugging cycle when a stale paste kept routing spec
 // sheets to "other".
-const FN_BUILD = '2026-09-25-claude-fallback';
+const FN_BUILD = '2026-09-25-groq-backoff';
 
 const SECTION_LABEL: Record<string, string> = {
   install_commission: 'Install & Commission', configure: 'Configure', inspect: 'Inspect',
@@ -97,7 +97,10 @@ function json(body: unknown, status = 200) {
 }
 
 // OpenAI-compatible Groq completion. Returns the text, or null on failure.
-async function groqComplete(system: string, user: string, key: string, model: string, jsonMode = false, maxTokens = 900): Promise<string | null> {
+// Last provider failure, surfaced by the admin probe (ping {probe:true}).
+let lastProviderError: { provider: string; status: number; message: string } | null = null;
+
+async function groqComplete(system: string, user: string, key: string, model: string, jsonMode = false, maxTokens = 900, attempt = 0): Promise<string | null> {
   try {
     const payload: Record<string, unknown> = {
       model,
@@ -110,7 +113,19 @@ async function groqComplete(system: string, user: string, key: string, model: st
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
       body: JSON.stringify(payload),
     });
-    if (!res.ok) { console.error('groq error', res.status, await res.text()); return null; }
+    if (!res.ok) {
+      const errText = await res.text();
+      console.error('groq error', model, res.status, errText.slice(0, 300));
+      lastProviderError = { provider: 'groq', status: res.status, message: errText.slice(0, 200) };
+      // Per-minute rate limit: one chat message makes three calls in a row, so
+      // wait for Retry-After (capped) and try once more before giving up.
+      if (res.status === 429 && attempt < 2 && !/tokens per day|TPD/i.test(errText)) {
+        const ra = Number(res.headers.get('retry-after') ?? '') || 3;
+        await new Promise((r) => setTimeout(r, Math.min(ra, 8) * 1000));
+        return groqComplete(system, user, key, model, jsonMode, maxTokens, attempt + 1);
+      }
+      return null;
+    }
     const body = await res.json();
     return body?.choices?.[0]?.message?.content ?? null;
   } catch (e) {
@@ -154,6 +169,7 @@ async function anthropicOnce(system: string, user: string, key: string, model: s
     if (!res.ok) {
       const errText = await res.text();
       console.error('anthropic error', model, res.status, errText.slice(0, 300));
+      lastProviderError = { provider: 'anthropic', status: res.status, message: errText.slice(0, 200) };
       // 404 or a "not_found" model id → try the next id; anything else stops.
       return { text: null, retryNext: res.status === 404 || /not_found|model.*not (found|supported|exist)/i.test(errText) };
     }
@@ -232,6 +248,10 @@ Deno.serve(async (req) => {
   // production. Keep this current, and note that fastComplete() below now
   // falls back to Claude so a retirement degrades speed, not availability.
   const MODEL = Deno.env.get('GROQ_MODEL') ?? 'openai/gpt-oss-120b';
+  // Groq rate limits are per model. The simple picks (which curated issue?)
+  // run on a light model with its own bucket, so they never eat the answer
+  // model's per-minute budget.
+  const FAST_MODEL = Deno.env.get('GROQ_FAST_MODEL') ?? 'llama-3.1-8b-instant';
   // Optional: Claude for the reasoning-heavy modes (generation, splitting,
   // issue mapping) and as the fallback for the fast ones.
   const ANTHROPIC_API_KEY = Deno.env.get('ANTHROPIC_API_KEY') ?? '';
@@ -589,10 +609,17 @@ Deno.serve(async (req) => {
     const { data: prof } = await supabase.from('profiles').select('role').eq('id', who.user.id).maybeSingle();
     if ((prof as any)?.role !== 'admin') return json({ error: 'admin only' }, 403);
     const t0 = Date.now();
-    const a = ANTHROPIC_API_KEY ? await anthropicComplete('Reply with the single word OK.', 'ping', ANTHROPIC_API_KEY, ANTHROPIC_MODEL, 5) : null;
+    lastProviderError = null;
+    const a = ANTHROPIC_API_KEY ? await anthropicComplete('Reply with the single word OK.', 'ping', ANTHROPIC_API_KEY, ANTHROPIC_MODEL, 64) : null;
+    const aErr = lastProviderError; lastProviderError = null;
     const t1 = Date.now();
-    const g = GROQ_API_KEY ? await groqComplete('Reply with the single word OK.', 'ping', GROQ_API_KEY, MODEL, false, 5) : null;
-    return json({ ...base, probe: { anthropic: { ok: Boolean(a), model: anthropicWorkingModel ?? ANTHROPIC_MODEL, ms: t1 - t0 }, groq: { ok: Boolean(g), model: MODEL, ms: Date.now() - t1 } } });
+    // gpt-oss spends tokens on reasoning before it writes; give it room.
+    const g = GROQ_API_KEY ? await groqComplete('Reply with the single word OK.', 'ping', GROQ_API_KEY, MODEL, false, 64) : null;
+    const gErr = lastProviderError;
+    return json({ ...base, probe: {
+      anthropic: { ok: Boolean(a), model: anthropicWorkingModel ?? ANTHROPIC_MODEL, ms: t1 - t0, error: a ? null : aErr },
+      groq: { ok: Boolean(g), model: MODEL, ms: Date.now() - t1, error: g ? null : gErr },
+    } });
   }
 
   // ---------- TRANSCRIBE MODE: speech → text via Whisper ----------
@@ -1039,7 +1066,7 @@ Deno.serve(async (req) => {
       'Return strict JSON: {"issue_id":"<id or null>","confidence":<0 to 1>}',
       'Pick an issue ONLY if the message plausibly describes that problem. Vague messages with no symptom → null.',
     ].join('\n');
-    const { raw } = await smartComplete(sys, userMsg, { ...smartOpts, maxTokens: 200 });
+    const { raw } = await smartComplete(sys, userMsg, { ...smartOpts, groqModel: FAST_MODEL, maxTokens: 200 });
     const parsed: any = extractJson(raw);
     const hit = list.find((i) => i.id === parsed.issue_id);
     const confidence = typeof parsed.confidence === 'number' ? parsed.confidence : 0;
