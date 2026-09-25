@@ -89,6 +89,7 @@ interface AssistantResult {
   answer: string | null;
   citations: Citation[];
   hits: Hit[];
+  serviceDown?: boolean;
 }
 
 // Fetch the full matched work-type section for each hit so the assistant can
@@ -211,6 +212,14 @@ async function askAssistant(
       }
       // null answer or refusal → not-found (no fallback, no sources).
       return { answer: null, citations: [], hits: [] };
+    }
+    // The function answered but could not produce an answer (model provider
+    // down or rate-limited): that is a service problem, not an empty
+    // knowledge base — say so, unless local retrieval can still help.
+    const status = (error as any)?.context?.status as number | undefined;
+    if ((status && status >= 500) || (data as any)?.error === 'model call failed') {
+      const hits = await runFallback();
+      return { answer: null, citations: [], hits, serviceDown: hits.length === 0 };
     }
   } catch {
     // Edge Function not deployed / network error → retrieval-only fallback.
@@ -704,8 +713,13 @@ export default function ChatDrawer({ open, onClose, seed, seedScope, onSeedConsu
 
       // If we have no scope yet, interpret the message: sensor TYPE + intent +
       // any make/model actually mentioned (handles vague/misspelled phrasing).
+      // Routing unavailable (service down, session expired): with no type in
+      // scope, an unscoped word-overlap flow match is worse than none — it once
+      // offered a camera flow for a MAG-110 question. Skip flow matching then.
+      let routingFailed = false;
       if (!activeScope) {
         const r = await routeQuery(mq);
+        routingFailed = r === null;
         if (r?.categories?.length) setRouteOrder(r.categories.map((c) => c.id));
         // Two or more distinct problems in one message: don't pick one and drop
         // the rest — list them, take them one at a time, keep the others queued.
@@ -754,7 +768,7 @@ export default function ChatDrawer({ open, onClose, seed, seedScope, onSeedConsu
           activeScope = { categoryId: r.top.id, generalModelId: (gm as any)?.id ?? null, label: `${r.top.name}` };
           setScope(activeScope);
         }
-      } else if (activeScope && !opts?.scope && /(and|aur|ও|आणि|also|plus|[,;&]|और)/i.test(mq)) {
+      } else if (activeScope && !opts?.scope && /(\band\b|\baur\b|\bও\b|\bआणि\b|\balso\b|\bplus\b|[,;&]|\bऔर\b)/i.test(mq)) {
         // Already scoped (a model or a plant answered the make/model question)
         // but the message reads as compound: still ask the router whether it is
         // several problems — a scoped conversation must not swallow the rest.
@@ -784,7 +798,7 @@ export default function ChatDrawer({ open, onClose, seed, seedScope, onSeedConsu
 
       const candidateIds = [activeScope?.modelId, activeScope?.generalModelId].filter(Boolean) as string[];
       const [flow, routed, llmIssue] = await Promise.all([
-        matchFlow(mq, { categoryId: activeScope?.categoryId ?? null, modelId: activeScope?.modelId ?? null }),
+        (routingFailed && !activeScope) ? Promise.resolve(null) : matchFlow(mq, { categoryId: activeScope?.categoryId ?? null, modelId: activeScope?.modelId ?? null }),
         candidateIds.length ? matchRule(mq, candidateIds) : Promise.resolve(null),
         (!clientIssue && issues.length > 0)
           ? supabase.functions.invoke('chat-answer', { body: { mode: 'match-issue', query: mq, category_id: activeScope?.categoryId ?? null } })
@@ -865,6 +879,10 @@ export default function ChatDrawer({ open, onClose, seed, seedScope, onSeedConsu
         askAssistant(mq, { sensorModelId: activeScope?.modelId ?? null, categoryId: activeScope?.categoryId ?? null }, fallback),
         new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), 40_000)),
       ]);
+      if ((result as any).serviceDown) {
+        setTurns((t) => fillLoadingTurn(t, { role: 'bot', query: q, loading: false, narrowedLabel: activeScope?.label, note: t2('chat.serviceDown'), retry: q }));
+        return;
+      }
       if (!result.answer && result.hits.length === 0) {
         logUnanswered({ query: q, source: 'chat', sensorModelId: activeScope?.modelId ?? null });
       }

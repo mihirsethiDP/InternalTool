@@ -42,7 +42,7 @@ interface Chunk {
 // Ask for it with { mode: "ping" }: guessing which copy of this file is
 // deployed cost us a debugging cycle when a stale paste kept routing spec
 // sheets to "other".
-const FN_BUILD = '2026-09-25-multi-problem-10';
+const FN_BUILD = '2026-09-25-claude-fallback';
 
 const SECTION_LABEL: Record<string, string> = {
   install_commission: 'Install & Commission', configure: 'Configure', inspect: 'Inspect',
@@ -122,7 +122,23 @@ async function groqComplete(system: string, user: string, key: string, model: st
 // Anthropic completion (Claude). Used for the REASONING-heavy modes — flow
 // generation, section splitting, issue mapping — where structural quality and
 // faithfulness matter most. Returns the text, or null on failure.
+// Model ids Anthropic retires on a schedule, so the configured id is tried
+// first and these follow. A 404 / "not found" moves to the next; any other
+// failure (auth, quota, overload) stops — retrying would not help.
+const ANTHROPIC_FALLBACK_MODELS = ['claude-sonnet-5', 'claude-haiku-4-5-20251001', 'claude-sonnet-4-5'];
+let anthropicWorkingModel: string | null = null; // remembered per isolate
+
 async function anthropicComplete(system: string, user: string, key: string, model: string, maxTokens = 2000): Promise<string | null> {
+  const order = [...new Set([anthropicWorkingModel, model, ...ANTHROPIC_FALLBACK_MODELS].filter(Boolean) as string[])];
+  for (const m of order) {
+    const r = await anthropicOnce(system, user, key, m, maxTokens);
+    if (r.text) { anthropicWorkingModel = m; return r.text; }
+    if (!r.retryNext) return null;
+  }
+  return null;
+}
+
+async function anthropicOnce(system: string, user: string, key: string, model: string, maxTokens: number): Promise<{ text: string | null; retryNext: boolean }> {
   try {
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -135,13 +151,18 @@ async function anthropicComplete(system: string, user: string, key: string, mode
         temperature: 0,
       }),
     });
-    if (!res.ok) { console.error('anthropic error', res.status, await res.text()); return null; }
+    if (!res.ok) {
+      const errText = await res.text();
+      console.error('anthropic error', model, res.status, errText.slice(0, 300));
+      // 404 or a "not_found" model id → try the next id; anything else stops.
+      return { text: null, retryNext: res.status === 404 || /not_found|model.*not (found|supported|exist)/i.test(errText) };
+    }
     const body = await res.json();
     const text = (body?.content ?? []).filter((b: any) => b.type === 'text').map((b: any) => b.text).join('');
-    return text || null;
+    return { text: text || null, retryNext: false };
   } catch (e) {
     console.error('anthropic fetch threw', e);
-    return null;
+    return { text: null, retryNext: false };
   }
 }
 
@@ -556,7 +577,23 @@ Deno.serve(async (req) => {
   }
 
   // ---------- PING: which build is actually deployed? ----------
-  if (mode === 'ping') return json({ build: FN_BUILD, model: MODEL, has_anthropic: Boolean(ANTHROPIC_API_KEY) });
+  if (mode === 'ping') {
+    const base = { build: FN_BUILD, model: MODEL, has_anthropic: Boolean(ANTHROPIC_API_KEY) };
+    if ((payload as any).probe !== true) return json(base);
+    // Provider health, admin only: one tiny call to each so a retired model id
+    // or a dead key is visible from the app instead of as 'nothing found'.
+    const supabase = createClient(SUPABASE_URL, SERVICE_KEY);
+    const token = (req.headers.get('Authorization') ?? '').replace(new RegExp('^Bearer' + String.fromCharCode(92) + 's+', 'i'), '');
+    const { data: who } = await supabase.auth.getUser(token);
+    if (!who?.user) return json({ error: 'unauthorized' }, 401);
+    const { data: prof } = await supabase.from('profiles').select('role').eq('id', who.user.id).maybeSingle();
+    if ((prof as any)?.role !== 'admin') return json({ error: 'admin only' }, 403);
+    const t0 = Date.now();
+    const a = ANTHROPIC_API_KEY ? await anthropicComplete('Reply with the single word OK.', 'ping', ANTHROPIC_API_KEY, ANTHROPIC_MODEL, 5) : null;
+    const t1 = Date.now();
+    const g = GROQ_API_KEY ? await groqComplete('Reply with the single word OK.', 'ping', GROQ_API_KEY, MODEL, false, 5) : null;
+    return json({ ...base, probe: { anthropic: { ok: Boolean(a), model: anthropicWorkingModel ?? ANTHROPIC_MODEL, ms: t1 - t0 }, groq: { ok: Boolean(g), model: MODEL, ms: Date.now() - t1 } } });
+  }
 
   // ---------- TRANSCRIBE MODE: speech → text via Whisper ----------
   // The browser's SpeechRecognition cut off at the first breath and mangled
