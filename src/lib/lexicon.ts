@@ -54,6 +54,12 @@ export async function loadLexicon(): Promise<Set<string>> {
       for (const r of (makes.data ?? []) as any[]) wordsFrom(r.name).forEach((w) => lex.add(w));
       for (const r of (models.data ?? []) as any[]) { wordsFrom(r.model_no).forEach((w) => lex.add(w)); wordsFrom(r.name).forEach((w) => lex.add(w)); }
       for (const r of (syns.data ?? []) as any[]) for (const t of (r.terms ?? [])) wordsFrom(t).forEach((w) => lex.add(w));
+      // Every word that appears in the approved references (migration 054):
+      // domain vocabulary is then known by definition, not by guesswork.
+      try {
+        const { data: corpus } = await supabase.rpc('lexicon_words');
+        for (const w of (corpus ?? []) as string[]) if (typeof w === 'string') lex.add(w);
+      } catch { /* RPC not deployed yet — catalogue words still apply */ }
     } catch (e) {
       console.warn('lexicon load failed (using core words only)', e);
     }
@@ -91,6 +97,9 @@ export function correctToken(token: string, lex: Set<string>): string {
   let bestDist = budget + 1;
   for (const w of lex) {
     if (Math.abs(w.length - t.length) > budget) continue;
+    // Real typos almost never change the first letter; without this guard a
+    // correct word the lexicon lacks snaps to a neighbour ("pipe" → "wipe").
+    if (w[0] !== t[0]) continue;
     const d = editDistance(t, w, budget);
     if (d < bestDist) { bestDist = d; best = w; if (d === 1 && t.length < 7) break; }
   }

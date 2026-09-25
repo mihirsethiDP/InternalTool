@@ -15,6 +15,11 @@ describe('editDistance', () => {
 });
 
 describe('correctToken', () => {
+  it('does not change a real word the lexicon lacks into a neighbour with another first letter', () => {
+    const lex = new Set(['wipe', 'sensor', 'pressure']);
+    expect(correctToken('pipe', lex)).toBe('pipe');
+    expect(correctToken('presure', lex)).toBe('pressure');
+  });
   it('fixes common misspellings', () => {
     expect(correctToken('senser', LEX)).toBe('sensor');
     expect(correctToken('presure', LEX)).toBe('pressure');
