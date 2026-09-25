@@ -42,7 +42,7 @@ interface Chunk {
 // Ask for it with { mode: "ping" }: guessing which copy of this file is
 // deployed cost us a debugging cycle when a stale paste kept routing spec
 // sheets to "other".
-const FN_BUILD = '2026-09-23-route-menu-2';
+const FN_BUILD = '2026-09-25-multi-problem';
 
 const SECTION_LABEL: Record<string, string> = {
   install_commission: 'Install & Commission', configure: 'Configure', inspect: 'Inspect',
@@ -1216,6 +1216,8 @@ Deno.serve(async (req) => {
       ' "intent": "<troubleshoot | howto | info | other>",',
       ' "vague": <true if the message gives NO concrete symptom, parameter, or model — just "broken/not working"-style complaints — so the assistant should ask what the sensor is doing>,',
       ' "normalized": "<the message restated as one clear English problem statement>",',
+      ' "problems": [{"text": "<one distinct problem, restated in plain English in the writer\'s own order>", "type": <its type number from the list, or 0 if unclear>}],',
+      '   (split ONLY when the message describes different devices or unrelated faults; one device with related symptoms — "UPS beeping and red light" — is ONE problem; a single problem gives a one-element list)',
       ' "make": "<manufacturer name if the message mentions one, else empty string>",',
       ' "model": "<model number/name if the message mentions one, else empty string>"}',
     ].join('\n');
@@ -1249,6 +1251,11 @@ Deno.serve(async (req) => {
       intent: VALID_INTENTS.includes(parsed.intent) ? parsed.intent : 'other',
       vague: parsed.vague === true,
       normalized: String(parsed.normalized ?? '').slice(0, 300) || null,
+      // Distinct problems in one message — the client queues them one at a time.
+      problems: (Array.isArray(parsed.problems) ? parsed.problems : [])
+        .map((p: any) => { const c = cats.find((x) => x.idx === Number(p?.type)); return { text: String(p?.text ?? '').slice(0, 300).trim(), category_id: c?.id ?? null, category_name: c?.name ?? null }; })
+        .filter((p: any) => p.text)
+        .slice(0, 6),
       slots: {
         make: String(parsed.make ?? '').slice(0, 80) || null,
         model: String(parsed.model ?? '').slice(0, 80) || null,

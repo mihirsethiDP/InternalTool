@@ -65,6 +65,8 @@ type Turn =
       // so ask what it's doing instead of dumping a generic answer. Options are
       // tappable symptom chips sourced from approved flows/rules in scope.
       probe?: { text: string; options: string[] };
+      // Several problems in one message: list them, ask which first.
+      multi?: { items: Problem[] };
       // Elicitation before a flow queue starts: confirm the matched issue with
       // the user, or ask which make/model when the fix genuinely depends on it
       // (model-specific flows exist). The bot never jumps straight into a flow.
@@ -159,6 +161,8 @@ async function routeQuery(query: string): Promise<{
   vague?: boolean;
   normalized?: string | null;
   slots?: { make: string | null; model: string | null };
+  // Distinct problems in one message (2+ → the drawer queues them one at a time).
+  problems?: { text: string; category_id: string | null; category_name: string | null }[];
 } | null> {
   try {
     const { data, error } = await supabase.functions.invoke('chat-answer', { body: { mode: 'route', query } });
@@ -292,6 +296,12 @@ function probeText(scopeLabel?: string | null): string {
 // the drawer opens already narrowed to that device, on the symptom probe.
 export interface SeedScope { modelId?: string | null; categoryId?: string | null; label: string; note?: string }
 type ScopeT = { modelId?: string | null; generalModelId?: string | null; categoryId?: string | null; label: string };
+// One of several problems typed in a single message.
+type Problem = { text: string; categoryId: string | null; categoryName: string | null };
+// Suggested order when several problems arrive together: what stops the
+// plant reporting first, then power, then everything else.
+const PROBLEM_PRIORITY: Record<string, number> = { Datalogger: 0, UPS: 1 };
+function problemRank(p: Problem): number { return PROBLEM_PRIORITY[p.categoryName ?? ''] ?? 2; }
 
 export default function ChatDrawer({ open, onClose, seed, seedScope, onSeedConsumed }: {
   open: boolean;
@@ -320,6 +330,9 @@ export default function ChatDrawer({ open, onClose, seed, seedScope, onSeedConsu
   // Active sensor scope: once the operator picks a make & model, all following
   // questions are scoped to it (and shown as a persistent chip) until cleared.
   const [scope, setScope] = useState<ScopeT | null>(null);
+  // Problems still to be handled from a multi-problem message; shown as a
+  // strip under the conversation whenever the operator is between problems.
+  const [problemQueue, setProblemQueue] = useState<Problem[]>([]);
   // Categories we've already consulted the plant register for in this
   // conversation — so "not sure" isn't followed by the same question again.
   const plantAskedRef = useRef<Set<string>>(new Set());
@@ -694,6 +707,15 @@ export default function ChatDrawer({ open, onClose, seed, seedScope, onSeedConsu
       if (!activeScope) {
         const r = await routeQuery(mq);
         if (r?.categories?.length) setRouteOrder(r.categories.map((c) => c.id));
+        // Two or more distinct problems in one message: don't pick one and drop
+        // the rest — list them, take them one at a time, keep the others queued.
+        const problems: Problem[] = (r?.problems ?? []).map((p) => ({ text: p.text, categoryId: p.category_id, categoryName: p.category_name }));
+        if (problems.length >= 2 && !opts?.scope) {
+          const ordered = [...problems].map((p, i) => ({ p, i })).sort((a, b) => problemRank(a.p) - problemRank(b.p) || a.i - b.i).map((x) => x.p);
+          setProblemQueue(ordered);
+          setTurns((tt) => fillLoadingTurn(tt, { role: 'bot', query: q, loading: false, multi: { items: ordered } }));
+          return;
+        }
         // The LLM backs up the client word-list for vague phrasings it misses
         // ("sensor not working at all", "mera meter kharab hai").
         if (r?.vague === true) vague = true;
@@ -1048,6 +1070,14 @@ export default function ChatDrawer({ open, onClose, seed, seedScope, onSeedConsu
     };
   }
 
+  // Multi-problem message: start one of the listed problems; it runs through
+  // the normal pipeline as if typed alone, and leaves the drawer's queue.
+  async function startProblem(p: Problem) {
+    setProblemQueue((qq) => qq.filter((x) => x !== p));
+    await send(p.text, { scope: null });
+  }
+  function dismissProblem(p: Problem) { setProblemQueue((qq) => qq.filter((x) => x !== p)); }
+
   // The operator told us the make at the escalation step: show that make's
   // contact in place, and scope the rest of the conversation to it.
   async function pickEscalationMake(turnIndex: number, choice: { makeId: string; makeName: string; modelId: string | null }) {
@@ -1342,6 +1372,23 @@ export default function ChatDrawer({ open, onClose, seed, seedScope, onSeedConsu
                     </div>
                   )}
                 </div>
+              ) : turn.multi ? (
+                <div className="rounded-2xl rounded-tl-md bg-white border border-slate-200 shadow-sm px-3.5 py-3 space-y-2.5">
+                  <div className="text-sm text-slate-700 leading-relaxed">{t('chat.multiIntro', { n: turn.multi.items.length })}</div>
+                  <ol className="space-y-1.5">
+                    {turn.multi.items.map((p, idx) => (
+                      <li key={idx}>
+                        <button onClick={() => startProblem(p)} disabled={i !== turns.length - 1 || !problemQueue.includes(p)}
+                          className={`${CHIP_CLS} disabled:opacity-50 disabled:pointer-events-none flex items-center gap-2`}>
+                          <span className="w-5 h-5 rounded-full bg-brand-700 text-white text-[11px] font-bold inline-flex items-center justify-center shrink-0">{idx + 1}</span>
+                          <span className="flex-1 min-w-0 text-left">{p.text}</span>
+                          {p.categoryName && <span className="text-[10px] text-slate-400 shrink-0">{p.categoryName}</span>}
+                        </button>
+                      </li>
+                    ))}
+                  </ol>
+                  <div className="text-[11px] text-slate-400">{t('chat.multiSuggest')}</div>
+                </div>
               ) : turn.probe ? (
                 <div className="rounded-2xl rounded-tl-md bg-white border border-slate-200 shadow-sm px-3.5 py-3 space-y-2.5">
                   <div className="text-sm text-slate-700 leading-relaxed">{turn.probe.text}</div>
@@ -1484,13 +1531,28 @@ export default function ChatDrawer({ open, onClose, seed, seedScope, onSeedConsu
               </div>
             </div>
           ))}
+          {/* Still-to-do strip: the other problems from a multi-problem message,
+              shown only between problems (never mid-flow, never on the list itself). */}
+          {problemQueue.length > 0 && !flowRun && turns.length > 0 && !(turns[turns.length - 1] as any).multi && !(turns[turns.length - 1] as any).loading && (
+            <div className="pl-10">
+              <div className="rounded-xl border border-amber-200 bg-amber-50/70 px-3 py-2.5 space-y-1.5">
+                <div className="text-[11px] uppercase tracking-wide font-semibold text-amber-800">{t('chat.stillToDo')} · {problemQueue.length}</div>
+                {problemQueue.map((p, idx) => (
+                  <div key={idx} className="flex items-center gap-1.5">
+                    <button onClick={() => startProblem(p)} className={`${CHIP_CLS} flex-1 text-left`}>{t('chat.nextProblem', { text: p.text })}</button>
+                    <button onClick={() => dismissProblem(p)} title={t('chat.sorted')} aria-label={t('chat.sorted')} className="tap shrink-0 text-[11px] text-slate-500 hover:text-emerald-700 px-1.5 py-1">✓</button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Input */}
         <div className="border-t border-slate-200 p-3 bg-white">
           {turns.length > 0 && (
             <div className="flex justify-end mb-2">
-              <button onClick={() => { setTurns([]); setScope(null); setFlowRun(null); flowRef.current = null; queueRef.current = null; }} className="inline-flex items-center gap-1 text-xs text-slate-500 hover:text-brand-700 transition">
+              <button onClick={() => { setTurns([]); setScope(null); setFlowRun(null); flowRef.current = null; queueRef.current = null; setProblemQueue([]); }} className="inline-flex items-center gap-1 text-xs text-slate-500 hover:text-brand-700 transition">
                 <Trash2 size={12} /> {t('chat.clearConversation')}
               </button>
             </div>
