@@ -42,7 +42,7 @@ interface Chunk {
 // Ask for it with { mode: "ping" }: guessing which copy of this file is
 // deployed cost us a debugging cycle when a stale paste kept routing spec
 // sheets to "other".
-const FN_BUILD = '2026-09-25-multi-problem';
+const FN_BUILD = '2026-09-25-multi-problem-10';
 
 const SECTION_LABEL: Record<string, string> = {
   install_commission: 'Install & Commission', configure: 'Configure', inspect: 'Inspect',
@@ -1255,7 +1255,7 @@ Deno.serve(async (req) => {
       problems: (Array.isArray(parsed.problems) ? parsed.problems : [])
         .map((p: any) => { const c = cats.find((x) => x.idx === Number(p?.type)); return { text: String(p?.text ?? '').slice(0, 300).trim(), category_id: c?.id ?? null, category_name: c?.name ?? null }; })
         .filter((p: any) => p.text)
-        .slice(0, 6),
+        .slice(0, 10),
       slots: {
         make: String(parsed.make ?? '').slice(0, 80) || null,
         model: String(parsed.model ?? '').slice(0, 80) || null,

@@ -754,7 +754,20 @@ export default function ChatDrawer({ open, onClose, seed, seedScope, onSeedConsu
           activeScope = { categoryId: r.top.id, generalModelId: (gm as any)?.id ?? null, label: `${r.top.name}` };
           setScope(activeScope);
         }
-      } else if (activeScope && !activeScope.modelId && activeScope.categoryId) {
+      } else if (activeScope && !opts?.scope && /(and|aur|ও|आणि|also|plus|[,;&]|और)/i.test(mq)) {
+        // Already scoped (a model or a plant answered the make/model question)
+        // but the message reads as compound: still ask the router whether it is
+        // several problems — a scoped conversation must not swallow the rest.
+        const r = await routeQuery(mq);
+        const problems: Problem[] = (r?.problems ?? []).map((p) => ({ text: p.text, categoryId: p.category_id, categoryName: p.category_name }));
+        if (problems.length >= 2) {
+          const ordered = [...problems].map((p, i) => ({ p, i })).sort((a, b) => problemRank(a.p) - problemRank(b.p) || a.i - b.i).map((x) => x.p);
+          setProblemQueue(ordered);
+          setTurns((tt) => fillLoadingTurn(tt, { role: 'bot', query: q, loading: false, multi: { items: ordered } }));
+          return;
+        }
+      }
+      if (activeScope && !activeScope.modelId && activeScope.categoryId && !plantAskedRef.current.has(activeScope.categoryId)) {
         // Category-only scope (a Home chip, or "not sure" earlier): the plant
         // register can still narrow it to the installed make & model.
         const fromPlant = await scopeFromPlant(activeScope.categoryId, activeScope.label, q);
@@ -900,7 +913,9 @@ export default function ChatDrawer({ open, onClose, seed, seedScope, onSeedConsu
     // Exactly one model covered → confirm it's theirs instead of asking open-ended.
     if (info.models.length === 1 && !info.hasGeneral) {
       return {
-        text: t('chat.issueForModel', { issue: issue.label, label: info.models[0].label }),
+        text: sc?.categoryId && !sc.modelId
+          ? t('chat.issueForDevice', { issue: issue.label, label: info.models[0].label, category: deviceNoun(sc.label) })
+          : t('chat.issueForModel', { issue: issue.label, label: info.models[0].label }),
         chips: [
           { label: t('chat.yesStart'), act: 'model', modelId: info.models[0].id },
           { label: t('chat.notThis'), act: 'reject' },
@@ -1520,7 +1535,7 @@ export default function ChatDrawer({ open, onClose, seed, seedScope, onSeedConsu
               {/* Guided sensor picker — shown until narrowed to a specific model.
                   When a TYPE is already inferred/scoped it jumps to the make step.
                   Hidden during a flow run — the flow's own chips drive the turn. */}
-              {!turn.loading && !turn.note && !turn.elicit && !turn.flowNode && !flowRun && i === turns.length - 1 && !scope?.modelId && (
+              {!turn.loading && !turn.note && !turn.elicit && !turn.multi && !turn.flowNode && !flowRun && i === turns.length - 1 && !scope?.modelId && (
                 <GuidedNarrow
                   key={`gn-${i}-${scope?.categoryId ?? 'none'}`}
                   initialCategoryId={scope?.categoryId ?? undefined}
