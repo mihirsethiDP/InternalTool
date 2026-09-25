@@ -57,8 +57,10 @@ export async function loadLexicon(): Promise<Set<string>> {
       // Every word that appears in the approved references (migration 054):
       // domain vocabulary is then known by definition, not by guesswork.
       try {
+        // One row carrying text[] (055); tolerate the older one-row-per-word shape.
         const { data: corpus } = await supabase.rpc('lexicon_words');
-        for (const w of (corpus ?? []) as string[]) if (typeof w === 'string') lex.add(w);
+        const words: unknown[] = Array.isArray(corpus) ? corpus.flatMap((x: any) => (Array.isArray(x) ? x : Array.isArray(x?.lexicon_words) ? x.lexicon_words : [x])) : [];
+        for (const w of words) if (typeof w === 'string') lex.add(w);
       } catch { /* RPC not deployed yet — catalogue words still apply */ }
     } catch (e) {
       console.warn('lexicon load failed (using core words only)', e);
