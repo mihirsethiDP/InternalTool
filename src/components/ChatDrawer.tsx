@@ -1503,7 +1503,7 @@ export default function ChatDrawer({ open, onClose, seed, seedScope, onSeedConsu
                   Shown on every real attempt, including no-result (they may have
                   resolved it via the web / a ticket). Mid-flow nodes skip it —
                   feedback belongs at the end of a diagnostic run. */}
-              {!turn.loading && !turn.note && !turn.probe && !turn.elicit && (!turn.flowNode || turn.flowTerminal) && (
+              {!turn.loading && !turn.note && !turn.probe && !turn.elicit && !turn.multi && (!turn.flowNode || turn.flowTerminal) && (
                 <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5">
                   <AnswerFeedback
                     key={`${turn.narrowedLabel ?? ''}|${turn.answer ? turn.answer.slice(0, 24) : (turn.hits?.[0]?.document_id ?? '')}`}
@@ -1533,7 +1533,7 @@ export default function ChatDrawer({ open, onClose, seed, seedScope, onSeedConsu
           ))}
           {/* Still-to-do strip: the other problems from a multi-problem message,
               shown only between problems (never mid-flow, never on the list itself). */}
-          {problemQueue.length > 0 && !flowRun && turns.length > 0 && !(turns[turns.length - 1] as any).multi && !(turns[turns.length - 1] as any).loading && (
+          {problemQueue.length > 0 && !flowRun && turns.length > 0 && !(turns[turns.length - 1] as any).multi && !(turns[turns.length - 1] as any).loading && !(turns[turns.length - 1] as any).elicit && !(turns[turns.length - 1] as any).probe && (
             <div className="pl-10">
               <div className="rounded-xl border border-amber-200 bg-amber-50/70 px-3 py-2.5 space-y-1.5">
                 <div className="text-[11px] uppercase tracking-wide font-semibold text-amber-800">{t('chat.stillToDo')} · {problemQueue.length}</div>
