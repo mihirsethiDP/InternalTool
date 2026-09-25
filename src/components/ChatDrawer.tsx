@@ -155,6 +155,12 @@ async function categoryRetrieve(query: string, categoryId: string): Promise<Hit[
 // Interpret a free-text message (elicitation/router level 1): sensor TYPE(s)
 // ranked most-likely-first, the user's intent, a normalized restatement of a
 // vague/misspelled problem, and any make/model the message itself mentions.
+// Opt-in diagnostics: localStorage.dpDebug = '1' prints what the drawer sends
+// and receives (query as corrected, scope, function responses). Off by default.
+function dlog(label: string, data: unknown) {
+  try { if (localStorage.getItem('dpDebug') === '1') console.debug(`[dr.paani] ${label}`, data); } catch { /* private mode */ }
+}
+
 async function routeQuery(query: string): Promise<{
   categories: { id: string; name: string }[];
   top: { id: string; name: string; confidence: number } | null;
@@ -167,6 +173,7 @@ async function routeQuery(query: string): Promise<{
 } | null> {
   try {
     const { data, error } = await supabase.functions.invoke('chat-answer', { body: { mode: 'route', query } });
+    dlog('route', { query, status: (error as any)?.context?.status, error: error?.message, data });
     if (error || !data || (data as any).error) return null;
     return data as any;
   } catch {
@@ -191,6 +198,7 @@ async function askAssistant(
     const { data, error } = await supabase.functions.invoke('chat-answer', {
       body: { query, sensor_model_id: scopeArg.sensorModelId ?? null, category_id: scopeArg.categoryId ?? null, lang: i18n.language },
     });
+    dlog('answer', { query, scope: scopeArg, lang: i18n.language, status: (error as any)?.context?.status, error: error?.message, data });
     if (!error && data && !(data as any).error) {
       // The Edge Function responded — trust it; do NOT fall back to raw
       // retrieval (that's only for when the function is unreachable).
