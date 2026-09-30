@@ -163,11 +163,16 @@ const FLOW_THRESHOLD = 0.34;
 
 // Match a user's message against approved flows' title + trigger symptoms.
 // Scoped: prefer flows for the model in scope, then its category, then any.
-export function scoreFlow(query: string, flow: Pick<DiagnosticFlow, 'title' | 'trigger_symptoms'>): number {
-  const qt = queryTokens(query);
+// `ignore` = device words (see deviceWords.ts): with them removed, "UPS is
+// overheating" no longer matches "UPS is completely dead" on "ups" alone —
+// a match needs a SYMPTOM word in common.
+export function scoreFlow(query: string, flow: Pick<DiagnosticFlow, 'title' | 'trigger_symptoms'>, ignore?: Set<string>): number {
+  const strip = (s: string) => ignore ? queryTokens(s).filter((w) => !ignore.has(w)).join(' ') : s;
+  const qt = queryTokens(strip(query));
+  if (qt.length === 0) return 0;
   return Math.max(
-    matchScore(qt, flow.title),
-    ...(flow.trigger_symptoms ?? []).map((s) => matchScore(qt, s)),
+    matchScore(qt, strip(flow.title)),
+    ...(flow.trigger_symptoms ?? []).map((s) => matchScore(qt, strip(s))),
     0,
   );
 }
@@ -175,6 +180,7 @@ export function scoreFlow(query: string, flow: Pick<DiagnosticFlow, 'title' | 't
 export async function matchFlow(
   query: string,
   scope: { categoryId?: string | null; modelId?: string | null },
+  ignore?: Set<string>,
 ): Promise<DiagnosticFlow | null> {
   try {
     let q = supabase
@@ -190,7 +196,7 @@ export async function matchFlow(
     let best: DiagnosticFlow | null = null;
     let bestScore = 0;
     for (const f of flows) {
-      let s = scoreFlow(query, f);
+      let s = scoreFlow(query, f, ignore);
       if (s < FLOW_THRESHOLD) continue;
       // Model-specific flow for the model in scope beats a category-general one.
       if (scope.modelId && f.sensor_model_id === scope.modelId) s += 0.25;

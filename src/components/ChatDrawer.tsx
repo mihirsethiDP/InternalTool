@@ -18,7 +18,8 @@ import { isProcedureRequest, isContactRequest, contactSkillHint } from '../lib/r
 import { interpretFlowReplyLocal, flowReplyLabel, flowReplyNext, type FlowReply } from '../lib/flowReply';
 import { matchRule, type RouteMatch } from '../lib/routing';
 import { matchFlow, getNode, failTarget, fetchContacts, contactsForSkill, type DiagnosticFlow, type FlowNode, type EscalationContact } from '../lib/flows';
-import { fetchIssues, matchIssueClient, issueQueueInfo, filterQueueForModel, type Issue, type IssueQueueInfo } from '../lib/issues';
+import { fetchIssues, matchIssueClient, issuePlausible, issueQueueInfo, filterQueueForModel, type Issue, type IssueQueueInfo } from '../lib/issues';
+import { loadCategories, deviceWordsFrom, namedCategory } from '../lib/deviceWords';
 import { usePlant, usePlantDevices, devicesInCategory, deviceLabel, deviceNoun } from '../lib/plant';
 import PlantSwitcher from './PlantSwitcher';
 import { correctSpelling } from '../lib/lexicon';
@@ -87,6 +88,9 @@ type Turn =
       // Mid-flow: the typed message looked like a different problem — confirm
       // before abandoning the fix in progress.
       leaveFlow?: { newQuery: string };
+      // The device is known but the library has NO documentation for its
+      // type yet — say so plainly (web answer / ticket), no device picker.
+      noDocsFor?: string;
       // Diagnostic flow runner: this turn shows one node of an approved flow.
       flowNode?: FlowNode;
       flowTitle?: string; // set on the first node so the user sees which flow started
@@ -818,7 +822,27 @@ export default function ChatDrawer({ open, onClose, seed, seedScope, onSeedConsu
             setScope(activeScope);
           }
         }
+        // The device the message NAMES beats the router's guess. The router
+        // only lists types that have documents, so "my tds sensor …" came
+        // back as the water quality analyser; the operator said TDS.
+        if (!activeScope && r) {
+          const named = namedCategory(q, await loadCategories());
+          if (named && named.id !== r.top?.id) {
+            r.top = { id: named.id, name: named.name, confidence: 0.95 };
+            setRouteOrder([named.id, ...(r.categories ?? []).map((c) => c.id).filter((id) => id !== named.id)]);
+          }
+        }
         if (!activeScope && r?.top && r.top.confidence >= 0.6) {
+          // No documentation for this device type at all → say so now; the
+          // register's make & model would not change that.
+          if (!(await categoryHasDocs(r.top.id))) {
+            const { data: gm } = await supabase.from('sensor_models').select('id').eq('is_general', true).eq('category_id', r.top.id).maybeSingle();
+            activeScope = { categoryId: r.top.id, generalModelId: (gm as any)?.id ?? null, label: r.top.name };
+            setScope(activeScope);
+            logUnanswered({ query: q, source: 'chat', sensorModelId: null });
+            setTurns((tt) => fillLoadingTurn(tt, { role: 'bot', query: q, loading: false, narrowedLabel: r.top!.name, noDocsFor: r.top!.name }));
+            return;
+          }
           // The plant register may already know the make & model.
           const fromPlant = await scopeFromPlant(r.top.id, r.top.name, q);
           if (fromPlant === 'asked') return;
@@ -855,12 +879,20 @@ export default function ChatDrawer({ open, onClose, seed, seedScope, onSeedConsu
       // ordered flow queue. Client alias-match is instant; the LLM match-issue
       // mode runs in parallel with the flow/rule matchers as the semantic
       // backstop, so it adds no latency to the fallback path.
-      const issues = await fetchIssues(activeScope?.categoryId ?? null);
-      const clientIssue = matchIssueClient(mq, issues);
+      // A device type with NO documentation: no flows, no issues, no
+      // retrieval can help — say that, instead of a refusal plus a picker.
+      if (activeScope?.categoryId && !activeScope.modelId && !(await categoryHasDocs(activeScope.categoryId))) {
+        logUnanswered({ query: q, source: 'chat', sensorModelId: null });
+        setTurns((tt) => fillLoadingTurn(tt, { role: 'bot', query: q, loading: false, narrowedLabel: activeScope?.label, noDocsFor: activeScope!.label }));
+        return;
+      }
+
+      const [issues, deviceWords] = await Promise.all([fetchIssues(activeScope?.categoryId ?? null), loadCategories().then(deviceWordsFrom)]);
+      const clientIssue = matchIssueClient(mq, issues, deviceWords);
 
       const candidateIds = [activeScope?.modelId, activeScope?.generalModelId].filter(Boolean) as string[];
-      const [flow, routed, llmIssue] = await Promise.all([
-        (routingFailed && !activeScope) ? Promise.resolve(null) : matchFlow(mq, { categoryId: activeScope?.categoryId ?? null, modelId: activeScope?.modelId ?? null }),
+      const [flow, routed, llmIssueRaw] = await Promise.all([
+        (routingFailed && !activeScope) ? Promise.resolve(null) : matchFlow(mq, { categoryId: activeScope?.categoryId ?? null, modelId: activeScope?.modelId ?? null }, deviceWords),
         candidateIds.length ? matchRule(mq, candidateIds) : Promise.resolve(null),
         // The router already picked (or declined) an issue in its own call;
         // the separate match-issue round-trip is only for the scoped path.
@@ -892,6 +924,9 @@ export default function ChatDrawer({ open, onClose, seed, seedScope, onSeedConsu
         return;
       }
 
+      // A model's pick must share a symptom word with the message — the
+      // light model guessed "Red fault light" for "blinking but overheating".
+      const llmIssue = llmIssueRaw && issuePlausible(mq, llmIssueRaw, deviceWords) ? llmIssueRaw : null;
       const issue: Issue | null = clientIssue ?? llmIssue;
       // A procedure request skips the confirm-and-walk-through; whichever
       // guided fix matched is remembered and offered under the steps.
@@ -1040,6 +1075,19 @@ export default function ChatDrawer({ open, onClose, seed, seedScope, onSeedConsu
         await startFlow(g.flow, scope?.label);
       } finally { sendingRef.current = false; }
     }
+  }
+
+  // Does the library hold ANY reference for this device type? (cached)
+  const docsByCatRef = useRef<Map<string, boolean>>(new Map());
+  async function categoryHasDocs(categoryId: string): Promise<boolean> {
+    const cached = docsByCatRef.current.get(categoryId);
+    if (cached !== undefined) return cached;
+    try {
+      const { data } = await supabase.from('sensor_models').select('id, consolidated_docs(id, content_markdown)').eq('category_id', categoryId).limit(200);
+      const has = ((data ?? []) as any[]).some((m) => (Array.isArray(m.consolidated_docs) ? m.consolidated_docs : [m.consolidated_docs]).some((d: any) => d && d.content_markdown));
+      docsByCatRef.current.set(categoryId, has);
+      return has;
+    } catch { return true; } // unsure → let the normal path try
   }
 
   // ---------- Contact directory ----------
@@ -1848,7 +1896,7 @@ export default function ChatDrawer({ open, onClose, seed, seedScope, onSeedConsu
                       refuses to answer a COD question from a flow meter's
                       pages. Ask which sensor (the picker is right below)
                       instead of telling the user the library is empty. */}
-                  <div>{scope?.modelId ? t('chat.nothing') : t('chat.nothingNarrow')}</div>
+                  <div>{turn.noDocsFor ? t('chat.noDocsFor', { category: turn.noDocsFor }) : scope?.modelId ? t('chat.nothing') : scope?.categoryId ? t('chat.nothingIn', { category: scope.label }) : t('chat.nothingNarrow')}</div>
                   <div className="flex flex-col gap-2">
                     <button
                       onClick={() => fetchWebAnswer(i, turn.query)}
@@ -1907,7 +1955,7 @@ export default function ChatDrawer({ open, onClose, seed, seedScope, onSeedConsu
               {/* Guided sensor picker — shown until narrowed to a specific model.
                   When a TYPE is already inferred/scoped it jumps to the make step.
                   Hidden during a flow run — the flow's own chips drive the turn. */}
-              {!turn.loading && !turn.note && !turn.elicit && !turn.multi && !turn.flowNode && !turn.contactCard && !turn.leaveFlow && !turn.aside && !flowRun && i === turns.length - 1 && !scope?.modelId && (
+              {!turn.loading && !turn.note && !turn.elicit && !turn.multi && !turn.flowNode && !turn.contactCard && !turn.leaveFlow && !turn.aside && !turn.noDocsFor && !flowRun && i === turns.length - 1 && !scope?.modelId && (
                 <GuidedNarrow
                   key={`gn-${i}-${scope?.categoryId ?? 'none'}`}
                   initialCategoryId={scope?.categoryId ?? undefined}

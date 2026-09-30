@@ -27,14 +27,17 @@ export async function fetchIssues(categoryId?: string | null): Promise<Issue[]> 
 // Cheap, instant issue match: token overlap between the (corrected) message
 // and each issue's label + aliases. The edge fn's match-issue mode is the
 // semantic backstop when this misses.
-export function matchIssueClient(corrected: string, issues: Issue[]): Issue | null {
-  const qTokens = new Set(queryTokens(corrected));
+// `ignore` = device words: scoring runs on the symptom words only, so the
+// device name alone ("ups", "tds") can never carry a match.
+export function matchIssueClient(corrected: string, issues: Issue[], ignore?: Set<string>): Issue | null {
+  const keep = (w: string) => !ignore || !ignore.has(w);
+  const qTokens = new Set(queryTokens(corrected).filter(keep));
   if (qTokens.size === 0) return null;
   let best: Issue | null = null;
   let bestScore = 0;
   for (const iss of issues) {
     for (const phrase of [iss.label, ...(iss.aliases ?? [])]) {
-      const pTokens = queryTokens(phrase);
+      const pTokens = queryTokens(phrase).filter(keep);
       if (pTokens.length === 0) continue;
       const overlap = pTokens.filter((t) => qTokens.has(t)).length;
       const score = overlap / pTokens.length; // how much of the phrase is present
@@ -42,6 +45,20 @@ export function matchIssueClient(corrected: string, issues: Issue[]): Issue | nu
     }
   }
   return bestScore >= 0.6 ? best : null;
+}
+
+// Sanity check on a model-picked issue: the message must share at least one
+// symptom word with the issue's label or aliases. The light model guessed
+// "Red fault light" for "it is blinking but overheating" — plausible to a
+// model, wrong to the operator, and a wrong confirm question is what makes
+// the bot look lost.
+export function issuePlausible(corrected: string, issue: Issue, ignore?: Set<string>): boolean {
+  const keep = (w: string) => !ignore || !ignore.has(w);
+  const q = new Set(queryTokens(corrected).filter(keep));
+  if (q.size === 0) return false;
+  for (const phrase of [issue.label, ...(issue.aliases ?? [])])
+    for (const w of queryTokens(phrase).filter(keep)) if (q.has(w)) return true;
+  return false;
 }
 
 // The ordered, APPROVED flows for an issue — the queue the chat walks.
