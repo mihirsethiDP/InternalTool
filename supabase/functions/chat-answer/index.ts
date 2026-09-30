@@ -42,7 +42,7 @@ interface Chunk {
 // Ask for it with { mode: "ping" }: guessing which copy of this file is
 // deployed cost us a debugging cycle when a stale paste kept routing spec
 // sheets to "other".
-const FN_BUILD = '2026-09-30-flow-reply';
+const FN_BUILD = '2026-09-30-flow-reply-2';
 
 const SECTION_LABEL: Record<string, string> = {
   install_commission: 'Install & Commission', configure: 'Configure', inspect: 'Inspect',
@@ -1125,7 +1125,7 @@ Deno.serve(async (req) => {
       `Operator typed: "${text}"`,
       '',
       'Classify the reply as exactly one of:',
-      '  "option"      - it answers the step: give the option number (for an action step, 1 = done / it worked, 2 = did not work / no change)',
+      '  "option"      - it answers the step: give the option number (for an action step, 1 = done / it worked, 2 = did not work / no change). A report of the OUTCOME of this step ("still offline", "same as before", "now it works") is an option, not a new problem, even if it names the device.',
       '  "question"    - they are asking something about this step or device (what/where/how/which/why, or "not sure how")',
       '  "new_problem" - they describe a different fault or device, unrelated to this step',
       '  "leave"       - they want to stop or skip this guided fix',

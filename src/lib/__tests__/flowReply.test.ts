@@ -47,3 +47,11 @@ describe('interpretFlowReplyLocal — question steps', () => {
     expect(flowReplyLabel({ action: 'option', option: 1 }, action, 'Done', 'Failed')).toBe('Done');
   });
 });
+
+describe('interpretFlowReplyLocal — outcome reports on yes/no questions', () => {
+  it('"still offline" answers No', () => {
+    const q = { kind: 'question' as const, options: [{ label: 'Yes', next: 'a' }, { label: 'No', next: 'b' }] };
+    expect(interpretFlowReplyLocal('it still shows offline after that', q)).toEqual({ action: 'option', option: 2 });
+    expect(interpretFlowReplyLocal('same as before', q)).toEqual({ action: 'option', option: 2 });
+  });
+});
