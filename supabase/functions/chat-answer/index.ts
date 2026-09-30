@@ -42,7 +42,7 @@ interface Chunk {
 // Ask for it with { mode: "ping" }: guessing which copy of this file is
 // deployed cost us a debugging cycle when a stale paste kept routing spec
 // sheets to "other".
-const FN_BUILD = '2026-09-25-groq-backoff';
+const FN_BUILD = '2026-09-30-fast-lane';
 
 const SECTION_LABEL: Record<string, string> = {
   install_commission: 'Install & Commission', configure: 'Configure', inspect: 'Inspect',
@@ -100,7 +100,12 @@ function json(body: unknown, status = 200) {
 // Last provider failure, surfaced by the admin probe (ping {probe:true}).
 let lastProviderError: { provider: string; status: number; message: string } | null = null;
 
-async function groqComplete(system: string, user: string, key: string, model: string, jsonMode = false, maxTokens = 900, attempt = 0): Promise<string | null> {
+// Groq's gpt-oss models spend hidden "reasoning" tokens before answering —
+// several seconds' worth at the default effort. Classification and JSON picks
+// do not need it; the grounded answer keeps the default.
+type GroqOpts = { reasoning?: 'low' | 'medium'; noWait?: boolean };
+
+async function groqComplete(system: string, user: string, key: string, model: string, jsonMode = false, maxTokens = 900, attempt = 0, opts: GroqOpts = {}): Promise<string | null> {
   try {
     const payload: Record<string, unknown> = {
       model,
@@ -108,6 +113,7 @@ async function groqComplete(system: string, user: string, key: string, model: st
       temperature: jsonMode ? 0 : 0.2, max_tokens: maxTokens, top_p: 0.9,
     };
     if (jsonMode) payload.response_format = { type: 'json_object' };
+    if (opts.reasoning && /gpt-oss/.test(model)) payload.reasoning_effort = opts.reasoning;
     const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
@@ -119,10 +125,12 @@ async function groqComplete(system: string, user: string, key: string, model: st
       lastProviderError = { provider: 'groq', status: res.status, message: errText.slice(0, 200) };
       // Per-minute rate limit: one chat message makes three calls in a row, so
       // wait for Retry-After (capped) and try once more before giving up.
-      if (res.status === 429 && attempt < 2 && !/tokens per day|TPD/i.test(errText)) {
+      // noWait: the caller has another model (its own rate bucket) to try
+      // first — sleeping here is what made answers take 15 seconds.
+      if (res.status === 429 && !opts.noWait && attempt < 2 && !/tokens per day|TPD/i.test(errText)) {
         const ra = Number(res.headers.get('retry-after') ?? '') || 3;
         await new Promise((r) => setTimeout(r, Math.min(ra, 8) * 1000));
-        return groqComplete(system, user, key, model, jsonMode, maxTokens, attempt + 1);
+        return groqComplete(system, user, key, model, jsonMode, maxTokens, attempt + 1, opts);
       }
       return null;
     }
@@ -248,10 +256,14 @@ Deno.serve(async (req) => {
   // production. Keep this current, and note that fastComplete() below now
   // falls back to Claude so a retirement degrades speed, not availability.
   const MODEL = Deno.env.get('GROQ_MODEL') ?? 'openai/gpt-oss-120b';
-  // Groq rate limits are per model. The simple picks (which curated issue?)
-  // run on a light model with its own bucket, so they never eat the answer
-  // model's per-minute budget.
-  const FAST_MODEL = Deno.env.get('GROQ_FAST_MODEL') ?? 'llama-3.1-8b-instant';
+  // Groq rate limits are per model — and tight: 8,000 tokens per MINUTE on
+  // each. One chat message used to make three calls on the answer model, so
+  // the second message of the minute hit 429 and slept through the backoff.
+  // Now the routing/matching picks run on the light model (its own bucket)
+  // and the answer model is reserved for the grounded answer. On 429 the
+  // alternate model is tried at once instead of waiting.
+  // (llama-3.1-8b-instant was retired 2026-09; 404s went silently to Claude.)
+  const FAST_MODEL = Deno.env.get('GROQ_FAST_MODEL') ?? 'openai/gpt-oss-20b';
   // Optional: Claude for the reasoning-heavy modes (generation, splitting,
   // issue mapping) and as the fallback for the fast ones.
   const ANTHROPIC_API_KEY = Deno.env.get('ANTHROPIC_API_KEY') ?? '';
@@ -266,11 +278,24 @@ Deno.serve(async (req) => {
   // automatic fallback. Previously these three called Groq directly, so one
   // retired model id took the chatbot's main answer path down while the
   // smartComplete modes kept working — this closes that gap.
-  const fastComplete = async (system: string, user: string, jsonMode = false, maxTokens = 900): Promise<string | null> => {
+  // `lane` picks the primary Groq model: 'fast' (routing, picks — cheap JSON,
+  // low reasoning) or 'answer' (the grounded answer). The other model is the
+  // immediate fallback when the primary's per-minute bucket is exhausted; a
+  // waited retry on the primary is the last resort before Claude.
+  const fastComplete = async (system: string, user: string, jsonMode = false, maxTokens = 900, lane: 'fast' | 'answer' = 'answer'): Promise<string | null> => {
     if (GROQ_API_KEY) {
-      const raw = await groqComplete(system, user, GROQ_API_KEY, MODEL, jsonMode, maxTokens);
-      if (raw) return raw;
-      console.warn(`groq failed (model ${MODEL}) — falling back to anthropic`);
+      const order = lane === 'fast' ? [FAST_MODEL, MODEL] : [MODEL, FAST_MODEL];
+      const reasoning = lane === 'fast' ? 'low' as const : undefined;
+      for (const m of [...new Set(order)]) {
+        const raw = await groqComplete(system, user, GROQ_API_KEY, m, jsonMode, maxTokens, 0, { reasoning, noWait: true });
+        if (raw) return raw;
+        console.warn(`groq failed (model ${m}, ${lastProviderError?.status ?? '?'}) — trying the next lane`);
+      }
+      if (lastProviderError?.status === 429) {
+        const raw = await groqComplete(system, user, GROQ_API_KEY, order[0], jsonMode, maxTokens, 1, { reasoning });
+        if (raw) return raw;
+      }
+      console.warn('groq exhausted — falling back to anthropic');
     }
     if (ANTHROPIC_API_KEY) return await anthropicComplete(system, user, ANTHROPIC_API_KEY, ANTHROPIC_MODEL, maxTokens);
     return null;
@@ -315,7 +340,7 @@ Deno.serve(async (req) => {
       'Return strict JSON: {"index": <catalog number that best matches the document, or 0 if none is a good match>, "confidence": <number 0 to 1>, "reason": "<one short sentence on the deciding evidence>"}',
     ].join('\n');
 
-    const raw = await fastComplete(sys, user, true);
+    const raw = await fastComplete(sys, user, true, 900, 'fast');
     // extractJson (not raw JSON.parse) because the Claude fallback has no
     // response_format and may wrap the object in prose or fences.
     const parsed: any = extractJson(raw);
@@ -370,7 +395,7 @@ Deno.serve(async (req) => {
       'Return strict JSON: {"rules":[{"problem":"<short symptom as a technician would phrase it>","aliases":["<alternate phrasing>"],"sections":["<section key from the allowed list>"],"clarifying_question":"<a question to disambiguate, or empty string>"}]}. Provide 5 to 10 rules. Every section must be from the allowed keys.',
     ].join('\n');
 
-    const raw = await fastComplete(sys, user, true);
+    const raw = await fastComplete(sys, user, true, 900, 'fast');
     // extractJson (not raw JSON.parse) because the Claude fallback has no
     // response_format and may wrap the object in prose or fences.
     const parsed: any = extractJson(raw);
@@ -1066,12 +1091,57 @@ Deno.serve(async (req) => {
       'Return strict JSON: {"issue_id":"<id or null>","confidence":<0 to 1>}',
       'Pick an issue ONLY if the message plausibly describes that problem. Vague messages with no symptom → null.',
     ].join('\n');
-    const { raw } = await smartComplete(sys, userMsg, { ...smartOpts, groqModel: FAST_MODEL, maxTokens: 200 });
+    // Fast lane (was Claude-first via smartComplete: 2–4 s per message).
+    const raw = await fastComplete(sys, userMsg, true, 200, 'fast');
     const parsed: any = extractJson(raw);
     const hit = list.find((i) => i.id === parsed.issue_id);
     const confidence = typeof parsed.confidence === 'number' ? parsed.confidence : 0;
     if (!hit || confidence < 0.55) return json({ issue_id: null });
     return json({ issue_id: hit.id, label: hit.label, confidence });
+  }
+
+  // ---------- FLOW-REPLY MODE: what did a typed message mean, mid-flow? ----------
+  // A diagnostic flow shows chips, but people type: "yes", "done", "haan ho
+  // gaya", "which button?", "actually the pump is also off". The client
+  // resolves the obvious ones itself (yes/no, done/didn't work, option
+  // words); this is the backstop for everything else.
+  if (mode === 'flow-reply') {
+    const supabase = createClient(SUPABASE_URL, SERVICE_KEY);
+    const frToken = (req.headers.get('Authorization') ?? '').replace(/^Bearer\s+/i, '');
+    const { data: frUser } = await supabase.auth.getUser(frToken);
+    if (!frUser?.user) return json({ error: 'unauthorized' }, 401);
+    const text = ((payload as any).text ?? '').toString().slice(0, 500).trim();
+    const node = (payload as any).node ?? {};
+    const kind = String(node.kind ?? '');
+    const nodeText = String(node.text ?? '').slice(0, 600);
+    const options: string[] = Array.isArray(node.options) ? node.options.map((o: any) => String(o?.label ?? o)).slice(0, 8) : [];
+    if (!text || !kind) return json({ error: 'text and node required' }, 400);
+    const sys = 'You interpret a plant operator\'s typed reply to one step of a guided troubleshooting flow. The reply may be Hinglish or another Indian language. Respond with strict JSON only.';
+    const userMsg = [
+      `Current step (${kind}): ${nodeText}`,
+      kind === 'question' && options.length ? `Options offered:\n${options.map((o, i) => `${i + 1}. ${o}`).join('\n')}` : (kind === 'action' ? 'Buttons offered: 1. Done  2. That didn\'t work' : ''),
+      '',
+      `Operator typed: "${text}"`,
+      '',
+      'Classify the reply as exactly one of:',
+      '  "option"      - it answers the step: give the option number (for an action step, 1 = done / it worked, 2 = did not work / no change)',
+      '  "question"    - they are asking something about this step or device (what/where/how/which/why, or "not sure how")',
+      '  "new_problem" - they describe a different fault or device, unrelated to this step',
+      '  "leave"       - they want to stop or skip this guided fix',
+      '  "unclear"     - none of the above',
+      'Return strict JSON: {"action":"<option|question|new_problem|leave|unclear>","option":<number or 0>,"confidence":<0 to 1>}',
+    ].join('\n');
+    const raw = await fastComplete(sys, userMsg, true, 120, 'fast');
+    const parsed: any = extractJson(raw);
+    const VALID = ['option', 'question', 'new_problem', 'leave', 'unclear'];
+    const action = VALID.includes(parsed.action) ? parsed.action : 'unclear';
+    const optNum = Number(parsed.option) || 0;
+    const maxOpt = kind === 'question' ? options.length : 2;
+    return json({
+      action: action === 'option' && (optNum < 1 || optNum > maxOpt) ? 'unclear' : action,
+      option: optNum >= 1 && optNum <= maxOpt ? optNum : 0,
+      confidence: Math.max(0, Math.min(1, Number(parsed.confidence) || 0)),
+    });
   }
 
   // ---------- SPLIT-SECTIONS MODE: partition one document across activity sections ----------
@@ -1244,12 +1314,19 @@ Deno.serve(async (req) => {
     // PostgREST caps any response at 1,000 rows regardless of .limit(), and once
     // the chunk table passed 1,000 the categories whose chunks sorted last —
     // Datalogger, Turbidity, DO … — silently fell off the menu.
-    const { data: chunkRows, error: rErr } = await supabase
-      .from('consolidated_docs')
-      .select('content_markdown, sensor_models(category_id, sensor_categories(id, name, aliases))')
-      .is('deleted_at', null)
-      .neq('content_markdown', '')
-      .limit(1000);
+    // Select ids only: pulling every reference's content_markdown (1 MB) just
+    // to apply the non-empty filter cost over a second per message.
+    const [{ data: chunkRows, error: rErr }, { data: issueRows }] = await Promise.all([
+      supabase
+        .from('consolidated_docs')
+        .select('id, sensor_models(category_id, sensor_categories(id, name, aliases))')
+        .is('deleted_at', null)
+        .neq('content_markdown', '')
+        .limit(1000),
+      // The curated issue list rides along in the same prompt, so the client
+      // no longer needs a second round-trip (match-issue) to pick one.
+      supabase.from('issues').select('id, label, aliases, sensor_category_id').limit(200),
+    ]);
     if (rErr) { console.error('route catalog error', rErr); return json({ error: 'catalog lookup failed' }, 500); }
     const catMap = new Map<string, { name: string; aliases: string[] }>();
     for (const row of (chunkRows ?? []) as any[]) {
@@ -1271,13 +1348,17 @@ Deno.serve(async (req) => {
       'The datalogger is the PLC-to-cloud bridge: a message that the plant, site or dashboard has stopped reporting, or that data is not coming or not updating, is about the Datalogger — not about a sensor.',
       'Respond with strict JSON only.',
     ].join('\n');
+    const issues = ((issueRows ?? []) as any[]).map((i, k) => ({ idx: k + 1, id: i.id as string, label: String(i.label), aliases: Array.isArray(i.aliases) ? i.aliases as string[] : [] }));
     const user = [
       `Device types (numbered):\n${cats.map((c) => `${c.idx}. ${c.name}${c.aliases.length ? ` (also called: ${c.aliases.slice(0, 14).join(', ')})` : ''}`).join('\n')}`,
       '',
+      issues.length ? `Known issues (lettered by number):\n${issues.map((i) => `I${i.idx}. ${i.label}${i.aliases.length ? ` (${i.aliases.slice(0, 8).join(', ')})` : ''}`).join('\n')}\n` : '',
       `Technician's message: ${query}`,
       '',
       'Return strict JSON: {"ranking": [<type numbers, most likely first, up to 4>], "confidence": <0 to 1 that the top type is correct>,',
       ' "intent": "<troubleshoot | howto | info | other>",',
+      '   (howto = they want a PROCEDURE: how to connect, install, wire, configure, calibrate, clean, replace, pair, set up — even if phrased as "share/send/give me the steps"; troubleshoot = something is wrong and they want it fixed; info = a fact, a contact, a specification)',
+      ' "issue": <the I-number of the known issue the message plausibly describes, or 0 if none — never guess for vague messages>,',
       ' "vague": <true if the message gives NO concrete symptom, parameter, or model — just "broken/not working"-style complaints — so the assistant should ask what the sensor is doing>,',
       ' "normalized": "<the message restated as one clear English problem statement>",',
       ' "problems": [{"text": "<one distinct problem, restated in plain English in the writer\'s own order>", "type": <its type number from the list, or 0 if unclear>}],',
@@ -1295,14 +1376,17 @@ Deno.serve(async (req) => {
       { name: 'Datalogger', re: /(datalogger|data logger|raspberry|\brpi\b|\bgateway\b|telemetry|((plant|site|station)[^.]{0,20}offline)|offline since|((plant|site|station|dashboard|portal|cloud)[^.]{0,40}(not|no|stopped|stop|nahi|band)[^.]{0,30}(report|send|updat|data|value|reading|show))|((data|values|readings)[^.]{0,30}(not|no|nahi|stopped)[^.]{0,20}(coming|arriv|updat|show|aa rah|report|send)))/ },
       { name: 'UPS', re: /(\bups\b|battery backup|power backup|\binverter\b|backup time|beeping)/ },
       { name: 'Camera', re: /(\bcamera\b|\bcctv\b|ezviz|live view|live feed)/ },
+      // The multi-parameter analyser goes by its regulatory name in the field.
+      { name: 'Water Quality Analyser', re: /(\bocems\b|\bcems\b|water analy[sz]er|effluent monitoring|\bwqa\b|multi.?param)/ },
     ];
     const forced = RULES.map((r) => (r.re.test(qLower) ? [...catMap.entries()].find(([, v]) => v.name === r.name) : null)).find(Boolean) ?? null;
 
-    const raw = await fastComplete(sys, user, true);
+    const raw = await fastComplete(sys, user, true, 900, 'fast');
     // extractJson (not raw JSON.parse) because the Claude fallback has no
     // response_format and may wrap the object in prose or fences.
     const parsed: any = extractJson(raw);
     const ranking: number[] = Array.isArray(parsed.ranking) ? parsed.ranking : [];
+    const pickedIssue = issues.find((i) => i.idx === Number(parsed.issue)) ?? null;
     let ordered = ranking.map((n) => cats.find((c) => c.idx === Number(n))).filter(Boolean) as { id: string; name: string }[];
     if (forced) ordered = [{ id: forced[0], name: forced[1].name }, ...ordered.filter((c) => c.id !== forced[0])];
     // Append any categories the model didn't rank, so the full set is still offered.
@@ -1314,6 +1398,8 @@ Deno.serve(async (req) => {
       top: ordered[0] ? { id: ordered[0].id, name: ordered[0].name, confidence } : null,
       intent: VALID_INTENTS.includes(parsed.intent) ? parsed.intent : 'other',
       vague: parsed.vague === true,
+      // Curated issue matched in the same call (null when vague or none).
+      issue_id: parsed.vague === true ? null : (pickedIssue?.id ?? null),
       normalized: String(parsed.normalized ?? '').slice(0, 300) || null,
       // Distinct problems in one message — the client queues them one at a time.
       problems: (Array.isArray(parsed.problems) ? parsed.problems : [])
@@ -1409,6 +1495,21 @@ Deno.serve(async (req) => {
       passages.push(p);
     }
   }
+
+  // Budget the context. Some sections are whole chapters (one camera query
+  // pulled 46 KB ≈ 11,500 tokens), which blows the answer model's 8,000
+  // tokens-per-minute bucket outright and lands on the slow fallback. Best
+  // passages come first from chat_retrieve, so trim from the tail.
+  const PASSAGE_CAP = 3200;
+  const TOTAL_CAP = 13000;
+  let budget = TOTAL_CAP;
+  for (const p of passages) {
+    const t = p.text.length > PASSAGE_CAP ? p.text.slice(0, PASSAGE_CAP) + ' …' : p.text;
+    p.text = t.length > budget ? (budget > 400 ? t.slice(0, budget) + ' …' : '') : t;
+    budget = Math.max(0, budget - p.text.length);
+  }
+  const kept = passages.filter((p) => p.text);
+  passages.length = 0; passages.push(...kept);
 
   const citations = passages.map((p) => ({
     document_id: p.document_id,

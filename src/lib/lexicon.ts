@@ -20,6 +20,8 @@ const CORE_WORDS = [
   'error', 'fault', 'alarm', 'blank', 'zero', 'drift', 'drifting', 'fluctuating',
   'unstable', 'stuck', 'frozen', 'leaking', 'cable', 'wiring', 'power', 'supply',
   'voltage', 'output', 'working', 'showing', 'wrong', 'broken', 'problem',
+  // regulatory / field names for the water quality analyser
+  'ocems', 'cems', 'analyser', 'effluent', 'monitoring', 'procedure', 'steps', 'contact', 'support', 'helpline',
   // Hinglish complaint words (shared list) — known so the corrector never
   // "fixes" them (e.g. 'band' → 'brand'); vagueness detection needs them intact.
   ...HINGLISH_COMPLAINT_WORDS,

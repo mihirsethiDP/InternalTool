@@ -14,6 +14,8 @@ import { SECTION_LABEL, parseSections } from '../lib/consolidated';
 import { renderMarkdown, normalizeAnswerSteps } from '../lib/markdown';
 import { stripCitationMarkers } from '../lib/text';
 import { conversationalReply, isVagueQuery } from '../lib/chatIntent';
+import { isProcedureRequest, isContactRequest, contactSkillHint } from '../lib/requestIntent';
+import { interpretFlowReplyLocal, flowReplyLabel, flowReplyNext, type FlowReply } from '../lib/flowReply';
 import { matchRule, type RouteMatch } from '../lib/routing';
 import { matchFlow, getNode, failTarget, fetchContacts, contactsForSkill, type DiagnosticFlow, type FlowNode, type EscalationContact } from '../lib/flows';
 import { fetchIssues, matchIssueClient, issueQueueInfo, filterQueueForModel, type Issue, type IssueQueueInfo } from '../lib/issues';
@@ -70,7 +72,21 @@ type Turn =
       // Elicitation before a flow queue starts: confirm the matched issue with
       // the user, or ask which make/model when the fix genuinely depends on it
       // (model-specific flows exist). The bot never jumps straight into a flow.
-      elicit?: { text: string; chips: { label: string; act: 'start' | 'reject' | 'model' | 'unsure'; modelId?: string }[] };
+      elicit?: { text: string; chips: ElicitChip[] };
+      // Directory answer: "whom do I call / EZVIZ contact details" — resolved
+      // from the escalation directory, not the documentation.
+      contactCard?: { title: string; contacts: EscalationContact[] };
+      // A procedure answer for which a guided walk-through also exists —
+      // offered as one chip under the steps instead of forced on the user.
+      offerGuide?: GuideOffer;
+      // Mid-flow aside: a question answered without leaving the flow (the
+      // step is re-shown right after this turn).
+      aside?: boolean;
+      // The re-shown step after an aside or an unclear typed reply.
+      flowResume?: boolean;
+      // Mid-flow: the typed message looked like a different problem — confirm
+      // before abandoning the fix in progress.
+      leaveFlow?: { newQuery: string };
       // Diagnostic flow runner: this turn shows one node of an approved flow.
       flowNode?: FlowNode;
       flowTitle?: string; // set on the first node so the user sees which flow started
@@ -82,6 +98,15 @@ type Turn =
       escalateContacts?: EscalationContact[]; // resolved directory entries (make/global/per-plant)
     };
 
+
+// 'steps' = "just give me the procedure" — the RAG answer instead of the flow.
+type ElicitChip = { label: string; act: 'start' | 'reject' | 'model' | 'unsure' | 'steps'; modelId?: string };
+
+// A guided flow that matched a PROCEDURE request. Not started automatically:
+// the steps come first, the walk-through is one tap away.
+type GuideOffer =
+  | { kind: 'flow'; flow: DiagnosticFlow; origQuery: string }
+  | { kind: 'issue'; issue: Issue; info: IssueQueueInfo; origQuery: string };
 
 // Result of one assistant turn: either a synthesized answer (+ citations) from
 // the Edge Function, or — if that isn't deployed/available — retrieval hits.
@@ -166,6 +191,8 @@ async function routeQuery(query: string): Promise<{
   top: { id: string; name: string; confidence: number } | null;
   intent?: 'troubleshoot' | 'howto' | 'info' | 'other';
   vague?: boolean;
+  // Curated issue picked in the same call (saves the match-issue round-trip).
+  issue_id?: string | null;
   normalized?: string | null;
   slots?: { make: string | null; model: string | null };
   // Distinct problems in one message (2+ → the drawer queues them one at a time).
@@ -372,10 +399,11 @@ export default function ChatDrawer({ open, onClose, seed, seedScope, onSeedConsu
   const pendingRef = useRef<
     | { kind: 'issue'; issue: Issue; info: IssueQueueInfo; origQuery: string }
     | { kind: 'flow'; flow: DiagnosticFlow; origQuery: string }
-    
     | { kind: 'plantpick'; origQuery: string; categoryId: string; categoryName: string; generalModelId: string | null }
     | null
   >(null);
+  // Makes on file, for "EZVIZ contact details"-style lookups (loaded once).
+  const makesRef = useRef<{ id: string; name: string }[] | null>(null);
   // Voice replies: which turn is being read aloud, whether the current message
   // came in by voice (→ speak the answer back without an extra tap).
   const [speakingIdx, setSpeakingIdx] = useState<number | null>(null);
@@ -672,6 +700,13 @@ export default function ChatDrawer({ open, onClose, seed, seedScope, onSeedConsu
     if (!q) return;
     if (sendingRef.current) return; // ignore concurrent sends (would swap answers under questions)
 
+    // Mid-flow: a typed message answers the step, asks about it, or wants
+    // out — it no longer silently abandons the fix. Runs BEFORE small-talk so
+    // "ok" / "done" reach the step instead of "You're welcome!".
+    if (flowRun && flowRef.current && opts?.scope === undefined && !opts?.noEcho) {
+      if (await handleFlowText(q)) return;
+    }
+
     // Small-talk / meta → reply conversationally, skip the doc search entirely.
     const chat = conversationalReply(q);
     if (chat) {
@@ -718,6 +753,22 @@ export default function ChatDrawer({ open, onClose, seed, seedScope, onSeedConsu
       // router's normalized restatement below is for retrieval and would make
       // "sensor not working" look specific ("not functioning correctly").
       let vague = isVagueQuery(mq);
+      // "Whom do I call / EZVIZ contact details": the directory answers this,
+      // not the manuals. Only when something is actually on file — otherwise
+      // the documentation may still name the vendor's helpline.
+      if (isContactRequest(mq)) {
+        const card = await contactCardFor(mq, activeScope);
+        if (card) {
+          setTurns((tt) => fillLoadingTurn(tt, { role: 'bot', query: q, loading: false, narrowedLabel: activeScope?.label, contactCard: card }));
+          return;
+        }
+      }
+      // "How do I calibrate / share the connection procedure": they want the
+      // STEPS. The flow (if one matches) is offered under the answer, not
+      // forced. The router's own intent reading backs up the regex.
+      let procedure = isProcedureRequest(mq);
+      // Curated issue picked by the router (undefined = router not called).
+      let routeIssueId: string | null | undefined = undefined;
 
       // If we have no scope yet, interpret the message: sensor TYPE + intent +
       // any make/model actually mentioned (handles vague/misspelled phrasing).
@@ -741,6 +792,9 @@ export default function ChatDrawer({ open, onClose, seed, seedScope, onSeedConsu
         // The LLM backs up the client word-list for vague phrasings it misses
         // ("sensor not working at all", "mera meter kharab hai").
         if (r?.vague === true) vague = true;
+        if (r?.intent === 'howto') procedure = true;
+        // undefined from an older edge build → the match-issue call still runs.
+        if (r && r.issue_id !== undefined) routeIssueId = r.issue_id;
         // A normalized restatement beats our token-level correction for matching.
         if (r?.normalized) mq = r.normalized;
         // If the message itself names a model we have, scope straight to it —
@@ -808,7 +862,11 @@ export default function ChatDrawer({ open, onClose, seed, seedScope, onSeedConsu
       const [flow, routed, llmIssue] = await Promise.all([
         (routingFailed && !activeScope) ? Promise.resolve(null) : matchFlow(mq, { categoryId: activeScope?.categoryId ?? null, modelId: activeScope?.modelId ?? null }),
         candidateIds.length ? matchRule(mq, candidateIds) : Promise.resolve(null),
-        (!clientIssue && issues.length > 0)
+        // The router already picked (or declined) an issue in its own call;
+        // the separate match-issue round-trip is only for the scoped path.
+        routeIssueId !== undefined
+          ? Promise.resolve(routeIssueId ? issues.find((i) => i.id === routeIssueId) ?? null : null)
+          : (!clientIssue && issues.length > 0)
           ? supabase.functions.invoke('chat-answer', { body: { mode: 'match-issue', query: mq, category_id: activeScope?.categoryId ?? null } })
               .then(({ data }) => {
                 const id = (data as any)?.issue_id;
@@ -835,7 +893,17 @@ export default function ChatDrawer({ open, onClose, seed, seedScope, onSeedConsu
       }
 
       const issue: Issue | null = clientIssue ?? llmIssue;
-      if (issue) {
+      // A procedure request skips the confirm-and-walk-through; whichever
+      // guided fix matched is remembered and offered under the steps.
+      let guide: GuideOffer | undefined;
+      if (procedure) {
+        if (issue) {
+          const info = await issueQueueInfo(issue.id);
+          if (info.flows.length > 0) guide = { kind: 'issue', issue, info, origQuery: q };
+        }
+        if (!guide && flow) guide = { kind: 'flow', flow, origQuery: q };
+      }
+      if (issue && !procedure) {
         // Never jump straight into a flow. Confirm the issue first — and when
         // the linked fixes are model-specific, elicit the make/model before
         // starting (the wrong model's fix is worse than no fix). When every
@@ -855,7 +923,7 @@ export default function ChatDrawer({ open, onClose, seed, seedScope, onSeedConsu
       // ---- Priority 2: a single approved flow matched by phrasing. Confirm
       // it too — the issue path asks first, and this path landing straight in
       // a fix was exactly how a COD question became a cleaning procedure.
-      if (flow) {
+      if (flow && !procedure) {
         queueRef.current = null;
         pendingRef.current = { kind: 'flow', flow, origQuery: q };
         // Built outside setTurns: the updater's `t` parameter shadows the
@@ -864,6 +932,7 @@ export default function ChatDrawer({ open, onClose, seed, seedScope, onSeedConsu
           text: t('chat.issueConfirm', { issue: flow.title }),
           chips: [
             { label: t('chat.startFix'), act: 'start' as const },
+            { label: t('chat.justSteps'), act: 'steps' as const },
             { label: t('chat.notThis'), act: 'reject' as const },
           ],
         };
@@ -894,7 +963,7 @@ export default function ChatDrawer({ open, onClose, seed, seedScope, onSeedConsu
       if (!result.answer && result.hits.length === 0) {
         logUnanswered({ query: q, source: 'chat', sensorModelId: activeScope?.modelId ?? null });
       }
-      setTurns((t) => fillLoadingTurn(t, { role: 'bot', query: q, loading: false, narrowedLabel: activeScope?.label, answer: result.answer, citations: result.citations, hits: result.hits, routed }));
+      setTurns((t) => fillLoadingTurn(t, { role: 'bot', query: q, loading: false, narrowedLabel: activeScope?.label, answer: result.answer, citations: result.citations, hits: result.hits, routed, offerGuide: guide }));
     } catch (e) {
       // Never leave the chat frozen — say what happened and offer a retry.
       console.warn('chat send failed', e);
@@ -903,6 +972,249 @@ export default function ChatDrawer({ open, onClose, seed, seedScope, onSeedConsu
       sendingRef.current = false;
       if (slowTimer.current) { clearTimeout(slowTimer.current); slowTimer.current = null; }
       setSlow(false);
+    }
+  }
+
+  // ---------- Procedure vs. guided fix ----------
+  // The documentation answer for a question, with the guided flow (when one
+  // matched) offered as a chip beneath it. Used by "Just give me the steps".
+  async function answerSteps(origQuery: string, guide?: GuideOffer) {
+    sendingRef.current = true;
+    setSlow(false);
+    if (slowTimer.current) clearTimeout(slowTimer.current);
+    slowTimer.current = setTimeout(() => setSlow(true), 9000);
+    setTurns((tt) => [...tt, { role: 'bot', query: origQuery, loading: true, narrowedLabel: scope?.label }]);
+    try {
+      let mq = origQuery;
+      try { mq = (await correctSpelling(origQuery)).text; } catch { /* raw query still works */ }
+      const sc = scope;
+      const fallback = sc?.modelId
+        ? () => scopedRetrieve(mq, sc.modelId!, sc.generalModelId ?? null)
+        : sc?.categoryId
+          ? () => categoryRetrieve(mq, sc.categoryId!)
+          : async () => { const { data } = await supabase.rpc('chat_search', { q: mq, p_limit: 5 }); return enrichHits((data as Hit[]) ?? []); };
+      const result = await Promise.race([
+        askAssistant(mq, { sensorModelId: sc?.modelId ?? null, categoryId: sc?.categoryId ?? null }, fallback),
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), 40_000)),
+      ]);
+      if ((result as any).serviceDown) {
+        setTurns((tt) => fillLoadingTurn(tt, { role: 'bot', query: origQuery, loading: false, narrowedLabel: sc?.label, note: t2('chat.serviceDown'), retry: origQuery }));
+        return;
+      }
+      if (!result.answer && result.hits.length === 0) logUnanswered({ query: origQuery, source: 'chat', sensorModelId: sc?.modelId ?? null });
+      setTurns((tt) => fillLoadingTurn(tt, { role: 'bot', query: origQuery, loading: false, narrowedLabel: sc?.label, answer: result.answer, citations: result.citations, hits: result.hits, offerGuide: guide }));
+    } catch (e) {
+      console.warn('answerSteps failed', e);
+      setTurns((tt) => fillLoadingTurn(tt, { role: 'bot', query: origQuery, loading: false, narrowedLabel: scope?.label, note: t2('chat.serviceDown'), retry: origQuery }));
+    } finally {
+      sendingRef.current = false;
+      if (slowTimer.current) { clearTimeout(slowTimer.current); slowTimer.current = null; }
+      setSlow(false);
+    }
+  }
+
+  // "Walk me through it step by step" under a procedure answer: start the
+  // guided fix that matched. An issue whose fixes differ by model still asks
+  // which model first (the existing elicitation), otherwise it starts at once.
+  async function startGuide(g: GuideOffer) {
+    if (sendingRef.current) return;
+    setTurns((tt) => [...tt, { role: 'user', text: t2('chat.walkMe') } as Turn]);
+    if (g.kind === 'flow') {
+      pendingRef.current = { kind: 'flow', flow: g.flow, origQuery: g.origQuery };
+      sendingRef.current = true;
+      try {
+        pendingRef.current = null;
+        setTurns((tt) => [...tt, { role: 'bot', query: g.origQuery, loading: true }]);
+        await startFlow(g.flow, scope?.label);
+      } finally { sendingRef.current = false; }
+      return;
+    }
+    pendingRef.current = { kind: 'issue', issue: g.issue, info: g.info, origQuery: g.origQuery };
+    const elicit = buildElicit(g.issue, g.info, scope);
+    if (!elicit) { pendingRef.current = null; return; }
+    const needsModel = elicit.chips.some((c) => c.act === 'model' || c.act === 'unsure');
+    if (needsModel) {
+      setTurns((tt) => [...tt, { role: 'bot', query: g.origQuery, loading: false, narrowedLabel: scope?.label, elicit: { ...elicit, chips: elicit.chips.filter((c) => c.act !== 'steps') } }]);
+      return;
+    }
+    await handleElicit({ label: t2('chat.startFix'), act: 'start' });
+  }
+
+  // ---------- Contact directory ----------
+  // Resolve "EZVIZ contact details" / "whom do I call" from the escalation
+  // directory: a make named in the message (or the make of the device in
+  // scope) picks that vendor's line; a role word picks that role; otherwise
+  // every contact on file is offered, most specific first.
+  async function contactCardFor(mq: string, sc: ScopeT | null): Promise<{ title: string; contacts: EscalationContact[] } | null> {
+    try {
+      if (!makesRef.current) {
+        const { data } = await supabase.from('sensor_makes').select('id, name').limit(500);
+        makesRef.current = ((data ?? []) as { id: string; name: string }[]);
+      }
+      const q = ` ${mq.toLowerCase().replace(/[^a-z0-9ऀ-෿]+/g, ' ')} `;
+      const named = makesRef.current.filter((m) => m.name.toLowerCase().replace(/[()/+&]/g, ' ').split(/\s+/).filter((w) => w.length >= 3).some((w) => q.includes(` ${w} `)));
+      let makeId: string | null = named.length === 1 ? named[0].id : null;
+      let makeName: string | null = named.length === 1 ? named[0].name : null;
+      const modelId = sc?.modelId ?? null;
+      if (!makeId && modelId) {
+        const { data: m } = await supabase.from('sensor_models').select('make_id, sensor_makes(name)').eq('id', modelId).maybeSingle();
+        makeId = (m as any)?.make_id ?? null;
+        const mk = m ? (Array.isArray((m as any).sensor_makes) ? (m as any).sensor_makes[0] : (m as any).sensor_makes) : null;
+        makeName = mk?.name ?? null;
+      }
+      const all = (await fetchContacts()).filter((c) => c.person_name || c.contact);
+      const skill = contactSkillHint(mq);
+      let list: EscalationContact[] = [];
+      let title = t2('chat.contactsTitle');
+      if (makeId) {
+        list = all.filter((c) => c.make_id === makeId || (c.sensor_model_id && c.sensor_model_id === modelId));
+        if (skill) list = list.filter((c) => c.skill_key === skill);
+        title = t2('chat.contactFor', { name: makeName ?? '' });
+      } else if (skill) {
+        list = contactsForSkill(all, skill, { makeId: null, modelId: null });
+        title = list[0]?.label ?? title;
+      } else {
+        // Everything on file, most specific first; other makes' vendor lines
+        // are noise unless nothing else exists.
+        const rank = (c: EscalationContact) => c.sensor_model_id ? 0 : c.make_id ? 3 : c.plant_id ? 2 : 1;
+        list = [...all].sort((a, b) => rank(a) - rank(b));
+        if (list.some((c) => !c.make_id)) list = list.filter((c) => !c.make_id);
+      }
+      if (list.length === 0) return null;
+      return { title, contacts: list.slice(0, 8) };
+    } catch (e) {
+      console.warn('contact lookup failed', e);
+      return null;
+    }
+  }
+
+  // ---------- Typed replies inside a flow ----------
+  // Returns true when the message was handled as part of the flow.
+  async function handleFlowText(q: string): Promise<boolean> {
+    const flow = flowRef.current;
+    if (!flow) return false;
+    const lastNode = [...turns].reverse().find((x) => x.role === 'bot' && (x as any).flowNode) as Extract<Turn, { role: 'bot' }> | undefined;
+    const node = lastNode?.flowNode;
+    if (!node || node.kind === 'resolve' || node.kind === 'escalate') return false;
+
+    let reply: FlowReply | null = interpretFlowReplyLocal(q, node);
+    setInput('');
+    if (!reply) {
+      // Not obvious locally — ask the model what the reply meant.
+      sendingRef.current = true;
+      setTurns((tt) => [...tt, { role: 'user', text: q }, { role: 'bot', query: flow.title, loading: true }]);
+      try {
+        const { data } = await supabase.functions.invoke('chat-answer', {
+          body: { mode: 'flow-reply', text: q, node: { kind: node.kind, text: node.text, options: (node.options ?? []).map((o) => o.label) } },
+        });
+        dlog('flow-reply', { q, data });
+        const a = (data as any)?.action;
+        reply = a === 'option' ? { action: 'option', option: Number((data as any).option) || 0 }
+          : a === 'question' || a === 'new_problem' || a === 'leave' ? { action: a } : { action: 'unclear' };
+        if (reply.action === 'option' && reply.option < 1) reply = { action: 'unclear' };
+      } catch {
+        reply = { action: 'unclear' };
+      } finally {
+        sendingRef.current = false;
+      }
+      // Drop the placeholder; each branch below adds its own bot turn.
+      setTurns((tt) => tt.filter((x, i) => !(i === tt.length - 1 && x.role === 'bot' && x.loading)));
+    } else {
+      setTurns((tt) => [...tt, { role: 'user', text: q }]);
+    }
+
+    const doneLabel = t2('chat.stepDone');
+    const failLabel = t2('chat.stepFailed');
+    if (reply.action === 'option') {
+      const next = flowReplyNext(reply, node, failTarget(flow.definition, node));
+      const label = flowReplyLabel(reply, node, doneLabel, failLabel) ?? q;
+      await advanceFlow(label, next, { noEcho: true });
+      return true;
+    }
+    if (reply.action === 'leave') {
+      setFlowRun(null); flowRef.current = null; queueRef.current = null; pendingRef.current = null;
+      setTurns((tt) => [...tt, { role: 'bot', query: q, loading: false, note: t2('chat.leftFlow') }]);
+      return true;
+    }
+    if (reply.action === 'new_problem') {
+      pendingRef.current = null;
+      setTurns((tt) => [...tt, { role: 'bot', query: q, loading: false, leaveFlow: { newQuery: q } }]);
+      return true;
+    }
+    if (reply.action === 'question') {
+      // Answer from the documentation, scoped to the flow's device, then put
+      // the step back on screen so the walk-through continues.
+      sendingRef.current = true;
+      setTurns((tt) => [...tt, { role: 'bot', query: q, loading: true, narrowedLabel: scope?.label }]);
+      try {
+        let mq = q;
+        try { mq = (await correctSpelling(q)).text; } catch { /* fine */ }
+        const modelId = flow.sensor_model_id ?? scope?.modelId ?? null;
+        const categoryId = flow.sensor_category_id ?? scope?.categoryId ?? null;
+        const result = await Promise.race([
+          askAssistant(mq, { sensorModelId: modelId, categoryId }, async () => modelId ? scopedRetrieve(mq, modelId, scope?.generalModelId ?? null) : categoryId ? categoryRetrieve(mq, categoryId) : []),
+          new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), 40_000)),
+        ]);
+        if (result.answer || result.hits.length) {
+          setTurns((tt) => fillLoadingTurn(tt, { role: 'bot', query: q, loading: false, narrowedLabel: scope?.label, answer: result.answer, citations: result.citations, hits: result.hits, aside: true }));
+        } else {
+          setTurns((tt) => fillLoadingTurn(tt, { role: 'bot', query: q, loading: false, note: t2('chat.asideNothing'), aside: true }));
+        }
+      } catch {
+        setTurns((tt) => fillLoadingTurn(tt, { role: 'bot', query: q, loading: false, note: t2('chat.serviceDown'), aside: true }));
+      } finally {
+        sendingRef.current = false;
+      }
+      await resumeNode(flow, node);
+      return true;
+    }
+    // unclear
+    setTurns((tt) => [...tt, { role: 'bot', query: q, loading: false, note: t2('chat.unclearReply'), aside: true }]);
+    await resumeNode(flow, node);
+    return true;
+  }
+
+  // Put the current step back at the bottom (chips active again).
+  async function resumeNode(flow: DiagnosticFlow, node: FlowNode) {
+    const turn = await nodeTurn(flow, node);
+    setTurns((tt) => [...tt, { ...turn, flowResume: true }]);
+  }
+
+  // The typed message was a different problem: leave the fix, or keep going.
+  async function resolveLeaveFlow(leave: boolean, newQuery: string) {
+    const flow = flowRef.current;
+    setTurns((tt) => [...tt, { role: 'user', text: leave ? t2('chat.leaveYes') : t2('chat.leaveNo') }]);
+    if (leave) {
+      setFlowRun(null); flowRef.current = null; queueRef.current = null; pendingRef.current = null;
+      await send(newQuery, { scope: scope ?? null, noEcho: true });
+      return;
+    }
+    const lastNode = [...turns].reverse().find((x) => x.role === 'bot' && (x as any).flowNode) as Extract<Turn, { role: 'bot' }> | undefined;
+    if (flow && lastNode?.flowNode) await resumeNode(flow, lastNode.flowNode);
+  }
+
+  // A resolve node that hands off to another flow ("fix the offline problem
+  // first"): start that flow, matched by title within the same category.
+  async function startHandoff(title: string) {
+    const flow = flowRef.current;
+    if (sendingRef.current) return;
+    sendingRef.current = true;
+    try {
+      let q = supabase.from('diagnostic_flows')
+        .select('id, sensor_category_id, sensor_model_id, title, trigger_symptoms, definition, status, source_doc_id, created_at, approved_at')
+        .eq('status', 'approved').ilike('title', title.replace(/[%_]/g, '')).limit(1);
+      if (flow) q = q.eq('sensor_category_id', flow.sensor_category_id);
+      const { data } = await q;
+      const next = (data ?? [])[0] as DiagnosticFlow | undefined;
+      setTurns((tt) => [...tt, { role: 'user', text: t2('chat.handoffStart', { title }) }, { role: 'bot', query: title, loading: true }]);
+      if (!next) {
+        setTurns((tt) => fillLoadingTurn(tt, { role: 'bot', query: title, loading: false, note: t2('chat.nothing') }));
+        return;
+      }
+      queueRef.current = null;
+      await startFlow(next, scope?.label);
+    } finally {
+      sendingRef.current = false;
     }
   }
 
@@ -922,6 +1234,7 @@ export default function ChatDrawer({ open, onClose, seed, seedScope, onSeedConsu
         text: t('chat.issueConfirmScoped', { issue: issue.label, label: sc.label }),
         chips: [
           { label: t('chat.startFix'), act: 'start' },
+          { label: t('chat.justSteps'), act: 'steps' },
           { label: t('chat.notThis'), act: 'reject' },
         ],
       };
@@ -932,6 +1245,7 @@ export default function ChatDrawer({ open, onClose, seed, seedScope, onSeedConsu
         text: t('chat.issueConfirm', { issue: issue.label }),
         chips: [
           { label: t('chat.startFix'), act: 'start' },
+          { label: t('chat.justSteps'), act: 'steps' },
           { label: t('chat.notThis'), act: 'reject' },
         ],
       };
@@ -962,9 +1276,17 @@ export default function ChatDrawer({ open, onClose, seed, seedScope, onSeedConsu
     };
   }
 
-  async function handleElicit(chip: { label: string; act: 'start' | 'reject' | 'model' | 'unsure'; modelId?: string }) {
+  async function handleElicit(chip: ElicitChip) {
     const p = pendingRef.current;
     if (!p || sendingRef.current) return;
+    // "Just give me the steps": the documentation answer for the original
+    // question, scoped as the conversation is — no walk-through.
+    if (chip.act === 'steps' && p.kind !== 'plantpick') {
+      pendingRef.current = null;
+      setTurns((tt) => [...tt, { role: 'user', text: chip.label } as Turn]);
+      await answerSteps(p.origQuery, p.kind === 'flow' ? { kind: 'flow', flow: p.flow, origQuery: p.origQuery } : { kind: 'issue', issue: p.issue, info: p.info, origQuery: p.origQuery });
+      return;
+    }
     if (p.kind === 'plantpick') {
       // Their pick scopes the whole conversation; then the original question
       // runs again against that device — without echoing it a second time.
@@ -1209,15 +1531,16 @@ export default function ChatDrawer({ open, onClose, seed, seedScope, onSeedConsu
     setTurns((t) => fillLoadingTurn(t, turn));
   }
 
-  // Advance from the node shown in the LAST bot turn via a chip tap.
-  async function advanceFlow(choiceLabel: string, nextId: string | null) {
-    if (!flowRun) return;
-    const { flow } = flowRun;
+  // Advance from the node shown in the LAST bot turn via a chip tap (or a
+  // typed reply that resolved to one — then the typed text is already echoed).
+  async function advanceFlow(choiceLabel: string, nextId: string | null, opts?: { noEcho?: boolean }) {
+    const flow = flowRun?.flow ?? flowRef.current;
+    if (!flow) return;
     const next = nextId ? getNode(flow.definition, nextId) : null;
     if (!next) { setFlowRun(null); return; }
     const terminal = next.kind === 'resolve' || next.kind === 'escalate';
     // Echo the choice as a user bubble, then show the next node.
-    setTurns((t) => [...t, { role: 'user', text: choiceLabel }, { role: 'bot', query: flow.title, loading: true }]);
+    setTurns((t) => [...t, ...(opts?.noEcho ? [] : [{ role: 'user', text: choiceLabel } as Turn]), { role: 'bot', query: flow.title, loading: true }]);
     const turn = await nodeTurn(flow, next);
     if (terminal) setFlowRun(null);
     setTurns((t) => fillLoadingTurn(t, turn));
@@ -1452,6 +1775,16 @@ export default function ChatDrawer({ open, onClose, seed, seedScope, onSeedConsu
                     ))}
                   </div>
                 </div>
+              ) : turn.leaveFlow ? (
+                <div className="rounded-2xl rounded-tl-md bg-white border border-amber-200 shadow-sm px-3.5 py-3 space-y-2.5">
+                  <div className="text-sm text-slate-700 leading-relaxed">{t('chat.leaveAsk')}</div>
+                  <div className="flex flex-col gap-1.5">
+                    <button onClick={() => resolveLeaveFlow(true, turn.leaveFlow!.newQuery)} disabled={i !== turns.length - 1} className={`${CHIP_CLS} disabled:opacity-50 disabled:pointer-events-none`}>{t('chat.leaveYes')}</button>
+                    <button onClick={() => resolveLeaveFlow(false, turn.leaveFlow!.newQuery)} disabled={i !== turns.length - 1} className={`${CHIP_CLS} disabled:opacity-50 disabled:pointer-events-none`}>{t('chat.leaveNo')}</button>
+                  </div>
+                </div>
+              ) : turn.contactCard ? (
+                <ContactCard title={turn.contactCard.title} contacts={turn.contactCard.contacts} />
               ) : turn.flowNode ? (
                 <FlowNodeCard
                   turn={turn}
@@ -1460,7 +1793,7 @@ export default function ChatDrawer({ open, onClose, seed, seedScope, onSeedConsu
                   onChoose={advanceFlow}
                   failNext={flowRun ? failTarget(flowRun.flow.definition, turn.flowNode) : null}
                   onTicket={() => openTicket(turn)}
-                  onBack={i === turns.length - 1 && flowRef.current
+                  onBack={i === turns.length - 1 && flowRef.current && !turn.flowResume
                     && turns.filter((tn) => tn.role === 'bot' && (tn as any).flowNode).length >= 2
                     ? flowBack : undefined}
                   onStillStuck={() => flowStillStuck(() => openTicket(turn))}
@@ -1468,14 +1801,24 @@ export default function ChatDrawer({ open, onClose, seed, seedScope, onSeedConsu
                   hasNextFix={queueHasNext()}
                   onNextFix={queueHasNext() ? advanceQueue : undefined}
                   onPickMake={(choice) => pickEscalationMake(i, choice)}
+                  onHandoff={i === turns.length - 1 ? startHandoff : undefined}
                 />
               ) : turn.answer ? (
-                <AnswerCard
-                  answer={turn.answer}
-                  citations={turn.citations ?? []}
-                  narrowedLabel={turn.narrowedLabel}
-                  onOpenCitation={(c) => openCitation(turn.query, c, turn.answer ?? undefined)}
-                />
+                <>
+                  {turn.aside && <div className="text-[11px] text-slate-400 italic">{t('chat.asideNote')}</div>}
+                  <AnswerCard
+                    answer={turn.answer}
+                    citations={turn.citations ?? []}
+                    narrowedLabel={turn.narrowedLabel}
+                    onOpenCitation={(c) => openCitation(turn.query, c, turn.answer ?? undefined)}
+                  />
+                  {turn.offerGuide && i === turns.length - 1 && !flowRun && (
+                    <button onClick={() => startGuide(turn.offerGuide!)}
+                      className="tap w-full inline-flex items-center justify-center gap-1.5 rounded-xl border border-brand-300 bg-brand-50/60 text-brand-800 px-3 py-2.5 text-xs font-semibold hover:bg-brand-100 transition">
+                      <GitBranch size={13} /> {t('chat.walkMe')} · {turn.offerGuide.kind === 'flow' ? turn.offerGuide.flow.title : turn.offerGuide.issue.label}
+                    </button>
+                  )}
+                </>
               ) : (turn.hits && turn.hits.length > 0) ? (
                 <>
                   <div className="card-tight bg-white text-sm text-slate-700">
@@ -1632,8 +1975,8 @@ export default function ChatDrawer({ open, onClose, seed, seedScope, onSeedConsu
                 ref={inputRef}
                 value={input}
                 onChange={(e) => { setInput(e.target.value); voiceAskedRef.current = false; }}
-                placeholder={t('chat.placeholder')}
-                aria-label={t('chat.placeholder')}
+                placeholder={flowRun ? t('chat.placeholderFlow') : t('chat.placeholder')}
+                aria-label={flowRun ? t('chat.placeholderFlow') : t('chat.placeholder')}
                 className="w-full rounded-2xl border border-slate-300 bg-slate-50 focus:bg-white pl-4 pr-3 py-3 text-sm focus:border-brand-700 focus:ring-2 focus:ring-brand-700/20 outline-none transition"
               />
             </div>
@@ -1871,7 +2214,53 @@ function RoutedCard({ routed, onOpen }: { routed: RouteMatch; onOpen: (docId: st
 // One node of a diagnostic flow run. Question nodes show tappable option
 // chips, action nodes a step with Done / Didn't-work, resolve and escalate
 // nodes are terminal (escalate resolves the contact from the directory).
-function FlowNodeCard({ turn, active, isLast, failNext, onChoose, onTicket, onBack, onStillStuck, hasEscalation, hasNextFix, onNextFix, onPickMake }: {
+// One directory entry — shared by the escalation step and the contact card.
+function ContactRow({ c }: { c: EscalationContact }) {
+  return (
+    <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 flex items-center gap-2">
+      <div className="min-w-0 flex-1">
+        {c.person_name && <div className="text-xs text-slate-700 font-medium">{c.person_name}</div>}
+        {c.contact && (
+          telHref(c.contact)
+            ? <a href={telHref(c.contact)!} className="text-xs text-brand-700 font-semibold inline-flex items-center gap-1 hover:underline"><Phone size={11} /> {c.contact}</a>
+            : <div className="text-xs text-brand-700 font-medium">{c.contact}</div>
+        )}
+      </div>
+      <span className={`shrink-0 text-[10px] rounded-full px-2 py-0.5 font-medium ${
+        c.make_name ? 'bg-violet-100 text-violet-700' : c.plant_name ? 'bg-sky-100 text-sky-700' : 'bg-slate-200 text-slate-600'
+      }`}>
+        {c.model_label ?? c.make_name ?? c.plant_name ?? 'Default'}
+      </span>
+    </div>
+  );
+}
+
+// "Whom do I call" answered from the escalation directory.
+function ContactCard({ title, contacts }: { title: string; contacts: EscalationContact[] }) {
+  const { t } = useTranslation();
+  // Group by role so a general "support contacts" question reads as a directory.
+  const groups = new Map<string, EscalationContact[]>();
+  for (const c of contacts) (groups.get(c.label) ?? groups.set(c.label, []).get(c.label)!).push(c);
+  return (
+    <div className="rounded-2xl rounded-tl-md border border-brand-200 bg-white shadow-sm overflow-hidden">
+      <div className="bg-gradient-to-r from-brand-600 to-brand-800 px-3.5 py-2 inline-flex items-center gap-1.5 w-full">
+        <PhoneCall size={12} className="text-white" />
+        <span className="text-white text-[11px] font-semibold uppercase tracking-wide">{title}</span>
+      </div>
+      <div className="p-3.5 space-y-2.5">
+        {[...groups.entries()].map(([label, list]) => (
+          <div key={label} className="space-y-1.5">
+            {groups.size > 1 && <div className="text-xs font-semibold text-slate-800">{label}</div>}
+            {list.map((c) => <ContactRow key={c.id} c={c} />)}
+          </div>
+        ))}
+        <div className="text-[10px] text-slate-400">{t('chat.contactsFoot')}</div>
+      </div>
+    </div>
+  );
+}
+
+function FlowNodeCard({ turn, active, isLast, failNext, onChoose, onTicket, onBack, onStillStuck, hasEscalation, hasNextFix, onNextFix, onPickMake, onHandoff }: {
   turn: Extract<Turn, { role: 'bot' }>;
   active: boolean;
   isLast: boolean;
@@ -1884,6 +2273,7 @@ function FlowNodeCard({ turn, active, isLast, failNext, onChoose, onTicket, onBa
   hasNextFix: boolean;
   onNextFix?: () => void;
   onPickMake?: (choice: { makeId: string; makeName: string; modelId: string | null }) => void;
+  onHandoff?: (title: string) => void;
 }) {
   const { t } = useTranslation();
   const n = turn.flowNode!;
@@ -1893,6 +2283,22 @@ function FlowNodeCard({ turn, active, isLast, failNext, onChoose, onTicket, onBa
       <Undo2 size={12} /> {t('chat.stepBack')}
     </button>
   );
+
+  if (n.kind === 'resolve' && n.handoff) {
+    // Not "fixed": this flow stops because ANOTHER flow is the real fix.
+    return (
+      <div className="rounded-2xl rounded-tl-md border border-amber-200 bg-amber-50/60 shadow-sm px-3.5 py-3 space-y-2">
+        <div className="inline-flex items-center gap-1.5 text-amber-800 text-[11px] font-semibold uppercase tracking-wide">
+          <GitBranch size={13} /> {t('chat.handoffTitle')}
+        </div>
+        <div className="text-sm text-slate-700 leading-relaxed">{n.text}</div>
+        {isLast && onHandoff && (
+          <button onClick={() => onHandoff(n.handoff!)} className={chip}>{t('chat.handoffStart', { title: n.handoff })} →</button>
+        )}
+        {isLast && backBtn}
+      </div>
+    );
+  }
 
   if (n.kind === 'resolve') {
     return (

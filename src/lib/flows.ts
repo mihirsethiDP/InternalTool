@@ -24,6 +24,11 @@ export interface FlowNode {
   fail_next?: string; // action only, optional (where "Didn't work" goes; default: next escalate/resolve)
   source_section?: string; // action provenance — consolidated doc section key
   skill?: string; // escalate only — escalation_contacts.skill_key
+  // resolve only, optional: this flow ends because a DIFFERENT flow is the
+  // real fix ("live view can't load while the camera is offline"). The runner
+  // offers to start that flow (matched by title, same category) instead of
+  // labelling the hand-off "should be fixed".
+  handoff?: string;
   // Classification matrix, action nodes (AI-proposed, admin-editable):
   visit?: 'no_visit' | 'visit_required';
   // action nodes reuse `skill` semantics differently: for actions it is
