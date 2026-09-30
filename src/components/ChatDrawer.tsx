@@ -1018,8 +1018,20 @@ export default function ChatDrawer({ open, onClose, seed, seedScope, onSeedConsu
   // which model first (the existing elicitation), otherwise it starts at once.
   async function startGuide(g: GuideOffer) {
     if (sendingRef.current) return;
+    if (g.kind === 'issue') {
+      pendingRef.current = { kind: 'issue', issue: g.issue, info: g.info, origQuery: g.origQuery };
+      const elicit = buildElicit(g.issue, g.info, scope);
+      if (!elicit) { pendingRef.current = null; return; }
+      if (elicit.chips.some((c) => c.act === 'model' || c.act === 'unsure')) {
+        setTurns((tt) => [...tt, { role: 'user', text: t2('chat.walkMe') } as Turn, { role: 'bot', query: g.origQuery, loading: false, narrowedLabel: scope?.label, elicit: { ...elicit, chips: elicit.chips.filter((c) => c.act !== 'steps') } }]);
+        return;
+      }
+      // handleElicit echoes the chip label itself.
+      await handleElicit({ label: t2('chat.walkMe'), act: 'start' });
+      return;
+    }
     setTurns((tt) => [...tt, { role: 'user', text: t2('chat.walkMe') } as Turn]);
-    if (g.kind === 'flow') {
+    {
       pendingRef.current = { kind: 'flow', flow: g.flow, origQuery: g.origQuery };
       sendingRef.current = true;
       try {
@@ -1027,17 +1039,7 @@ export default function ChatDrawer({ open, onClose, seed, seedScope, onSeedConsu
         setTurns((tt) => [...tt, { role: 'bot', query: g.origQuery, loading: true }]);
         await startFlow(g.flow, scope?.label);
       } finally { sendingRef.current = false; }
-      return;
     }
-    pendingRef.current = { kind: 'issue', issue: g.issue, info: g.info, origQuery: g.origQuery };
-    const elicit = buildElicit(g.issue, g.info, scope);
-    if (!elicit) { pendingRef.current = null; return; }
-    const needsModel = elicit.chips.some((c) => c.act === 'model' || c.act === 'unsure');
-    if (needsModel) {
-      setTurns((tt) => [...tt, { role: 'bot', query: g.origQuery, loading: false, narrowedLabel: scope?.label, elicit: { ...elicit, chips: elicit.chips.filter((c) => c.act !== 'steps') } }]);
-      return;
-    }
-    await handleElicit({ label: t2('chat.startFix'), act: 'start' });
   }
 
   // ---------- Contact directory ----------
@@ -1887,7 +1889,7 @@ export default function ChatDrawer({ open, onClose, seed, seedScope, onSeedConsu
                   Shown on every real attempt, including no-result (they may have
                   resolved it via the web / a ticket). Mid-flow nodes skip it —
                   feedback belongs at the end of a diagnostic run. */}
-              {!turn.loading && !turn.note && !turn.probe && !turn.elicit && !turn.multi && (!turn.flowNode || turn.flowTerminal) && (
+              {!turn.loading && !turn.note && !turn.probe && !turn.elicit && !turn.multi && !turn.leaveFlow && !turn.aside && (!turn.flowNode || turn.flowTerminal) && (
                 <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5">
                   <AnswerFeedback
                     key={`${turn.narrowedLabel ?? ''}|${turn.answer ? turn.answer.slice(0, 24) : (turn.hits?.[0]?.document_id ?? '')}`}
@@ -1904,7 +1906,7 @@ export default function ChatDrawer({ open, onClose, seed, seedScope, onSeedConsu
               {/* Guided sensor picker — shown until narrowed to a specific model.
                   When a TYPE is already inferred/scoped it jumps to the make step.
                   Hidden during a flow run — the flow's own chips drive the turn. */}
-              {!turn.loading && !turn.note && !turn.elicit && !turn.multi && !turn.flowNode && !flowRun && i === turns.length - 1 && !scope?.modelId && (
+              {!turn.loading && !turn.note && !turn.elicit && !turn.multi && !turn.flowNode && !turn.contactCard && !turn.leaveFlow && !turn.aside && !flowRun && i === turns.length - 1 && !scope?.modelId && (
                 <GuidedNarrow
                   key={`gn-${i}-${scope?.categoryId ?? 'none'}`}
                   initialCategoryId={scope?.categoryId ?? undefined}
