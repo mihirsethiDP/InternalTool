@@ -1890,7 +1890,7 @@ export default function ChatDrawer({ open, onClose, seed, seedScope, onSeedConsu
                   Shown on every real attempt, including no-result (they may have
                   resolved it via the web / a ticket). Mid-flow nodes skip it —
                   feedback belongs at the end of a diagnostic run. */}
-              {!turn.loading && !turn.note && !turn.probe && !turn.elicit && !turn.multi && !turn.leaveFlow && !turn.aside && (!turn.flowNode || turn.flowTerminal) && (
+              {!turn.loading && !turn.note && !turn.probe && !turn.elicit && !turn.multi && !turn.leaveFlow && !turn.aside && (!turn.flowNode || (turn.flowTerminal && !turn.flowNode.handoff)) && (
                 <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5">
                   <AnswerFeedback
                     key={`${turn.narrowedLabel ?? ''}|${turn.answer ? turn.answer.slice(0, 24) : (turn.hits?.[0]?.document_id ?? '')}`}
