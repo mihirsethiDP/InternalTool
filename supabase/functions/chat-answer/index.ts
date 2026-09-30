@@ -42,7 +42,7 @@ interface Chunk {
 // Ask for it with { mode: "ping" }: guessing which copy of this file is
 // deployed cost us a debugging cycle when a stale paste kept routing spec
 // sheets to "other".
-const FN_BUILD = '2026-09-30-fast-lane';
+const FN_BUILD = '2026-09-30-flow-reply';
 
 const SECTION_LABEL: Record<string, string> = {
   install_commission: 'Install & Commission', configure: 'Configure', inspect: 'Inspect',
@@ -245,6 +245,7 @@ Deno.serve(async (req) => {
     : payload.mode === 'translate' ? 'translate'
     : payload.mode === 'transcribe' ? 'transcribe'
     : payload.mode === 'fetch-url' ? 'fetch-url'
+    : payload.mode === 'flow-reply' ? 'flow-reply'
     : payload.mode === 'ping' ? 'ping'
     : 'docs';
 
