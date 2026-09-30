@@ -1260,6 +1260,7 @@ export default function ChatDrawer({ open, onClose, seed, seedScope, onSeedConsu
           : t('chat.issueForModel', { issue: issue.label, label: info.models[0].label }),
         chips: [
           { label: t('chat.yesStart'), act: 'model', modelId: info.models[0].id },
+          { label: t('chat.justSteps'), act: 'steps' },
           { label: t('chat.notThis'), act: 'reject' },
         ],
       };
