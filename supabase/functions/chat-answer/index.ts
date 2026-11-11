@@ -42,7 +42,7 @@ interface Chunk {
 // Ask for it with { mode: "ping" }: guessing which copy of this file is
 // deployed cost us a debugging cycle when a stale paste kept routing spec
 // sheets to "other".
-const FN_BUILD = '2026-09-30-flow-reply-2';
+const FN_BUILD = '2026-11-11-ocr-pdf';
 
 const SECTION_LABEL: Record<string, string> = {
   install_commission: 'Install & Commission', configure: 'Configure', inspect: 'Inspect',
@@ -247,6 +247,7 @@ Deno.serve(async (req) => {
     : payload.mode === 'fetch-url' ? 'fetch-url'
     : payload.mode === 'flow-reply' ? 'flow-reply'
     : payload.mode === 'ping' ? 'ping'
+    : payload.mode === 'ocr-pdf' ? 'ocr-pdf'
     : 'docs';
 
   const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
@@ -655,6 +656,63 @@ Deno.serve(async (req) => {
   // audio, and it is far stronger on accents and Hinglish code-switching.
   // The sensor catalogue is passed as a bias prompt so "MAG-110" and "OCEMS"
   // come back spelled correctly rather than phonetically.
+  // ---------- OCR-PDF MODE: read a scanned PDF (no text layer) with Claude ----------
+  // Vendor manuals in India are very often scans: pdf.js finds 0 characters
+  // and the submission reached the review queue empty (the Microtek 1 kVA
+  // manual, 18 pages, 205 characters). The file is already in storage; Claude
+  // reads the pages as images and returns clean markdown. Uploaders/admins.
+  if (mode === 'ocr-pdf') {
+    if (!ANTHROPIC_API_KEY) return json({ error: 'OCR not configured (no Anthropic key)' }, 500);
+    const supabase = createClient(SUPABASE_URL, SERVICE_KEY);
+    const token = (req.headers.get('Authorization') ?? '').replace(new RegExp('^Bearer' + String.fromCharCode(92) + 's+', 'i'), '');
+    const { data: who } = await supabase.auth.getUser(token);
+    if (!who?.user) return json({ error: 'unauthorized' }, 401);
+    const { data: prof } = await supabase.from('profiles').select('role').eq('id', who.user.id).maybeSingle();
+    if (!['uploader', 'admin'].includes((prof as any)?.role)) return json({ error: 'uploaders and admins only' }, 403);
+    const storagePath = ((payload as any).storage_path ?? '').toString().trim();
+    if (!storagePath || /[^A-Za-z0-9._\-\/]/.test(storagePath)) return json({ error: 'storage_path required' }, 400);
+    const { data: blob, error: dlErr } = await supabase.storage.from('documents').download(storagePath);
+    if (dlErr || !blob) return json({ error: 'file not found in storage' }, 404);
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    const MAX = 25 * 1024 * 1024;
+    if (bytes.byteLength > MAX) return json({ error: 'file is larger than 25 MB — split it before OCR' }, 413);
+    let b64 = '';
+    for (let i = 0; i < bytes.byteLength; i += 0x8000) b64 += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+    b64 = btoa(b64);
+    const sys = 'You transcribe scanned equipment manuals for water-treatment technicians. Output clean Markdown that preserves the document\'s own headings (as ## / ###), numbered steps, bullet lists, tables (as Markdown tables), warnings and specifications. Keep model numbers, part names, units and values exactly as printed. Do not summarise, do not add commentary, do not invent text for unreadable areas — write [illegible] there. Skip page headers/footers and decorative text.';
+    const body = {
+      model: anthropicWorkingModel ?? ANTHROPIC_MODEL,
+      max_tokens: 16000,
+      system: sys,
+      temperature: 0,
+      messages: [{ role: 'user', content: [
+        { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: b64 } },
+        { type: 'text', text: 'Transcribe this manual into Markdown. Start with a one-line "# <document title>" taken from the cover.' },
+      ] }],
+    };
+    const tryModels = [...new Set([anthropicWorkingModel, ANTHROPIC_MODEL, ...ANTHROPIC_FALLBACK_MODELS].filter(Boolean) as string[])];
+    for (const m of tryModels) {
+      const res = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' },
+        body: JSON.stringify({ ...body, model: m }),
+      });
+      if (!res.ok) {
+        const errText = await res.text();
+        console.error('ocr error', m, res.status, errText.slice(0, 300));
+        lastProviderError = { provider: 'anthropic', status: res.status, message: errText.slice(0, 200) };
+        if (res.status === 404 || /not_found/i.test(errText)) continue;
+        return json({ error: 'OCR failed: ' + errText.slice(0, 160), status: res.status }, 502);
+      }
+      const out = await res.json();
+      anthropicWorkingModel = m;
+      const text = (out?.content ?? []).filter((b: any) => b.type === 'text').map((b: any) => b.text).join('').trim();
+      if (!text) return json({ error: 'OCR returned no text' }, 502);
+      return json({ text, pages: null, model: m, truncated: out?.stop_reason === 'max_tokens' });
+    }
+    return json({ error: 'no Anthropic model accepted the document' }, 502);
+  }
+
   if (mode === 'transcribe') {
     const supabase = createClient(SUPABASE_URL, SERVICE_KEY);
     const token = (req.headers.get('Authorization') ?? '').replace(/^Bearer\s+/i, '');

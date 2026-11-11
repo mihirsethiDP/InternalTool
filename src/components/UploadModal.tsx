@@ -3,7 +3,8 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useLocation } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import CategoryOptions from './CategoryOptions';
-import { extractPdfText, chunkPage, sanitizeText } from '../lib/pdf';
+import { chunkPage, sanitizeText } from '../lib/pdf';
+import { extractFileText, extractionKind } from '../lib/extract';
 import { analyzeUpload, AUTOFILL_CONFIDENCE, type UploadAnalysis } from '../lib/analyzeUpload';
 import { classifyDoc, MISMATCH_CONFIDENCE } from '../lib/classify';
 import AddSensorModal from './AddSensorModal';
@@ -21,7 +22,7 @@ interface BatchItem {
   file: File;
   title: string;
   typeId: string;
-  extracted: { text: string; pages: number } | null;
+  extracted: { text: string; pages: number; needsOcr?: boolean } | null;
   analysis: UploadAnalysis | null;
   reading: boolean;
   state: 'idle' | 'uploading' | 'done' | 'error';
@@ -59,6 +60,10 @@ export function UploadProvider({ children }: { children: ReactNode }) {
     </UploadCtx.Provider>
   );
 }
+
+// Legacy .doc and images have no reader in the browser.
+const UNSUPPORTED_MSG = (name: string) => `Can’t read ${name}: please save it as .docx or PDF and upload that (images and old .doc files can’t be read).`;
+const SCAN_NOTE = 'This looks like a scanned PDF (no text layer). It will be read page by page after upload — allow a minute.';
 
 function fileIcon(name: string) {
   const ext = name.split('.').pop()?.toLowerCase();
@@ -99,7 +104,7 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
   // Extract on pick so the uploader can confirm the PDF was read (catches
   // scanned/image-only PDFs before they waste a review round), and so submit
   // reuses the text instead of extracting twice.
-  const [extracted, setExtracted] = useState<{ text: string; pages: number } | null>(null);
+  const [extracted, setExtracted] = useState<{ text: string; pages: number; needsOcr?: boolean } | null>(null);
   const [reading, setReading] = useState(false);
   // AI pre-fill: detected activity types + sensor. Suggestions only — the
   // *Touched flags make sure a manual choice is never overwritten.
@@ -182,19 +187,22 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
 
   function pickFile(f: File | null) {
     setFile(f); setError(null); setExtracted(null); setAnalysis(null); setPrestored(null);
-    if (f && (/\.pdf$/i.test(f.name) || /pdf/i.test(f.type))) {
-      setReading(true);
-      extractPdfText(f)
-        .then((pages) => {
-          const text = pages.map((p) => `[Page ${p.page}]\n${p.text}`).join('\n\n');
-          setExtracted({ text, pages: pages.length });
-          runAnalysis(text, f.name.replace(/\.[^.]+$/, ''));
-        })
-        // On a hard failure leave `extracted` null so submit() retries fresh —
-        // never store empty text from a transient parse error.
-        .catch((e) => { console.warn('pdf extract failed', e); setExtracted(null); })
-        .finally(() => setReading(false));
+    if (!f) return;
+    if (extractionKind(f) === 'unsupported') {
+      setError(UNSUPPORTED_MSG(f.name));
+      return;
     }
+    setReading(true);
+    extractFileText(f)
+      .then((r) => {
+        setExtracted({ text: r.text, pages: r.pages, needsOcr: r.needsOcr });
+        if (r.needsOcr) setStatus(SCAN_NOTE);
+        if (r.text) runAnalysis(r.text, f.name.replace(/\.[^.]+$/, ''));
+      })
+      // On a hard failure leave `extracted` null so submit() retries fresh —
+      // never store empty text from a transient parse error.
+      .catch((e) => { console.warn('text extract failed', e); setExtracted(null); setError(`Couldn’t read ${f.name}: ${e?.message ?? e}`); })
+      .finally(() => setReading(false));
   }
 
   // Paste a vendor link: the edge function downloads it server-side (the
@@ -256,13 +264,15 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
   // first confident hit — the shared sensor fields, unless already chosen.
   async function processBatchItem(idx: number, f: File) {
     let text = '';
-    if (/\.pdf$/i.test(f.name) || /pdf/i.test(f.type)) {
-      try {
-        const pages = await extractPdfText(f);
-        text = pages.map((p) => `[Page ${p.page}]\n${p.text}`).join('\n\n');
-        patchItem(idx, { extracted: { text, pages: pages.length } });
-      } catch (e) { console.warn('batch pdf extract failed', e); }
+    if (extractionKind(f) === 'unsupported') {
+      patchItem(idx, { state: 'error', error: UNSUPPORTED_MSG(f.name), reading: false });
+      return;
     }
+    try {
+      const r = await extractFileText(f);
+      text = r.text;
+      patchItem(idx, { extracted: { text, pages: r.pages, needsOcr: r.needsOcr } });
+    } catch (e) { console.warn('batch text extract failed', e); }
     if (text) {
       const a = await analyzeUpload(text, f.name.replace(/\.[^.]+$/, ''));
       if (a) {
@@ -403,8 +413,20 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
   }
 
   // Upload + insert ONE submission; shared by both modes. Throws on failure.
+  // A scanned PDF has no text layer: the edge function reads the stored file
+  // with Claude and the text lands on the submission before review.
+  async function ocrSubmission(submissionId: string, storagePath: string): Promise<boolean> {
+    try {
+      const { data, error } = await supabase.functions.invoke('chat-answer', { body: { mode: 'ocr-pdf', storage_path: storagePath } });
+      const text = (data as any)?.text as string | undefined;
+      if (error || !text) { console.warn('ocr failed', error?.message ?? (data as any)?.error); return false; }
+      await supabase.from('document_submissions').update({ extracted_text: sanitizeText(text) }).eq('id', submissionId);
+      return true;
+    } catch (e) { console.warn('ocr failed', e); return false; }
+  }
+
   async function submitOne(f: File, meta: {
-    title: string; typeId: string; extractedText: string; pageCount: number | null; detected: string[] | null;
+    title: string; typeId: string; extractedText: string; pageCount: number | null; detected: string[] | null; needsOcr?: boolean;
   }): Promise<string> {
     const safeName = f.name.replace(/[^a-zA-Z0-9._-]+/g, '_');
     const storagePath = `${Date.now()}_${safeName}`;
@@ -426,6 +448,7 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
       detected_sections: meta.detected,
     }).select('id').single();
     if (insert.error || !insert.data) throw new Error('Submission failed: ' + (insert.error?.message ?? '?'));
+    if (meta.needsOcr) await ocrSubmission(insert.data.id as string, storagePath);
     return insert.data.id as string;
   }
 
@@ -446,6 +469,7 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
           title: it.title.trim(), typeId: it.typeId,
           extractedText: it.extracted?.text ?? '', pageCount: it.extracted?.pages ?? null,
           detected: it.analysis?.sections.length ? it.analysis.sections.map((s) => s.key) : null,
+          needsOcr: it.extracted?.needsOcr,
         });
         firstId = firstId ?? id;
         doneCount++;
@@ -496,17 +520,19 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
     // to store on the submission for the checker.
     let extractedText = '';
     let pageCount: number | null = null;
+    let needsOcr = false;
     if (extracted) {
       // Already read when the file was picked — reuse it.
-      extractedText = extracted.text; pageCount = extracted.pages || null;
-    } else if (/\.pdf$/i.test(file.name) || /pdf/i.test(file.type)) {
+      extractedText = extracted.text; pageCount = extracted.pages || null; needsOcr = !!extracted.needsOcr;
+    } else if (extractionKind(file) !== 'unsupported') {
       try {
-        setStatus('Extracting PDF text…');
-        const pages = await extractPdfText(file);
-        pageCount = pages.length;
-        extractedText = pages.map((p) => `[Page ${p.page}]\n${p.text}`).join('\n\n');
+        setStatus('Extracting text…');
+        const r = await extractFileText(file);
+        pageCount = r.pages || null;
+        extractedText = r.text;
+        needsOcr = !!r.needsOcr;
       } catch (e: any) {
-        console.warn('pdf extract failed', e);
+        console.warn('text extract failed', e);
       }
     }
 
@@ -557,6 +583,11 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
       setBusy(false);
       setError('Submission failed: ' + (insert.error?.message ?? '?'));
       return;
+    }
+    if (needsOcr) {
+      setProgress(70); setStatus('Scanned PDF — reading the pages (this can take a minute)…');
+      const ok = await ocrSubmission(insert.data.id as string, storagePath);
+      if (!ok) setStatus('Submitted. The scan could not be read automatically — the reviewer will see that.');
     }
     // Notify all admins that a new submission has landed (best-effort, non-blocking)
     try {

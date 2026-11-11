@@ -8,7 +8,8 @@ import { useAuth, canUpload } from '../lib/auth';
 import PageHeader from '../components/PageHeader';
 import QueryError from '../components/QueryError';
 import { useUpload } from '../components/UploadModal';
-import { extractPdfText, sanitizeText } from '../lib/pdf';
+import { sanitizeText } from '../lib/pdf';
+import { extractFileText, extractionKind } from '../lib/extract';
 import { fetchMyScore, POINTS } from '../lib/contributions';
 import { SECTION_LABEL } from '../lib/consolidated';
 import type { SubmissionStatus, SubmissionSection } from '../lib/types';
@@ -252,14 +253,22 @@ function ReviseModal({ submission, onClose, onDone }: { submission: any; onClose
         if (up.error) throw up.error;
         update.storage_path = storagePath;
         update.size_bytes = file.size;
-        if (/\.pdf$/i.test(file.name) || /pdf/i.test(file.type)) {
-          setStatus('Extracting text…');
-          try {
-            const pages = await extractPdfText(file);
-            update.page_count = pages.length;
-            update.extracted_text = sanitizeText(pages.map((p) => `[Page ${p.page}]\n${p.text}`).join('\n\n'));
-          } catch { /* keep prior extracted_text */ }
+        if (extractionKind(file) === 'unsupported') {
+          throw new Error(`Can’t read ${file.name}: please save it as .docx or PDF and upload that.`);
         }
+        setStatus('Extracting text…');
+        try {
+          const r = await extractFileText(file);
+          update.page_count = r.pages || null;
+          if (r.needsOcr) {
+            setStatus('Scanned PDF — reading the pages (this can take a minute)…');
+            const { data } = await supabase.functions.invoke('chat-answer', { body: { mode: 'ocr-pdf', storage_path: storagePath } });
+            const t = (data as any)?.text as string | undefined;
+            if (t) update.extracted_text = sanitizeText(t);
+          } else if (r.text) {
+            update.extracted_text = sanitizeText(r.text);
+          }
+        } catch { /* keep prior extracted_text */ }
       }
 
       setStatus('Resubmitting…');

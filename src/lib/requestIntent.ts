@@ -38,3 +38,15 @@ export function contactSkillHint(text: string): string | null {
   if (/(vendor|oem|manufacturer|supplier|company|customer care|brand)/.test(q)) return 'vendor_support';
   return null;
 }
+
+// ---- Document requests ----
+// "manual of ups", "router docs", "do you have any document about camera?",
+// "ups docx of microtek" — they want the reference itself, not an answer.
+const DOC_WORDS = /\b(manual|manuals|user manual|document|documents|documentation|docs|doc|docx|pdf|datasheet|data sheet|spec sheet|brochure|catalog|catalogue|handbook|reference|file|files)\b/i;
+const DOC_ASK = /\b(do you have|is there|any|share|send|give|show|open|where is|need|want|chahiye|dikhao|bhejo|of|for|about|ka|ki|ke)\b/i;
+export function isDocumentRequest(text: string): boolean {
+  const q = (text ?? '').trim();
+  if (!q || !DOC_WORDS.test(q)) return false;
+  const words = q.split(/\s+/).length;
+  return words <= 3 || DOC_ASK.test(q);
+}

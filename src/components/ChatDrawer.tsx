@@ -14,7 +14,7 @@ import { SECTION_LABEL, parseSections } from '../lib/consolidated';
 import { renderMarkdown, normalizeAnswerSteps } from '../lib/markdown';
 import { stripCitationMarkers } from '../lib/text';
 import { conversationalReply, isVagueQuery } from '../lib/chatIntent';
-import { isProcedureRequest, isContactRequest, contactSkillHint } from '../lib/requestIntent';
+import { isProcedureRequest, isContactRequest, contactSkillHint, isDocumentRequest } from '../lib/requestIntent';
 import { interpretFlowReplyLocal, flowReplyLabel, flowReplyNext, type FlowReply } from '../lib/flowReply';
 import { matchRule, type RouteMatch } from '../lib/routing';
 import { matchFlow, getNode, failTarget, fetchContacts, contactsForSkill, type DiagnosticFlow, type FlowNode, type EscalationContact } from '../lib/flows';
@@ -760,6 +760,14 @@ export default function ChatDrawer({ open, onClose, seed, seedScope, onSeedConsu
       // "Whom do I call / EZVIZ contact details": the directory answers this,
       // not the manuals. Only when something is actually on file — otherwise
       // the documentation may still name the vendor's helpline.
+      // "manual of ups", "router docs": hand over the references themselves.
+      if (isDocumentRequest(mq)) {
+        const hits = await referencesFor(mq, activeScope);
+        if (hits.length) {
+          setTurns((tt) => fillLoadingTurn(tt, { role: 'bot', query: q, loading: false, narrowedLabel: activeScope?.label, hits }));
+          return;
+        }
+      }
       if (isContactRequest(mq)) {
         const card = await contactCardFor(mq, activeScope);
         if (card) {
@@ -913,7 +921,9 @@ export default function ChatDrawer({ open, onClose, seed, seedScope, onSeedConsu
       // ("...not working" matched "Automatic cleaning not working" and dropped
       // the user into an unrelated fix), and a wrong fix is worse than a
       // question. If a rule still routed it, point at that procedure instead.
-      if (vague) {
+      // A procedure request is never "vague" — "how to on ups" wants the
+      // start-up steps, not "what is the UPS doing?".
+      if (vague && !procedure) {
         if (routed) {
           setTurns((t) => fillLoadingTurn(t, { role: 'bot', query: q, loading: false, narrowedLabel: activeScope?.label, answer: null, citations: [], hits: [], routed }));
           return;
@@ -1088,6 +1098,34 @@ export default function ChatDrawer({ open, onClose, seed, seedScope, onSeedConsu
       docsByCatRef.current.set(categoryId, has);
       return has;
     } catch { return true; } // unsure → let the normal path try
+  }
+
+  // ---------- Document requests ----------
+  // The references for the device in scope — or for the device the message
+  // names ("manual of ups") — as open-able cards.
+  async function referencesFor(mq: string, sc: ScopeT | null): Promise<Hit[]> {
+    try {
+      let categoryId = sc?.categoryId ?? null;
+      let modelId = sc?.modelId ?? null;
+      if (!categoryId) {
+        const named = namedCategory(mq, await loadCategories());
+        if (named) categoryId = named.id;
+      }
+      if (!categoryId && !modelId) return [];
+      let q = supabase.from('consolidated_docs').select('id, content_markdown, sensor_models!inner(id, model_no, name, is_general, category_id, sensor_makes(name))').is('deleted_at', null).neq('content_markdown', '').limit(12);
+      q = modelId ? q.eq('sensor_model_id', modelId) : q.eq('sensor_models.category_id', categoryId!);
+      const { data } = await q;
+      const rows = ((data ?? []) as any[]).filter((d) => (d.content_markdown ?? '').length > 50);
+      // The user's own make first when they named one ("microtek ups manual").
+      const ql = mq.toLowerCase();
+      rows.sort((a, b) => Number(ql.includes(String(b.sensor_models?.sensor_makes?.name ?? '').toLowerCase().split(' ')[0])) - Number(ql.includes(String(a.sensor_models?.sensor_makes?.name ?? '').toLowerCase().split(' ')[0])));
+      return rows.map((d) => {
+        const sm = d.sensor_models; const mk = Array.isArray(sm?.sensor_makes) ? sm.sensor_makes[0] : sm?.sensor_makes;
+        const title = sm?.is_general ? `${sm.name ?? sm.model_no}` : `${mk?.name ?? ''} ${sm?.model_no || sm?.name || ''}`.trim();
+        const body = String(d.content_markdown).replace(/^#+ .*$/gm, '').replace(/\s+/g, ' ').trim();
+        return { document_id: d.id, document_title: title, section: 'other' as SubmissionSection, snippet: body.slice(0, 220) + (body.length > 220 ? '…' : ''), rank: 0 };
+      });
+    } catch (e) { console.warn('referencesFor failed', e); return []; }
   }
 
   // ---------- Contact directory ----------

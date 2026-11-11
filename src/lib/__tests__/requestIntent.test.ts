@@ -1,5 +1,16 @@
 import { describe, it, expect } from 'vitest';
-import { isProcedureRequest, isContactRequest, contactSkillHint } from '../requestIntent';
+import { isProcedureRequest, isContactRequest, contactSkillHint, isDocumentRequest } from '../requestIntent';
+
+describe('isDocumentRequest', () => {
+  it('recognises requests for the document itself', () => {
+    for (const t of ['manual of ups', 'router docs', 'do you have any document about camera?', 'ups docx of microtek', 'user manual', 'datasheet for MAG-110'])
+      expect(isDocumentRequest(t)).toBe(true);
+  });
+  it('ignores ordinary questions', () => {
+    for (const t of ['camera showing offline', 'how to on ups', 'pH drifting', 'ups me ENA show kar rha hai'])
+      expect(isDocumentRequest(t)).toBe(false);
+  });
+});
 
 describe('isProcedureRequest', () => {
   it('recognises requests for steps / procedures', () => {
