@@ -42,7 +42,7 @@ interface Chunk {
 // Ask for it with { mode: "ping" }: guessing which copy of this file is
 // deployed cost us a debugging cycle when a stale paste kept routing spec
 // sheets to "other".
-const FN_BUILD = '2026-11-11-hybrid-retrieval';
+const FN_BUILD = '2026-11-11-model-aware-answers';
 
 const SECTION_LABEL: Record<string, string> = {
   install_commission: 'Install & Commission', configure: 'Configure', inspect: 'Inspect',
@@ -56,7 +56,9 @@ const SYSTEM_PROMPT = [
   'Answer the technician\'s question using ONLY the reference passages provided in the user message.',
   'Rules:',
   '- Use only facts found in the passages. Do NOT invent steps, numbers, part names, or specifications.',
-  '- If the passages do not actually answer the question, reply exactly: "This isn\'t documented yet for the sensors in the library. Try narrowing to your specific make and model, or raise it with your supervisor." Do not pad it.',
+  '- The question often names only the device TYPE ("BOD sensor", "the UPS") while the passages come from specific models of that type. That is expected: answer from the passage that covers the asked task, and start with one short line naming the model it is written for (e.g. "For the HACH UVAS plus sc:"). If two models differ, give the steps for each, briefly.',
+  '- Answer whenever the passages contain the steps, values or facts asked for, even partially — say what is covered and stop there.',
+  '- Only if NO passage covers the question at all, reply exactly: "This isn\'t documented yet for the sensors in the library. Try narrowing to your specific make and model, or raise it with your supervisor." Do not pad it.',
   '- Be concise and practical. Prefer short numbered steps a technician can follow on site.',
   '- Format steps as a markdown numbered list with EACH step on its own line (e.g. "1. ...\\n2. ...\\n3. ..."). Never run multiple numbered steps together in one sentence.',
   '- Do NOT put reference markers in the answer ([1], 【2】, footnotes). The sources are listed separately for the reader; markers mid-instruction only get in the way.',
