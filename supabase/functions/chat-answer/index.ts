@@ -42,7 +42,7 @@ interface Chunk {
 // Ask for it with { mode: "ping" }: guessing which copy of this file is
 // deployed cost us a debugging cycle when a stale paste kept routing spec
 // sheets to "other".
-const FN_BUILD = '2026-11-11-ocr-pdf';
+const FN_BUILD = '2026-11-11-ocr-url';
 
 const SECTION_LABEL: Record<string, string> = {
   install_commission: 'Install & Commission', configure: 'Configure', inspect: 'Inspect',
@@ -671,22 +671,20 @@ Deno.serve(async (req) => {
     if (!['uploader', 'admin'].includes((prof as any)?.role)) return json({ error: 'uploaders and admins only' }, 403);
     const storagePath = ((payload as any).storage_path ?? '').toString().trim();
     if (!storagePath || /[^A-Za-z0-9._\-\/]/.test(storagePath)) return json({ error: 'storage_path required' }, 400);
-    const { data: blob, error: dlErr } = await supabase.storage.from('documents').download(storagePath);
-    if (dlErr || !blob) return json({ error: 'file not found in storage' }, 404);
-    const bytes = new Uint8Array(await blob.arrayBuffer());
-    const MAX = 25 * 1024 * 1024;
-    if (bytes.byteLength > MAX) return json({ error: 'file is larger than 25 MB — split it before OCR' }, 413);
-    let b64 = '';
-    for (let i = 0; i < bytes.byteLength; i += 0x8000) b64 += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
-    b64 = btoa(b64);
+    // The bytes never pass through this worker: an 8 MB scan turned into
+    // base64 here blew the edge function's CPU/memory budget
+    // (WORKER_RESOURCE_LIMIT). Claude fetches the PDF itself from a short-lived
+    // signed URL.
+    const { data: signed, error: sErr } = await supabase.storage.from('documents').createSignedUrl(storagePath, 900);
+    if (sErr || !signed?.signedUrl) return json({ error: 'file not found in storage' }, 404);
     const sys = 'You transcribe scanned equipment manuals for water-treatment technicians. Output clean Markdown that preserves the document\'s own headings (as ## / ###), numbered steps, bullet lists, tables (as Markdown tables), warnings and specifications. Keep model numbers, part names, units and values exactly as printed. Do not summarise, do not add commentary, do not invent text for unreadable areas — write [illegible] there. Skip page headers/footers and decorative text.';
     const body = {
       model: anthropicWorkingModel ?? ANTHROPIC_MODEL,
-      max_tokens: 16000,
+      max_tokens: 12000,
       system: sys,
       temperature: 0,
       messages: [{ role: 'user', content: [
-        { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: b64 } },
+        { type: 'document', source: { type: 'url', url: signed.signedUrl } },
         { type: 'text', text: 'Transcribe this manual into Markdown. Start with a one-line "# <document title>" taken from the cover.' },
       ] }],
     };
