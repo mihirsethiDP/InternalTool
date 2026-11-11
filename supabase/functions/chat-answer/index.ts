@@ -42,7 +42,7 @@ interface Chunk {
 // Ask for it with { mode: "ping" }: guessing which copy of this file is
 // deployed cost us a debugging cycle when a stale paste kept routing spec
 // sheets to "other".
-const FN_BUILD = '2026-11-11-answer-quality';
+const FN_BUILD = '2026-11-11-hybrid-retrieval';
 
 const SECTION_LABEL: Record<string, string> = {
   install_commission: 'Install & Commission', configure: 'Configure', inspect: 'Inspect',
@@ -102,12 +102,37 @@ const SEARCH_FILLER = new Set([
   'hai', 'hain', 'ho', 'hota', 'hoti', 'hoga', 'tha', 'thi', 'karna', 'karne', 'karu', 'karun', 'kare', 'kre', 'karo', 'kar', 'karein',
   'mera', 'meri', 'mere', 'apna', 'apni', 'ka', 'ki', 'ke', 'ko', 'se', 'me', 'mein', 'par', 'pe', 'aur', 'bhi', 'ji', 'bhai', 'sir', 'madam',
   'user', 'wants', 'asking', 'asks', 'question', 'regarding', 'related', 'currently', 'since', 'days', 'day',
+  'rha', 'raha', 'rahi', 'rahe', 'rhe', 'rhi', 'gaya', 'gayi', 'hua', 'hui', 'dikh', 'dikha', 'batao', 'bataye', 'bata', 'chahiye', 'procedure', 'steps', 'step',
 ]);
 function searchText(q: string): string {
   const words = (q ?? '').split(/\s+/).filter(Boolean);
   const kept = words.filter((w) => !SEARCH_FILLER.has(w.toLowerCase().replace(/[^a-z0-9]/g, '')));
   // Never strip a question down to nothing or to a single generic word.
   return kept.length >= 1 ? kept.join(' ') : q;
+}
+
+// Words that only NAME the device in scope (its category + aliases, make and
+// model number). Inside a scope they add strictness, not signal.
+async function deviceWordsFor(supabase: any, modelId: string | null, categoryId: string | null): Promise<Set<string>> {
+  const out = new Set<string>(['sensor', 'sensors', 'device', 'meter', 'transmitter', 'probe', 'analyser', 'analyzer', 'instrument']);
+  if (!modelId && !categoryId) return new Set();
+  const add = (s: unknown) => String(s ?? '').toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length >= 2).forEach((w) => out.add(w));
+  try {
+    let catId = categoryId;
+    if (modelId) {
+      const { data: m } = await supabase.from('sensor_models').select('model_no, name, category_id, sensor_makes(name)').eq('id', modelId).maybeSingle();
+      if (m) { add(m.model_no); add(m.name); add((Array.isArray(m.sensor_makes) ? m.sensor_makes[0] : m.sensor_makes)?.name); catId = catId ?? m.category_id; }
+    }
+    if (catId) {
+      const [{ data: c }, { data: ms }] = await Promise.all([
+        supabase.from('sensor_categories').select('name, aliases').eq('id', catId).maybeSingle(),
+        supabase.from('sensor_models').select('model_no, sensor_makes(name)').eq('category_id', catId).eq('is_general', false).limit(60),
+      ]);
+      if (c) { add(c.name); for (const a of c.aliases ?? []) add(a); }
+      for (const m of (ms ?? []) as any[]) { add(m.model_no); add((Array.isArray(m.sensor_makes) ? m.sensor_makes[0] : m.sensor_makes)?.name); }
+    }
+  } catch { /* scope words are an optimisation; never fail the answer */ }
+  return out;
 }
 
 function json(body: unknown, status = 200) {
@@ -1544,21 +1569,62 @@ Deno.serve(async (req) => {
   // never reached "Press and hold ON … to power on the UPS". Question and
   // filler words are dropped from the SEARCH text only; the model still sees
   // the full question.
+  //
+  // Hybrid retrieval (2026-11-11). Once search matched word stems (migration
+  // 059) the all-words match found far more passages, and ts_rank — which
+  // rewards a word repeating — promoted WPS pages for "configure wi-fi router"
+  // and a single WPS passage for "Archer_MR200 ip address" (the login page
+  // never names the model). So:
+  //  1. In a scope, words that only name the device (category, aliases, make,
+  //     model) are dropped — the scope already does that job.
+  //  2. Candidates = the all-words match ∪ each content word on its own.
+  //  3. Rank by how many DISTINCT question words a passage covers, then by
+  //     whether it matched all words, then ts_rank; table-of-contents and
+  //     page-marker fragments are skipped.
   const supabase = createClient(SUPABASE_URL, SERVICE_KEY);
-  const retrievalQ = searchText(query);
-  const { data, error } = await supabase.rpc('chat_retrieve', {
-    q: retrievalQ || query,
-    p_sensor_model_id: sensorModelId,
-    p_category_id: categoryId,
-    p_limit: 8,
-  });
-
-  if (error) {
-    console.error('chat_retrieve error', error);
+  const scopeWords = await deviceWordsFor(supabase, sensorModelId, categoryId);
+  const contentWords = [...new Set(searchText(query).toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length >= 2 && !SEARCH_FILLER.has(w) && !scopeWords.has(w)))];
+  const allQ = contentWords.join(' ') || searchText(query) || query;
+  const rpc = (q: string, limit: number) => supabase.rpc('chat_retrieve', { q, p_sensor_model_id: sensorModelId, p_category_id: categoryId, p_limit: limit });
+  const [all, ...singles] = await Promise.all([
+    rpc(allQ, 12),
+    ...(contentWords.length > 1 ? contentWords.slice(0, 6).map((w) => rpc(w, 6)) : []),
+  ]);
+  if (all.error) {
+    console.error('chat_retrieve error', all.error);
     return json({ error: 'retrieval failed' }, 500);
   }
-
-  const chunks = (data ?? []) as Chunk[];
+  const TOC = /(\.\s?){8,}|(\s\.){8,}/;
+  const cand = new Map<string, Chunk & { inAll: boolean; cover: number }>();
+  const add = (rows: any[] | null, inAll: boolean) => {
+    for (const c of (rows ?? []) as Chunk[]) {
+      const text = String(c.chunk_text ?? '');
+      if (TOC.test(text) || text.replace(/\[Page \d+\]/g, '').trim().length < 60) continue;
+      const key = `${c.document_id}|${c.section}|${text.slice(0, 80)}`;
+      const lower = text.toLowerCase();
+      const cover = contentWords.filter((w) => lower.includes(w.length > 5 ? w.slice(0, w.length - 2) : w)).length;
+      const prev = cand.get(key);
+      if (prev) { prev.inAll = prev.inAll || inAll; continue; }
+      cand.set(key, { ...c, inAll, cover });
+    }
+  };
+  add(all.data, true);
+  for (const s of singles) add((s as any).data, false);
+  // "specifications" rarely appears inside a spec table ("Range 0-1000 mg/L",
+  // "1080p"): for a spec question, also offer the device's data-sheet section.
+  if (/\b(spec|specs|specification|specifications|datasheet|rating|ratings|range|capacity|dimension|dimensions|weight|accuracy|resolution)\b/i.test(query) && (sensorModelId || categoryId)) {
+    let models: string[] = sensorModelId ? [sensorModelId] : [];
+    if (!sensorModelId) { const { data: ms } = await supabase.from('sensor_models').select('id').eq('category_id', categoryId).limit(100); models = ((ms ?? []) as any[]).map((m) => m.id); }
+    if (models.length) {
+      const { data: tds } = await supabase.from('consolidated_doc_chunks').select('chunk_text, section, consolidated_doc_id, sensor_model_id, consolidated_docs(id, sensor_models(model_no, sensor_makes(name)))').in('sensor_model_id', models).eq('section', 'tds').limit(6);
+      const rows = ((tds ?? []) as any[]).map((c) => { const sm = c.consolidated_docs?.sensor_models; const mk = Array.isArray(sm?.sensor_makes) ? sm.sensor_makes[0] : sm?.sensor_makes; return { document_id: c.consolidated_doc_id, document_title: `${mk?.name ?? ''} ${sm?.model_no ?? ''}`.trim(), section: 'tds', chunk_text: c.chunk_text, rank: 0, match_kind: 'section' }; });
+      add(rows, false);
+      for (const r of rows) { const k = `${r.document_id}|tds|${String(r.chunk_text).slice(0, 80)}`; const v = cand.get(k); if (v) v.cover += 1; }
+    }
+  }
+  const chunks = [...cand.values()]
+    .sort((a, b) => (b.cover - a.cover) || (Number(b.inAll) - Number(a.inAll)) || ((b as any).rank - (a as any).rank))
+    .slice(0, 8) as Chunk[];
 
   if (chunks.length === 0) {
     // Nothing in the library — let the client show its "not documented" fallback.
