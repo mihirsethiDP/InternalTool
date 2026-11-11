@@ -757,7 +757,24 @@ export default function ChatDrawer({ open, onClose, seed, seedScope, onSeedConsu
       // Judge vagueness on what the USER actually said (corrected) — the
       // router's normalized restatement below is for retrieval and would make
       // "sensor not working" look specific ("not functioning correctly").
-      let vague = isVagueQuery(mq);
+      // A message that NAMES a different device than the one in scope starts
+      // over for that device. Without this, "ups not working" asked after a
+      // camera question stayed "Answering for Camera" and was matched against
+      // camera fixes only (2026-11-11). Messages that name no device keep the
+      // scope ("still not working" is about the same camera).
+      const catList = await loadCategories();
+      const named = namedCategory(mq, catList);
+      if (activeScope && opts?.scope === undefined && named && activeScope.categoryId && named.id !== activeScope.categoryId) {
+        activeScope = null;
+        setScope(null);
+        plantAskedRef.current.delete(named.id);
+        setTurns((tt) => tt.map((x, i) => (i === tt.length - 1 && x.role === 'bot' && x.loading) ? { ...x, narrowedLabel: undefined } : x));
+      }
+      // Device words say WHICH device, not what is wrong: "ups not working"
+      // is as vague as "not working" once we know it is the UPS.
+      const dWords = deviceWordsFrom(catList);
+      const symptomOnly = mq.split(/\s+/).filter((w) => !dWords.has(w.toLowerCase().replace(/[^a-z0-9]/g, ''))).join(' ');
+      let vague = isVagueQuery(mq) || (!!named && (symptomOnly.trim() === '' || isVagueQuery(symptomOnly)));
       // "Whom do I call / EZVIZ contact details": the directory answers this,
       // not the manuals. Only when something is actually on file — otherwise
       // the documentation may still name the vendor's helpline.
