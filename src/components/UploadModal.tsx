@@ -5,6 +5,7 @@ import { supabase } from '../lib/supabase';
 import CategoryOptions from './CategoryOptions';
 import { chunkPage, sanitizeText } from '../lib/pdf';
 import { extractFileText, extractionKind } from '../lib/extract';
+import { ocrPdfInBrowser } from '../lib/ocr';
 import { analyzeUpload, AUTOFILL_CONFIDENCE, type UploadAnalysis } from '../lib/analyzeUpload';
 import { classifyDoc, MISMATCH_CONFIDENCE } from '../lib/classify';
 import AddSensorModal from './AddSensorModal';
@@ -413,14 +414,14 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
   }
 
   // Upload + insert ONE submission; shared by both modes. Throws on failure.
-  // A scanned PDF has no text layer: the edge function reads the stored file
-  // with Claude and the text lands on the submission before review.
-  async function ocrSubmission(submissionId: string, storagePath: string): Promise<boolean> {
+  // A scanned PDF has no text layer: the browser renders each page and the
+  // edge function has Claude read it; the text lands on the submission
+  // before review. Returns false only when nothing at all could be read.
+  async function ocrSubmission(f: File, submissionId: string): Promise<boolean> {
     try {
-      const { data, error } = await supabase.functions.invoke('chat-answer', { body: { mode: 'ocr-pdf', storage_path: storagePath } });
-      const text = (data as any)?.text as string | undefined;
-      if (error || !text) { console.warn('ocr failed', error?.message ?? (data as any)?.error); return false; }
-      await supabase.from('document_submissions').update({ extracted_text: sanitizeText(text) }).eq('id', submissionId);
+      const r = await ocrPdfInBrowser(f, (p) => setStatus(`Reading scanned page ${p.page} of ${p.total}…`));
+      if (r.failed.length === r.pages) return false;
+      await supabase.from('document_submissions').update({ extracted_text: r.text, page_count: r.pages }).eq('id', submissionId);
       return true;
     } catch (e) { console.warn('ocr failed', e); return false; }
   }
@@ -448,7 +449,7 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
       detected_sections: meta.detected,
     }).select('id').single();
     if (insert.error || !insert.data) throw new Error('Submission failed: ' + (insert.error?.message ?? '?'));
-    if (meta.needsOcr) await ocrSubmission(insert.data.id as string, storagePath);
+    if (meta.needsOcr) await ocrSubmission(f, insert.data.id as string);
     return insert.data.id as string;
   }
 
@@ -586,7 +587,7 @@ function UploadModalInner({ defaults, onClose }: { defaults: UploadDefaults; onC
     }
     if (needsOcr) {
       setProgress(70); setStatus('Scanned PDF — reading the pages (this can take a minute)…');
-      const ok = await ocrSubmission(insert.data.id as string, storagePath);
+      const ok = await ocrSubmission(file, insert.data.id as string);
       if (!ok) setStatus('Submitted. The scan could not be read automatically — the reviewer will see that.');
     }
     // Notify all admins that a new submission has landed (best-effort, non-blocking)

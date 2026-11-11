@@ -42,7 +42,7 @@ interface Chunk {
 // Ask for it with { mode: "ping" }: guessing which copy of this file is
 // deployed cost us a debugging cycle when a stale paste kept routing spec
 // sheets to "other".
-const FN_BUILD = '2026-11-11-ocr-url';
+const FN_BUILD = '2026-11-11-ocr-page';
 
 const SECTION_LABEL: Record<string, string> = {
   install_commission: 'Install & Commission', configure: 'Configure', inspect: 'Inspect',
@@ -247,7 +247,7 @@ Deno.serve(async (req) => {
     : payload.mode === 'fetch-url' ? 'fetch-url'
     : payload.mode === 'flow-reply' ? 'flow-reply'
     : payload.mode === 'ping' ? 'ping'
-    : payload.mode === 'ocr-pdf' ? 'ocr-pdf'
+    : payload.mode === 'ocr-page' ? 'ocr-page'
     : 'docs';
 
   const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
@@ -656,12 +656,14 @@ Deno.serve(async (req) => {
   // audio, and it is far stronger on accents and Hinglish code-switching.
   // The sensor catalogue is passed as a bias prompt so "MAG-110" and "OCEMS"
   // come back spelled correctly rather than phonetically.
-  // ---------- OCR-PDF MODE: read a scanned PDF (no text layer) with Claude ----------
+  // ---------- OCR-PAGE MODE: read ONE scanned page (an image) with Claude ----------
   // Vendor manuals in India are very often scans: pdf.js finds 0 characters
   // and the submission reached the review queue empty (the Microtek 1 kVA
-  // manual, 18 pages, 205 characters). The file is already in storage; Claude
-  // reads the pages as images and returns clean markdown. Uploaders/admins.
-  if (mode === 'ocr-pdf') {
+  // manual, 18 pages, 205 characters). Whole-PDF OCR in this worker failed
+  // twice with WORKER_RESOURCE_LIMIT (base64 of 8 MB = CPU budget; one
+  // two-minute transcription = wall-clock budget), so the BROWSER renders the
+  // pages and sends them here one at a time (src/lib/ocr.ts). Uploaders/admins.
+  if (mode === 'ocr-page') {
     if (!ANTHROPIC_API_KEY) return json({ error: 'OCR not configured (no Anthropic key)' }, 500);
     const supabase = createClient(SUPABASE_URL, SERVICE_KEY);
     const token = (req.headers.get('Authorization') ?? '').replace(new RegExp('^Bearer' + String.fromCharCode(92) + 's+', 'i'), '');
@@ -669,23 +671,21 @@ Deno.serve(async (req) => {
     if (!who?.user) return json({ error: 'unauthorized' }, 401);
     const { data: prof } = await supabase.from('profiles').select('role').eq('id', who.user.id).maybeSingle();
     if (!['uploader', 'admin'].includes((prof as any)?.role)) return json({ error: 'uploaders and admins only' }, 403);
-    const storagePath = ((payload as any).storage_path ?? '').toString().trim();
-    if (!storagePath || /[^A-Za-z0-9._\-\/]/.test(storagePath)) return json({ error: 'storage_path required' }, 400);
-    // The bytes never pass through this worker: an 8 MB scan turned into
-    // base64 here blew the edge function's CPU/memory budget
-    // (WORKER_RESOURCE_LIMIT). Claude fetches the PDF itself from a short-lived
-    // signed URL.
-    const { data: signed, error: sErr } = await supabase.storage.from('documents').createSignedUrl(storagePath, 900);
-    if (sErr || !signed?.signedUrl) return json({ error: 'file not found in storage' }, 404);
-    const sys = 'You transcribe scanned equipment manuals for water-treatment technicians. Output clean Markdown that preserves the document\'s own headings (as ## / ###), numbered steps, bullet lists, tables (as Markdown tables), warnings and specifications. Keep model numbers, part names, units and values exactly as printed. Do not summarise, do not add commentary, do not invent text for unreadable areas — write [illegible] there. Skip page headers/footers and decorative text.';
+    const b64 = ((payload as any).image_b64 ?? '').toString();
+    const mediaType = ((payload as any).media_type ?? 'image/jpeg').toString();
+    if (!b64 || b64.length > 2_800_000) return json({ error: 'image_b64 required (under 2 MB)' }, 400);
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(mediaType)) return json({ error: 'unsupported image type' }, 400);
+    const pageNo = Number((payload as any).page) || 0;
+    const total = Number((payload as any).total) || 0;
+    const sys = 'You transcribe one scanned page of an equipment manual for water-treatment technicians. Output clean Markdown that preserves the page\'s own headings (as ## / ###), numbered steps, bullet lists, tables (as Markdown tables), warnings and specifications. Keep model numbers, part names, units and values exactly as printed. Do not summarise, do not add commentary, do not invent text for unreadable areas — write [illegible] there. Skip page headers/footers, page numbers and decorative text. If the page is blank or only a picture, output a one-line description in square brackets.';
     const body = {
       model: anthropicWorkingModel ?? ANTHROPIC_MODEL,
-      max_tokens: 12000,
+      max_tokens: 3000,
       system: sys,
       temperature: 0,
       messages: [{ role: 'user', content: [
-        { type: 'document', source: { type: 'url', url: signed.signedUrl } },
-        { type: 'text', text: 'Transcribe this manual into Markdown. Start with a one-line "# <document title>" taken from the cover.' },
+        { type: 'image', source: { type: 'base64', media_type: mediaType, data: b64 } },
+        { type: 'text', text: `Transcribe this page${pageNo ? ` (page ${pageNo}${total ? ` of ${total}` : ''})` : ''} into Markdown.` },
       ] }],
     };
     const tryModels = [...new Set([anthropicWorkingModel, ANTHROPIC_MODEL, ...ANTHROPIC_FALLBACK_MODELS].filter(Boolean) as string[])];
@@ -705,10 +705,9 @@ Deno.serve(async (req) => {
       const out = await res.json();
       anthropicWorkingModel = m;
       const text = (out?.content ?? []).filter((b: any) => b.type === 'text').map((b: any) => b.text).join('').trim();
-      if (!text) return json({ error: 'OCR returned no text' }, 502);
-      return json({ text, pages: null, model: m, truncated: out?.stop_reason === 'max_tokens' });
+      return json({ text, page: pageNo, model: m, truncated: out?.stop_reason === 'max_tokens' });
     }
-    return json({ error: 'no Anthropic model accepted the document' }, 502);
+    return json({ error: 'no Anthropic model accepted the image' }, 502);
   }
 
   if (mode === 'transcribe') {

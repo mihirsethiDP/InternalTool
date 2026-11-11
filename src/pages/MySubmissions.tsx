@@ -10,6 +10,7 @@ import QueryError from '../components/QueryError';
 import { useUpload } from '../components/UploadModal';
 import { sanitizeText } from '../lib/pdf';
 import { extractFileText, extractionKind } from '../lib/extract';
+import { ocrPdfInBrowser } from '../lib/ocr';
 import { fetchMyScore, POINTS } from '../lib/contributions';
 import { SECTION_LABEL } from '../lib/consolidated';
 import type { SubmissionStatus, SubmissionSection } from '../lib/types';
@@ -261,10 +262,8 @@ function ReviseModal({ submission, onClose, onDone }: { submission: any; onClose
           const r = await extractFileText(file);
           update.page_count = r.pages || null;
           if (r.needsOcr) {
-            setStatus('Scanned PDF — reading the pages (this can take a minute)…');
-            const { data } = await supabase.functions.invoke('chat-answer', { body: { mode: 'ocr-pdf', storage_path: storagePath } });
-            const t = (data as any)?.text as string | undefined;
-            if (t) update.extracted_text = sanitizeText(t);
+            const o = await ocrPdfInBrowser(file, (p) => setStatus(`Reading scanned page ${p.page} of ${p.total}…`));
+            if (o.failed.length < o.pages) { update.extracted_text = o.text; update.page_count = o.pages; }
           } else if (r.text) {
             update.extracted_text = sanitizeText(r.text);
           }
