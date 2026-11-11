@@ -193,3 +193,18 @@ describe('indexing an admin-added section (049)', () => {
     expect(chunks.map((c) => c.section).sort()).toEqual(['clean', 'tds']);
   });
 });
+
+import { replaceSection as _rs, appendSection as _as, parseSections as _ps, demoteBodyHeadings } from '../consolidated';
+describe('body headings never become section markers', () => {
+  it('demotes # and ## inside a body, keeps ### and text', () => {
+    expect(demoteBodyHeadings('## DESCRIPTION\ntext\n# Title\n### Sub')).toBe('### DESCRIPTION\ntext\n### Title\n### Sub');
+  });
+  it('replace/append keep OCR text inside the chosen section', () => {
+    let md = _rs('', 'tds' as any, '## DESCRIPTION\nSubmersible level transmitter\n## FEATURE\nIP68');
+    md = _as(md, 'install_commission' as any, '## Mounting\nHang the probe');
+    const s = _ps(md) as Record<string, string>;
+    expect(Object.keys(s).filter((k) => s[k]).sort()).toEqual(['install_commission', 'tds']);
+    expect(s.tds).toContain('### DESCRIPTION');
+    expect(s.tds).toContain('IP68');
+  });
+});

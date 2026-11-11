@@ -165,16 +165,26 @@ export function renderSections(sections: Sections): string {
 }
 
 
+// Section markers are `## key` lines, so a body must never contain a level-1/2
+// heading: OCR and vendor text say "## DESCRIPTION" or "## Features", which
+// parseSections read as a NEW section — content moved out of its section and
+// the search index rejected the unknown key (LFIA LFT1, 2026-11-11). Body
+// headings are demoted to ###, keeping their text.
+export function demoteBodyHeadings(body: string): string {
+  return body.replace(/^#{1,2}(?=\s)/gm, '###');
+}
+
 export function replaceSection(md: string, section: SubmissionSection, body: string): string {
   const sections = parseSections(md);
-  sections[section] = body.trim();
+  sections[section] = demoteBodyHeadings(body.trim());
   return renderSections(sections);
 }
 
 export function appendSection(md: string, section: SubmissionSection, addition: string, headerNote = ''): string {
   const sections = parseSections(md);
   const existing = sections[section];
-  const block = headerNote ? `_${headerNote}_\n\n${addition.trim()}` : addition.trim();
+  const clean = demoteBodyHeadings(addition.trim());
+  const block = headerNote ? `_${headerNote}_\n\n${clean}` : clean;
   sections[section] = existing ? `${existing}\n\n---\n\n${block}` : block;
   return renderSections(sections);
 }
