@@ -42,7 +42,7 @@ interface Chunk {
 // Ask for it with { mode: "ping" }: guessing which copy of this file is
 // deployed cost us a debugging cycle when a stale paste kept routing spec
 // sheets to "other".
-const FN_BUILD = '2026-11-11-ocr-page';
+const FN_BUILD = '2026-11-11-answer-quality';
 
 const SECTION_LABEL: Record<string, string> = {
   install_commission: 'Install & Commission', configure: 'Configure', inspect: 'Inspect',
@@ -88,6 +88,27 @@ const WEB_SYSTEM_PROMPT = [
   '- If the results do not actually answer the question, say so briefly.',
   '- Do NOT add a disclaimer about reliability — the app adds one.',
 ].join('\n');
+
+// Words that say how something is ASKED, not what it is about. Removed from
+// the full-text search text so they cannot be mandatory terms (see the
+// retrieval step of the docs answer). English and Hinglish field phrasing.
+const SEARCH_FILLER = new Set([
+  'how', 'what', 'why', 'when', 'where', 'which', 'who', 'whom', 'whose', 'is', 'are', 'was', 'were', 'am', 'be', 'been',
+  'do', 'does', 'did', 'can', 'could', 'should', 'would', 'will', 'shall', 'may', 'might', 'must',
+  'i', 'me', 'my', 'we', 'our', 'you', 'your', 'it', 'its', 'this', 'that', 'these', 'those', 'there', 'here',
+  'the', 'a', 'an', 'to', 'of', 'for', 'in', 'at', 'by', 'with', 'from', 'about', 'into', 'and', 'or', 'but', 'so', 'if', 'then',
+  'please', 'pls', 'plz', 'tell', 'give', 'show', 'share', 'send', 'explain', 'need', 'want', 'help', 'know', 'get', 'got',
+  'kaise', 'kese', 'kaisey', 'kya', 'kyu', 'kyun', 'kab', 'kahan', 'kaha', 'kaun', 'kon', 'konsa', 'kaunsa',
+  'hai', 'hain', 'ho', 'hota', 'hoti', 'hoga', 'tha', 'thi', 'karna', 'karne', 'karu', 'karun', 'kare', 'kre', 'karo', 'kar', 'karein',
+  'mera', 'meri', 'mere', 'apna', 'apni', 'ka', 'ki', 'ke', 'ko', 'se', 'me', 'mein', 'par', 'pe', 'aur', 'bhi', 'ji', 'bhai', 'sir', 'madam',
+  'user', 'wants', 'asking', 'asks', 'question', 'regarding', 'related', 'currently', 'since', 'days', 'day',
+]);
+function searchText(q: string): string {
+  const words = (q ?? '').split(/\s+/).filter(Boolean);
+  const kept = words.filter((w) => !SEARCH_FILLER.has(w.toLowerCase().replace(/[^a-z0-9]/g, '')));
+  // Never strip a question down to nothing or to a single generic word.
+  return kept.length >= 1 ? kept.join(' ') : q;
+}
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -286,14 +307,21 @@ Deno.serve(async (req) => {
   // waited retry on the primary is the last resort before Claude.
   const fastComplete = async (system: string, user: string, jsonMode = false, maxTokens = 900, lane: 'fast' | 'answer' = 'answer'): Promise<string | null> => {
     if (GROQ_API_KEY) {
-      const order = lane === 'fast' ? [FAST_MODEL, MODEL] : [MODEL, FAST_MODEL];
+      // The grounded ANSWER never drops to the small model: given a long stack
+      // of manual passages, gpt-oss-20b too often replied "isn't documented"
+      // when the answer was right there (the busy-minute refusals seen in the
+      // 2026-11-11 replay). When the main model is rate-limited the answer goes
+      // to Claude instead; routing and picks still use the small model first.
+      const order = lane === 'fast' ? [FAST_MODEL, MODEL] : [MODEL];
       const reasoning = lane === 'fast' ? 'low' as const : undefined;
       for (const m of [...new Set(order)]) {
         const raw = await groqComplete(system, user, GROQ_API_KEY, m, jsonMode, maxTokens, 0, { reasoning, noWait: true });
         if (raw) return raw;
         console.warn(`groq failed (model ${m}, ${lastProviderError?.status ?? '?'}) — trying the next lane`);
       }
-      if (lastProviderError?.status === 429) {
+      // A waited retry only for routing; an answer goes straight to Claude
+      // rather than making the operator wait out Groq's minute window.
+      if (lane === 'fast' && lastProviderError?.status === 429) {
         const raw = await groqComplete(system, user, GROQ_API_KEY, order[0], jsonMode, maxTokens, 1, { reasoning });
         if (raw) return raw;
       }
@@ -1510,9 +1538,16 @@ Deno.serve(async (req) => {
   }
 
   // ---------- 1. Retrieve verified content ----------
+  // chat_retrieve requires EVERY word of the search text, and only falls back
+  // to any-word matching when that finds nothing. So "how to start ups"
+  // matched two passages containing "how" (a "Before you start" note) and
+  // never reached "Press and hold ON … to power on the UPS". Question and
+  // filler words are dropped from the SEARCH text only; the model still sees
+  // the full question.
   const supabase = createClient(SUPABASE_URL, SERVICE_KEY);
+  const retrievalQ = searchText(query);
   const { data, error } = await supabase.rpc('chat_retrieve', {
-    q: query,
+    q: retrievalQ || query,
     p_sensor_model_id: sensorModelId,
     p_category_id: categoryId,
     p_limit: 8,

@@ -52,3 +52,17 @@ describe('namedCategory', () => {
     expect(namedCategory('reading is fluctuating', cats)).toBeNull();
   });
 });
+
+describe('only device categories can claim a message by name', () => {
+  const list: CategoryRef[] = [
+    { id: 'wqa', name: 'Water Quality Analyser', aliases: ['OCEMS'], isDevice: true },
+    { id: 'st', name: 'Sensor Testing', aliases: ['Calibration', 'Verification'], isDevice: false },
+    { id: 'io', name: 'I/O List', aliases: ['Modbus'], isDevice: false },
+    { id: 'flow', name: 'Flow', aliases: ['Flowmeter', 'Magmeter'], isDevice: true },
+  ];
+  it('ignores document-type categories', () => {
+    expect(namedCategory('OCEMS calibration procedure', list)?.id).toBe('wqa');
+    expect(namedCategory('flowmeter modbus details', list)?.id).toBe('flow');
+    expect(namedCategory('calibration procedure', list)).toBeNull();
+  });
+});

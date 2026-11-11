@@ -14,7 +14,7 @@ import { SECTION_LABEL, parseSections } from '../lib/consolidated';
 import { renderMarkdown, normalizeAnswerSteps } from '../lib/markdown';
 import { stripCitationMarkers } from '../lib/text';
 import { conversationalReply, isVagueQuery } from '../lib/chatIntent';
-import { isProcedureRequest, isContactRequest, contactSkillHint, isDocumentRequest } from '../lib/requestIntent';
+import { isProcedureRequest, isContactRequest, contactSkillHint, isDocumentRequest, normalizeFieldPhrasing } from '../lib/requestIntent';
 import { interpretFlowReplyLocal, flowReplyLabel, flowReplyNext, type FlowReply } from '../lib/flowReply';
 import { matchRule, type RouteMatch } from '../lib/routing';
 import { matchFlow, getNode, failTarget, fetchContacts, contactsForSkill, type DiagnosticFlow, type FlowNode, type EscalationContact } from '../lib/flows';
@@ -753,6 +753,7 @@ export default function ChatDrawer({ open, onClose, seed, seedScope, onSeedConsu
       // (flows, rules, routing, retrieval) runs on the corrected text.
       let mq = q;
       try { mq = (await correctSpelling(q)).text; } catch { /* raw query still works */ }
+      mq = normalizeFieldPhrasing(mq);
       // Judge vagueness on what the USER actually said (corrected) — the
       // router's normalized restatement below is for retrieval and would make
       // "sensor not working" look specific ("not functioning correctly").
@@ -1032,6 +1033,7 @@ export default function ChatDrawer({ open, onClose, seed, seedScope, onSeedConsu
     try {
       let mq = origQuery;
       try { mq = (await correctSpelling(origQuery)).text; } catch { /* raw query still works */ }
+      mq = normalizeFieldPhrasing(mq);
       const sc = scope;
       const fallback = sc?.modelId
         ? () => scopedRetrieve(mq, sc.modelId!, sc.generalModelId ?? null)

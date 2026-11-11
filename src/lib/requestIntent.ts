@@ -39,6 +39,17 @@ export function contactSkillHint(text: string): string | null {
   return null;
 }
 
+// ---- Field phrasing ----
+// "how to on ups", "camera on kaise kare", "ups off karna hai": operators use
+// on/off as verbs. Search drops "on"/"off" as stop words, so the question
+// arrived as "how to ups" and matched nothing useful. Spell it out.
+export function normalizeFieldPhrasing(text: string): string {
+  return (text ?? '')
+    .replace(/\bhow (?:to|do i|can i|should i) (on|off)\b/gi, (_m, v) => `how to turn ${v.toLowerCase()}`)
+    .replace(/\b(on|off) (?:kaise|kese|kaisey)\b/gi, (_m, v) => `turn ${v.toLowerCase()} kaise`)
+    .replace(/\b(on|off) (?:karna|karne|karu|karun|kare|kre|kar)\b/gi, (_m, v) => `turn ${v.toLowerCase()}`);
+}
+
 // ---- Document requests ----
 // "manual of ups", "router docs", "do you have any document about camera?",
 // "ups docx of microtek" — they want the reference itself, not an answer.

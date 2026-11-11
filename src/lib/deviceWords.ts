@@ -10,7 +10,11 @@ import { queryTokens } from './routing';
 // device did they name?" when the router's guess disagrees with the text
 // ("my tds sensor …" routed to the analyser because TDS has no documents).
 
-export interface CategoryRef { id: string; name: string; aliases: string[] }
+// isDevice: the category holds at least one real (non-general) model. Only
+// those can claim a message by name — "Sensor Testing" (alias "Calibration")
+// and "I/O List" (alias "Modbus") are document types, and once took "OCEMS
+// calibration procedure" and "flowmeter modbus details" away from the device.
+export interface CategoryRef { id: string; name: string; aliases: string[]; isDevice?: boolean }
 
 const GENERIC = ['sensor', 'sensors', 'probe', 'meter', 'device', 'instrument', 'transmitter', 'equipment', 'machine', 'unit', 'analyser', 'analyzer', 'system', 'controller',
   // negation / filler: "no", "but", "still" must never be the word a match
@@ -25,8 +29,12 @@ export async function loadCategories(): Promise<CategoryRef[]> {
   if (loading) return loading;
   loading = (async () => {
     try {
-      const { data } = await supabase.from('sensor_categories').select('id, name, aliases').limit(500);
-      cats = ((data ?? []) as any[]).map((c) => ({ id: c.id, name: String(c.name), aliases: Array.isArray(c.aliases) ? c.aliases.map(String) : [] }));
+      const [{ data }, { data: models }] = await Promise.all([
+        supabase.from('sensor_categories').select('id, name, aliases').limit(500),
+        supabase.from('sensor_models').select('category_id').eq('is_general', false).limit(1000),
+      ]);
+      const withModels = new Set(((models ?? []) as any[]).map((m) => m.category_id));
+      cats = ((data ?? []) as any[]).map((c) => ({ id: c.id, name: String(c.name), aliases: Array.isArray(c.aliases) ? c.aliases.map(String) : [], isDevice: withModels.has(c.id) }));
     } catch {
       cats = [];
     }
@@ -55,6 +63,7 @@ export function namedCategory(text: string, list: CategoryRef[]): CategoryRef | 
   const q = ` ${(text ?? '').toLowerCase().replace(/[^a-z0-9ऀ-෿]+/g, ' ')} `;
   let best: { c: CategoryRef; len: number; isName: boolean } | null = null;
   for (const c of list) {
+    if (c.isDevice === false) continue;
     const terms = [{ t: c.name, isName: true }, ...c.aliases.map((a) => ({ t: a, isName: false }))];
     for (const { t, isName } of terms) {
       const n = t.toLowerCase().replace(/[^a-z0-9ऀ-෿]+/g, ' ').trim();

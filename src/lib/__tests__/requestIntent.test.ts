@@ -49,3 +49,16 @@ describe('isContactRequest', () => {
     expect(contactSkillHint('EZVIZ contact details')).toBeNull();
   });
 });
+
+import { normalizeFieldPhrasing } from '../requestIntent';
+describe('normalizeFieldPhrasing', () => {
+  it('turns on/off verbs into searchable phrases', () => {
+    expect(normalizeFieldPhrasing('how to on ups')).toBe('how to turn on ups');
+    expect(normalizeFieldPhrasing('camera on kaise kare')).toBe('camera turn on kaise kare');
+    expect(normalizeFieldPhrasing('ups off karna hai')).toBe('ups turn off hai');
+  });
+  it('leaves ordinary sentences alone', () => {
+    expect(normalizeFieldPhrasing('error on display')).toBe('error on display');
+    expect(normalizeFieldPhrasing('UPS is on battery')).toBe('UPS is on battery');
+  });
+});
