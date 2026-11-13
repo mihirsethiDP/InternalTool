@@ -14,13 +14,14 @@ import { SECTION_LABEL, parseSections } from '../lib/consolidated';
 import { renderMarkdown, normalizeAnswerSteps } from '../lib/markdown';
 import { stripCitationMarkers } from '../lib/text';
 import { conversationalReply, isVagueQuery } from '../lib/chatIntent';
-import { isProcedureRequest, isContactRequest, contactSkillHint, isDocumentRequest, normalizeFieldPhrasing } from '../lib/requestIntent';
+import { isProcedureRequest, isContactRequest, contactSkillHint, isDocumentRequest, normalizeFieldPhrasing, isDefeatRequest } from '../lib/requestIntent';
 import { flowToSteps } from '../lib/flowSteps';
 import { interpretFlowReplyLocal, flowReplyLabel, flowReplyNext, type FlowReply } from '../lib/flowReply';
 import { matchRule, type RouteMatch } from '../lib/routing';
-import { matchFlows, getNode, failTarget, fetchContacts, contactsForSkill, type DiagnosticFlow, type FlowNode, type EscalationContact } from '../lib/flows';
+import { scoreFlow, matchFlows, getNode, failTarget, fetchContacts, contactsForSkill, type DiagnosticFlow, type FlowNode, type EscalationContact } from '../lib/flows';
 import { fetchIssues, matchIssueClient, issuePlausible, issueQueueInfo, filterQueueForModel, type Issue, type IssueQueueInfo } from '../lib/issues';
 import { loadCategories, deviceWordsFrom, namedCategory, hasSymptomWord } from '../lib/deviceWords';
+import { loadModels, namedModel } from '../lib/modelNames';
 import { usePlant, usePlantDevices, devicesInCategory, deviceLabel, deviceNoun } from '../lib/plant';
 import PlantSwitcher from './PlantSwitcher';
 import { correctSpelling } from '../lib/lexicon';
@@ -715,6 +716,14 @@ export default function ChatDrawer({ open, onClose, seed, seedScope, onSeedConsu
       if (await handleFlowText(q)) return;
     }
 
+    // Asking how to bypass / defeat a protection: a fixed safety reply, never
+    // an AI answer and never a "search the web" offer.
+    if (isDefeatRequest(q)) {
+      setInput('');
+      setTurns((tt) => [...tt, { role: 'user', text: q }, { role: 'bot', query: q, loading: false, note: t2('chat.defeatRefusal') }]);
+      return;
+    }
+
     // Small-talk / meta → reply conversationally, skip the doc search entirely.
     const chat = conversationalReply(q);
     if (chat) {
@@ -773,6 +782,16 @@ export default function ChatDrawer({ open, onClose, seed, seedScope, onSeedConsu
         setScope(null);
         plantAskedRef.current.delete(named.id);
         setTurns((tt) => tt.map((x, i) => (i === tt.length - 1 && x.role === 'bot' && x.loading) ? { ...x, narrowedLabel: undefined } : x));
+      }
+      // A model number in the message decides the device outright, across
+      // categories ("HACH DPC1R1A" went to the analyser, "EM306" to Flow).
+      if (opts?.scope === undefined) {
+        const nm = namedModel(mq, await loadModels());
+        if (nm && activeScope?.modelId !== nm.id) {
+          activeScope = { modelId: nm.id, generalModelId: nm.generalModelId, categoryId: nm.categoryId, label: nm.label };
+          setScope(activeScope);
+          setTurns((tt) => tt.map((x, i) => (i === tt.length - 1 && x.role === 'bot' && x.loading) ? { ...x, narrowedLabel: nm.label } : x));
+        }
       }
       // Device words say WHICH device, not what is wrong: "ups not working"
       // is as vague as "not working" once we know it is the UPS.
@@ -954,7 +973,11 @@ export default function ChatDrawer({ open, onClose, seed, seedScope, onSeedConsu
         }
         logUnanswered({ query: q, source: 'chat', sensorModelId: activeScope?.modelId ?? null });
         const options = await symptomOptions(activeScope);
-        setTurns((t) => fillLoadingTurn(t, { role: 'bot', query: q, loading: false, narrowedLabel: activeScope?.label, probe: { text: probeText(activeScope?.label), options } }));
+        // No device known (gibberish, "kuch problem hai", off-topic): ask for
+        // the device first — "what exactly is it doing?" about nothing helps
+        // no one. The device picker shows under this turn.
+        const probeMsg = activeScope ? probeText(activeScope?.label) : t2('chat.whichDeviceFirst');
+        setTurns((t) => fillLoadingTurn(t, { role: 'bot', query: q, loading: false, narrowedLabel: activeScope?.label, probe: { text: probeMsg, options: activeScope ? options : [] } }));
         return;
       }
 
@@ -964,7 +987,15 @@ export default function ChatDrawer({ open, onClose, seed, seedScope, onSeedConsu
       // A model's pick must share a symptom word with the message — the
       // light model guessed "Red fault light" for "blinking but overheating".
       const llmIssue = llmIssueRaw && issuePlausible(mq, llmIssueRaw, deviceWords) ? llmIssueRaw : null;
-      const issue: Issue | null = clientIssue ?? llmIssue;
+      let issue: Issue | null = clientIssue ?? llmIssue;
+      // A fix whose trigger the message matches strongly beats a problem the
+      // routing model GUESSED: "magmeter display pe FGP alarm" matched the
+      // trigger "FGP showing" exactly, yet the guessed problem "display blank
+      // / no power" (shared word: display) won (agent QA 2026-11-13).
+      if (issue && !clientIssue && flow && scoreFlow(mq, flow, deviceWords) >= 0.75) {
+        const linked = await issueQueueInfo(issue.id).catch(() => null);
+        if (!linked?.flows.some((f) => f.id === flow.id)) issue = null;
+      }
       // A procedure request skips the confirm-and-walk-through; whichever
       // guided fix matched is remembered and offered under the steps.
       let guide: GuideOffer | undefined;
@@ -1239,6 +1270,17 @@ export default function ChatDrawer({ open, onClose, seed, seedScope, onSeedConsu
         const rank = (c: EscalationContact) => c.sensor_model_id ? 0 : c.make_id ? 3 : c.plant_id ? 2 : 1;
         list = [...all].sort((a, b) => rank(a) - rank(b));
         if (list.some((c) => !c.make_id)) list = list.filter((c) => !c.make_id);
+        // "whom do I call for the UPS": the message names a DEVICE TYPE but no
+        // make. The vendor helplines are filed per make, so they were left out
+        // and only internal people showed (agent QA 2026-11-13). Lead with
+        // the vendor lines of every make that has a model of that type.
+        const catId = namedCategory(mq, await loadCategories())?.id ?? sc?.categoryId ?? null;
+        if (catId) {
+          const { data: ms } = await supabase.from('sensor_models').select('make_id').eq('category_id', catId).eq('is_general', false);
+          const makesOfType = new Set(((ms ?? []) as any[]).map((m) => m.make_id).filter(Boolean));
+          const vendors = all.filter((c) => c.make_id && makesOfType.has(c.make_id));
+          if (vendors.length) list = [...vendors, ...list];
+        }
       }
       if (list.length === 0) return null;
       return { title, contacts: list.slice(0, 8) };
@@ -1290,6 +1332,17 @@ export default function ChatDrawer({ open, onClose, seed, seedScope, onSeedConsu
       const label = flowReplyLabel(reply, node, doneLabel, failLabel) ?? q;
       await advanceFlow(label, next, { noEcho: true });
       return true;
+    }
+    // "talk to a human", "call someone", "kisi se baat karni hai": show this
+    // fix's own escalation (who to call) instead of silently stopping.
+    if (reply.action === 'leave' || /\b(human|person|someone|somebody|engineer|technician|support|helpline|call (someone|support|the vendor)|baat kar|kisi se|insaan|aadmi)\b/i.test(q)) {
+      const esc = flow.definition.nodes.find((n) => n.kind === 'escalate');
+      if (esc && /\b(human|person|someone|somebody|engineer|technician|support|helpline|call|baat kar|kisi se|insaan|aadmi)\b/i.test(q)) {
+        const turn = await nodeTurn(flow, esc);
+        setFlowRun(null);
+        setTurns((tt) => [...tt, turn]);
+        return true;
+      }
     }
     if (reply.action === 'leave') {
       setFlowRun(null); flowRef.current = null; queueRef.current = null; pendingRef.current = null;

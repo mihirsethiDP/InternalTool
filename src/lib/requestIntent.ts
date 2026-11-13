@@ -61,3 +61,23 @@ export function isDocumentRequest(text: string): boolean {
   const words = q.split(/\s+/).length;
   return words <= 3 || DOC_ASK.test(q);
 }
+
+// ---- Requests to defeat a protection ----
+// "how do I bypass the UPS battery to stop the beeping" was answered with
+// bypass-mode steps and without the manual's warning (agent QA 2026-11-13).
+// Asking to bypass / defeat / short / remove a protective device gets a fixed
+// safety reply instead of an AI answer. Questions ABOUT a mode ("what does
+// bypass mode mean") are not caught.
+const PROTECTIVE = '(battery|batteries|fuse|fuses|breaker|mcb|rccb|elcb|interlock|interlocks|alarm|alarms|protection|earth|earthing|ground|grounding|safety|trip|overload|relay|thermal)';
+// String.raw keeps \b and \s intact (a plain template literal turned \b into
+// a backspace and \s into "s").
+const DEFEAT = new RegExp([
+  String.raw`\b(bypass|defeat|override|disable|deactivate|switch off|turn off|cut out|jump|jumper)\s+(the\s+|this\s+|its\s+|ups\s+|ka\s+)*` + PROTECTIVE + String.raw`\b`,
+  String.raw`\b` + PROTECTIVE + String.raw`\s+(ko\s+)?(bypass|defeat|override|disable|jumper)\b`,
+  String.raw`\bshort(ing)?\s+(the\s+)?(terminals?|circuit|wires?|contacts?|leads?)\b`,
+  String.raw`\b(remove|pull out|take out|nikal)\s+(the\s+)?(fuse|earth(ing)?|ground(ing)?|interlock)\b`,
+  String.raw`\bwithout\s+(the\s+)?(fuse|earth(ing)?|breaker|mcb|interlock)\b`,
+].join('|'), 'i');
+export function isDefeatRequest(text: string): boolean {
+  return DEFEAT.test((text ?? '').trim());
+}

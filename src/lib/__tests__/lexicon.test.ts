@@ -35,3 +35,24 @@ describe('correctToken', () => {
     expect(correctToken('unrelatedword', LEX)).toBe('unrelatedword');
   });
 });
+
+describe('fault words survive the corrector', () => {
+  it('does not turn real words into neighbours', async () => {
+    const { correctToken } = await import('../lexicon');
+    const lex = new Set(['jamming', 'sharing', 'jumping', 'shaking', 'pressure']);
+    expect(correctToken('jumping', lex)).toBe('jumping');
+    expect(correctToken('jumpng', new Set(['jumping']))).toBe('jumping');
+    expect(correctToken('shakin', new Set(['sharing']))).toBe('shakin');
+  });
+});
+
+describe('corrections only land on device vocabulary', () => {
+  it('known manual words protect, but are never targets', async () => {
+    const { correctToken } = await import('../lexicon');
+    const known = new Set(['cracked', 'scope', 'pressure', 'present', 'doct']);
+    const targets = new Set(['pressure']);
+    expect(correctToken('cricket', known, targets)).toBe('cricket');
+    expect(correctToken('pretend', known, targets)).toBe('pretend');
+    expect(correctToken('presure', known, targets)).toBe('pressure');
+  });
+});

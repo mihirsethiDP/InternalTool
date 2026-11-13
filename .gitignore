@@ -16,3 +16,4 @@ illuminati-estates-redesign/
 
 # scratch scripts (node needs project-root resolution for node_modules)
 /_*.mjs
+/_probe/

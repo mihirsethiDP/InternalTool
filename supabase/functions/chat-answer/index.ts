@@ -42,7 +42,7 @@ interface Chunk {
 // Ask for it with { mode: "ping" }: guessing which copy of this file is
 // deployed cost us a debugging cycle when a stale paste kept routing spec
 // sheets to "other".
-const FN_BUILD = '2026-11-11-model-aware-answers';
+const FN_BUILD = '2026-11-13-agent-qa';
 
 const SECTION_LABEL: Record<string, string> = {
   install_commission: 'Install & Commission', configure: 'Configure', inspect: 'Inspect',
@@ -59,6 +59,9 @@ const SYSTEM_PROMPT = [
   '- The question often names only the device TYPE ("BOD sensor", "the UPS") while the passages come from specific models of that type. That is expected: answer from the passage that covers the asked task, and start with one short line naming the model it is written for (e.g. "For the HACH UVAS plus sc:"). If two models differ, give the steps for each, briefly.',
   '- Answer whenever the passages contain the steps, values or facts asked for, even partially — say what is covered and stop there.',
   '- Only if NO passage covers the question at all, reply exactly: "This isn\'t documented yet for the sensors in the library. Try narrowing to your specific make and model, or raise it with your supervisor." Do not pad it.',
+  '- Never carry steps over from one kind of equipment to another. If the question is about equipment that none of the passages describe (for example a chiller or compressor while the passages are about a pressure transmitter or a pump), use the refusal sentence above.',
+  '- Keep each procedure as the passage gives it: never merge steps from two different procedures (for example a 1-point and a 2-point calibration) into one list, and never add steps, waiting times or checks the passages do not contain.',
+  '- SAFETY: whenever the steps involve acid or chemicals, mains power, opening a casing, batteries or pressurised parts, include the passage\'s own DANGER / CAUTION / WARNING lines (eye protection, isolate power, etc.) at the start of the answer. Never give steps that bypass, disable, short or remove a protective device (fuse, breaker, battery, interlock, alarm); say it must not be done and to contact service instead.',
   '- Be concise and practical. Prefer short numbered steps a technician can follow on site.',
   '- Format steps as a markdown numbered list with EACH step on its own line (e.g. "1. ...\\n2. ...\\n3. ..."). Never run multiple numbered steps together in one sentence.',
   '- Do NOT put reference markers in the answer ([1], 【2】, footnotes). The sources are listed separately for the reader; markers mid-instruction only get in the way.',
@@ -1237,7 +1240,7 @@ Deno.serve(async (req) => {
       'Classify the reply as exactly one of:',
       '  "option"      - it answers the step: give the option number (for an action step, 1 = done / it worked, 2 = did not work / no change). A report of the OUTCOME of this step ("still offline", "same as before", "now it works") is an option, not a new problem, even if it names the device.',
       '  "question"    - they are asking something about this step or device (what/where/how/which/why, or "not sure how")',
-      '  "new_problem" - they describe a different fault or device, unrelated to this step',
+      '  "new_problem" - they describe a different fault or a different device that this step does NOT mention. If the step itself is about that device ("Check the site router…" and they say "the router is also dead"), it is the outcome of this step: choose "option" (didn\'t work / No), not new_problem.',
       '  "leave"       - they want to stop or skip this guided fix',
       '  "unclear"     - none of the above',
       'Return strict JSON: {"action":"<option|question|new_problem|leave|unclear>","option":<number or 0>,"confidence":<0 to 1>}',

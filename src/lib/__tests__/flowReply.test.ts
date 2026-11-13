@@ -48,10 +48,16 @@ describe('interpretFlowReplyLocal — question steps', () => {
   });
 });
 
-describe('interpretFlowReplyLocal — outcome reports on yes/no questions', () => {
-  it('"still offline" answers No', () => {
-    const q = { kind: 'question' as const, options: [{ label: 'Yes', next: 'a' }, { label: 'No', next: 'b' }] };
-    expect(interpretFlowReplyLocal('it still shows offline after that', q)).toEqual({ action: 'option', option: 2 });
-    expect(interpretFlowReplyLocal('same as before', q)).toEqual({ action: 'option', option: 2 });
+describe('interpretFlowReplyLocal — wording-dependent replies go to the model', () => {
+  const hot = { kind: 'question' as const, options: [{ label: 'No — warm but normal now', next: 'ok' }, { label: 'Yes — still very hot or fan not running', next: 'call' }] };
+  const returned = { kind: 'question' as const, options: [{ label: 'No — it is steady green now', next: 'ok' }, { label: 'Yes — fault returned', next: 'call' }] };
+  it('never resolves "nahi hua" / "ok" / outcome phrases locally on a question', () => {
+    expect(interpretFlowReplyLocal('nahi hua', hot)).toBeNull();
+    expect(interpretFlowReplyLocal('ok', returned)).toBeNull();
+    expect(interpretFlowReplyLocal('it still shows offline after that', { kind: 'question', options: [{ label: 'Yes', next: 'a' }, { label: 'No', next: 'b' }] })).toBeNull();
+  });
+  it('still resolves a bare yes / no instantly', () => {
+    expect(interpretFlowReplyLocal('no', hot)).toEqual({ action: 'option', option: 1 });
+    expect(interpretFlowReplyLocal('haan', returned)).toEqual({ action: 'option', option: 2 });
   });
 });

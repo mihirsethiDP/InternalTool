@@ -17,6 +17,9 @@ export type FlowReply =
 const YES = /^(y|yes|yeah|yep|yup|ya|ok|okay|sure|correct|right|true|done|did it|did that|completed|finished|haan|han|ha|haa|ji|ji haan|hanji|theek|thik|ho gaya|hogaya|kar diya|kardiya|kiya|check kiya|it is|it does|yes it is|yes it does|आणि|हाँ|हा|हो|ঠিক|হ্যাঁ|అవును|ஆம்|હા|ಹೌದು)[.! ]*$/i;
 const NO = /^(n|no|nope|nah|not|no change|nothing|nothing happened|still same|same|still|didn'?t work|did not work|not working|not fixed|nahi|nahin|nai|nhi|nahi hua|nahi hui|nahi chala|nahi kaam|kaam nahi|wahi|same hai|कुछ नहीं|नहीं|ना|না|కాదు|இல்லை|ના|ಇಲ್ಲ)[.! ]*$/i;
 const NO_CHANGE = /\b(no change|same as before|as before|still (same|not|the same|dead|blank|off|offline|beeping|not working|shows|showing|says|getting|coming|giving|no)|same (problem|issue|thing)|didn'?t (work|help)|did not (work|help)|not (working|fixed|helped|helping)|nahi (hua|chala|hui)|kaam nahi|kuch nahi|no luck|same hai|wahi)\b/i;
+// The only replies resolved locally against a question's Yes / No options.
+const BARE_YES = /^(y|yes|yeah|yep|yup|haan|han|haa|ji haan|hanji|हाँ|हां|ہاں)[.! ]*$/i;
+const BARE_NO = /^(n|no|nope|nah|nahi|nahin|nai|nhi|नहीं|ना)[.! ]*$/i;
 const DONE = /\b(done|did (it|that|this)|completed|finished|checked|tightened|replaced|restarted|rebooted|cleaned|closed|opened|switched|plugged|reset|ho gaya|hogaya|kar (diya|liya)|kardiya|kiya|complete)\b/i;
 const LEAVE = /\b(stop|skip|exit|quit|cancel|leave|never ?mind|forget it|not this|wrong (flow|fix|steps)|different (problem|issue)|band karo|rehne do|chhodo|chodo|छोड़ो|रहने दो)\b/i;
 const QUESTION = /(\?|^(what|where|which|how|why|when|who|can i|should i|do i|is it|does it|kya|kahan|kaise|kaun|kyu|kyun|kab|क्या|कहाँ|कैसे|कौन|क्यों)\b|\b(what does|what is|meaning|means|matlab|samajh nahi|not sure how|don'?t know how|how do i|where is|which one|kaunsa|konsa)\b)/i;
@@ -62,13 +65,17 @@ export function interpretFlowReplyLocal(text: string, node: Pick<FlowNode, 'kind
       const best = [...scored].sort((a, b) => b.s - a.s);
       if (best[0] && best[0].s >= 0.6 && (!best[1] || best[1].s < best[0].s - 0.2)) return { action: 'option', option: best[0].i };
     }
-    // Yes/No typed against Yes/No-style options.
+    // Only an explicit yes / no word answers a question locally, and only
+    // against options that literally start with Yes / No. Phrases like
+    // "nahi hua" ("it didn't work out"), "ok", "ho gaya", "still same" depend
+    // on how the question is worded — at the UPS-overheating step "Is it still
+    // too hot…?" "nahi hua" was read as "No — warm but normal" and closed a
+    // SAFETY fix as fixed (agent QA, 2026-11-13). Those go to the model,
+    // which sees the question.
     const yesIdx = opts.findIndex((o) => /^(yes|haan|ha\b)/i.test(o.label.trim()));
-    const noIdx = opts.findIndex((o) => /^(no|nahi|still|not)/i.test(o.label.trim()));
-    if (YES.test(raw) && yesIdx >= 0) return { action: 'option', option: yesIdx + 1 };
-    if (NO.test(raw) && noIdx >= 0) return { action: 'option', option: noIdx + 1 };
-    // "it still shows offline after that" answers a Yes/No question with No.
-    if (NO_CHANGE.test(raw) && noIdx >= 0 && !QUESTION.test(raw)) return { action: 'option', option: noIdx + 1 };
+    const noIdx = opts.findIndex((o) => /^(no|nahi)\b/i.test(o.label.trim()));
+    if (BARE_YES.test(raw) && yesIdx >= 0) return { action: 'option', option: yesIdx + 1 };
+    if (BARE_NO.test(raw) && noIdx >= 0) return { action: 'option', option: noIdx + 1 };
     if (QUESTION.test(raw)) return { action: 'question' };
     return null;
   }

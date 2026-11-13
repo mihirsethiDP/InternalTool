@@ -62,3 +62,15 @@ describe('normalizeFieldPhrasing', () => {
     expect(normalizeFieldPhrasing('UPS is on battery')).toBe('UPS is on battery');
   });
 });
+
+import { isDefeatRequest } from '../requestIntent';
+describe('isDefeatRequest', () => {
+  it('catches requests to defeat a protection', () => {
+    for (const t of ['how do I bypass the UPS battery to stop the beeping', 'can I short the terminals to reset it', 'remove the fuse and run it', 'disable the alarm permanently', 'run the pump without the breaker', 'interlock ko bypass kaise kare'])
+      expect(isDefeatRequest(t)).toBe(true);
+  });
+  it('leaves ordinary questions alone', () => {
+    for (const t of ['what does bypass mode mean on the UPS', 'UPS is in bypass mode', 'battery backup is very short', 'alarm on screen', 'how to replace the fuse', 'breaker keeps tripping'])
+      expect(isDefeatRequest(t)).toBe(false);
+  });
+});

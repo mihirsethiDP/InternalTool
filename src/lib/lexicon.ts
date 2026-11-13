@@ -22,12 +22,31 @@ const CORE_WORDS = [
   'voltage', 'output', 'working', 'showing', 'wrong', 'broken', 'problem',
   // regulatory / field names for the water quality analyser
   'ocems', 'cems', 'analyser', 'effluent', 'monitoring', 'procedure', 'steps', 'contact', 'support', 'helpline',
+  // how operators describe faults — never "corrected" into something else
+  'jumping', 'shaking', 'vibrating', 'wobbling', 'wobbly', 'loose', 'flickering', 'blinking', 'flashing', 'beeping', 'buzzing',
+  'overheating', 'heating', 'burning', 'smell', 'smoke', 'sparking', 'tripping', 'tripped', 'leaking', 'dripping', 'noisy',
+  'dead', 'frozen', 'stuck', 'constant', 'zero', 'negative', 'erratic', 'random', 'jumps', 'drops', 'dropping', 'spikes',
+  'restart', 'reboot', 'reset', 'login', 'password', 'router', 'internet', 'offline', 'online', 'battery', 'backup',
+  // everyday Hinglish the corrector used to "fix" (dikh -> dish, dala -> data,
+  // kare -> kar, baar -> bar; agent QA 2026-11-13)
+  'dikh', 'dikha', 'dikhta', 'dikhai', 'dala', 'daala', 'dali', 'kare', 'karein', 'karu', 'karun', 'kre', 'krna', 'karna', 'karne',
+  'baar', 'bar', 'kaise', 'kese', 'kyun', 'kyu', 'kahan', 'kab', 'raha', 'rahi', 'rahe', 'rha', 'rhi', 'aaya', 'aayi', 'aa', 'gaya',
+  'chalu', 'bandh', 'lagta', 'lag', 'pata', 'samajh', 'batao', 'bata', 'chahiye', 'abhi', 'phir', 'fir', 'bahut', 'zyada', 'kam',
+  'garam', 'thanda', 'awaaz', 'dhuan', 'jal', 'jalne', 'jala', 'bijli', 'light', 'paani', 'pani', 'naya', 'purana', 'wala', 'wali',
+  'alag', 'galat', 'sahi', 'saaf', 'safai', 'pe', 'par', 'mein', 'se', 'tak', 'aur', 'ya', 'bhi', 'nahi', 'kuch', 'koi', 'sab', 'ek', 'do', 'teen',
+  'chal', 'chala', 'chalta', 'ruk', 'ruka', 'gir', 'gira', 'badh', 'badha', 'ghat', 'ghata', 'upar', 'neeche', 'andar', 'bahar', 'jaldi', 'dheere',
   // Hinglish complaint words (shared list) — known so the corrector never
   // "fixes" them (e.g. 'band' → 'brand'); vagueness detection needs them intact.
   ...HINGLISH_COMPLAINT_WORDS,
 ];
 
 let lexicon: Set<string> | null = null;
+// Words a misspelling may be corrected TO: device vocabulary only (core
+// words, categories, makes, models, synonyms). Words from the manuals are
+// KNOWN (never corrected) but are not targets — "cricket score" became
+// "cracked scope", "dont" became "doct", "pretend" became "present", all
+// towards manual words (agent QA 2026-11-13).
+let targets: Set<string> | null = null;
 let loading: Promise<Set<string>> | null = null;
 
 function wordsFrom(s: string | null | undefined): string[] {
@@ -56,6 +75,7 @@ export async function loadLexicon(): Promise<Set<string>> {
       for (const r of (makes.data ?? []) as any[]) wordsFrom(r.name).forEach((w) => lex.add(w));
       for (const r of (models.data ?? []) as any[]) { wordsFrom(r.model_no).forEach((w) => lex.add(w)); wordsFrom(r.name).forEach((w) => lex.add(w)); }
       for (const r of (syns.data ?? []) as any[]) for (const t of (r.terms ?? [])) wordsFrom(t).forEach((w) => lex.add(w));
+      targets = new Set(lex);
       // Every word that appears in the approved references (migration 054):
       // domain vocabulary is then known by definition, not by guesswork.
       try {
@@ -68,6 +88,7 @@ export async function loadLexicon(): Promise<Set<string>> {
       console.warn('lexicon load failed (using core words only)', e);
     }
     lexicon = lex;
+    if (!targets) targets = new Set(lex);
     return lex;
   })();
   return loading;
@@ -92,14 +113,16 @@ export function editDistance(a: string, b: string, max = 2): number {
 }
 
 // Correct one token against the lexicon. Known/short/numeric tokens pass through.
-export function correctToken(token: string, lex: Set<string>): string {
+export function correctToken(token: string, lex: Set<string>, candidates: Set<string> = lex): string {
   const t = token.toLowerCase();
   if (t.length < 4 || /\d/.test(t) || lex.has(t)) return token;
-  // distance budget scales with length: 1 for short words, 2 for 7+
-  const budget = t.length >= 7 ? 2 : 1;
+  // Distance budget: 1, and 2 only for long words. At 7+ letters two edits
+  // turned real words into other real words ("jumping" -> "jamming",
+  // "shaking" -> "sharing"; agent QA 2026-11-13).
+  const budget = t.length >= 9 ? 2 : 1;
   let best: string | null = null;
   let bestDist = budget + 1;
-  for (const w of lex) {
+  for (const w of candidates) {
     if (Math.abs(w.length - t.length) > budget) continue;
     // Real typos almost never change the first letter; without this guard a
     // correct word the lexicon lacks snaps to a neighbour ("pipe" → "wipe").
@@ -119,7 +142,7 @@ export async function correctSpelling(query: string): Promise<{ text: string; ch
     if (/^\s+$/.test(p) || !p) return p;
     const clean = p.replace(/[^a-zA-Z0-9]/g, '');
     if (!clean) return p;
-    const fixed = correctToken(clean, lex);
+    const fixed = correctToken(clean, lex, targets ?? lex);
     if (fixed.toLowerCase() !== clean.toLowerCase()) { changed = true; return p.replace(clean, fixed); }
     return p;
   }).join('');
