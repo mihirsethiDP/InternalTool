@@ -23,18 +23,30 @@ const GENERIC = ['sensor', 'sensors', 'probe', 'meter', 'device', 'instrument', 
 
 let cats: CategoryRef[] | null = null;
 let loading: Promise<CategoryRef[]> | null = null;
+// Words that describe a PROBLEM somewhere in the knowledge base (issue
+// labels/aliases, flow titles and triggers). Some categories carry symptom
+// phrases as aliases — Datalogger lists "plant offline", "data not coming" —
+// and their words must not be treated as device names: "camera is offline"
+// lost "offline" and became a vague "what is it doing?" (2026-11-13).
+let symptomWords: Set<string> = new Set();
 
 export async function loadCategories(): Promise<CategoryRef[]> {
   if (cats) return cats;
   if (loading) return loading;
   loading = (async () => {
     try {
-      const [{ data }, { data: models }] = await Promise.all([
+      const [{ data }, { data: models }, { data: issues }, { data: flows }] = await Promise.all([
         supabase.from('sensor_categories').select('id, name, aliases').limit(500),
         supabase.from('sensor_models').select('category_id').eq('is_general', false).limit(1000),
+        supabase.from('issues').select('label, aliases').limit(500),
+        supabase.from('diagnostic_flows').select('title, trigger_symptoms').eq('status', 'approved').limit(500),
       ]);
       const withModels = new Set(((models ?? []) as any[]).map((m) => m.category_id));
       cats = ((data ?? []) as any[]).map((c) => ({ id: c.id, name: String(c.name), aliases: Array.isArray(c.aliases) ? c.aliases.map(String) : [], isDevice: withModels.has(c.id) }));
+      const sw = new Set<string>();
+      for (const i of (issues ?? []) as any[]) for (const p of [i.label, ...(i.aliases ?? [])]) for (const w of queryTokens(String(p))) sw.add(w);
+      for (const f of (flows ?? []) as any[]) for (const p of [f.title, ...(f.trigger_symptoms ?? [])]) for (const w of queryTokens(String(p))) sw.add(w);
+      symptomWords = sw;
     } catch {
       cats = [];
     }
@@ -43,11 +55,26 @@ export async function loadCategories(): Promise<CategoryRef[]> {
   return loading;
 }
 
-export function deviceWordsFrom(list: CategoryRef[]): Set<string> {
+// True when the message uses a word that some problem description in the
+// knowledge base uses ("offline", "beeping", "blank") and that is not just a
+// device name or filler. The routing model sometimes calls such a message
+// "vague" ("camera is offline": vague, "camera showing offline": not); the
+// chat overrides it when this is true.
+export function hasSymptomWord(text: string, list: CategoryRef[]): boolean {
+  const dev = deviceWordsFrom(list);
+  return queryTokens(text).some((w) => symptomWords.has(w) && !dev.has(w));
+}
+
+// Category NAME words always name a device ("ups", "camera", "turbidity").
+// ALIAS words do only when no problem description uses them.
+export function deviceWordsFrom(list: CategoryRef[], symptoms: Set<string> = symptomWords): Set<string> {
   const s = new Set<string>(GENERIC);
-  for (const c of list) {
-    for (const w of queryTokens(c.name)) s.add(w);
-    for (const a of c.aliases) for (const w of queryTokens(a)) s.add(w);
+  // Document-type categories ("Indicator / Display", "Sensor Testing") name
+  // no device: "display is blank" must keep "display".
+  const devices = list.filter((c) => c.isDevice !== false);
+  for (const c of devices) for (const w of queryTokens(c.name)) s.add(w);
+  for (const c of devices) {
+    for (const a of c.aliases) for (const w of queryTokens(a)) if (!symptoms.has(w)) s.add(w);
   }
   return s;
 }

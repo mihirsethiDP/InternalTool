@@ -182,6 +182,18 @@ export async function matchFlow(
   scope: { categoryId?: string | null; modelId?: string | null },
   ignore?: Set<string>,
 ): Promise<DiagnosticFlow | null> {
+  return (await matchFlows(query, scope, ignore))[0] ?? null;
+}
+
+// Every approved flow that matches, best first (at most `max`). A symptom
+// can have more than one fix ("camera offline": the offline flow, then the
+// keeps-dropping flow); the chat starts with the first and offers the next.
+export async function matchFlows(
+  query: string,
+  scope: { categoryId?: string | null; modelId?: string | null },
+  ignore?: Set<string>,
+  max = 3,
+): Promise<DiagnosticFlow[]> {
   try {
     let q = supabase
       .from('diagnostic_flows')
@@ -191,25 +203,23 @@ export async function matchFlow(
     if (scope.categoryId) q = q.eq('sensor_category_id', scope.categoryId);
     const { data } = await q.limit(200);
     const flows = (data ?? []) as DiagnosticFlow[];
-    if (flows.length === 0) return null;
+    if (flows.length === 0) return [];
 
-    let best: DiagnosticFlow | null = null;
-    let bestScore = 0;
+    const scored: { f: DiagnosticFlow; s: number }[] = [];
     for (const f of flows) {
       let s = scoreFlow(query, f, ignore);
       if (s < FLOW_THRESHOLD) continue;
       // Model-specific flow for the model in scope beats a category-general one.
       if (scope.modelId && f.sensor_model_id === scope.modelId) s += 0.25;
       else if (f.sensor_model_id && scope.modelId && f.sensor_model_id !== scope.modelId) continue; // other model's flow: skip
-      if (s > bestScore) { bestScore = s; best = f; }
+      // Never run a definition the validator rejects — fall back to RAG instead.
+      if (!validateFlowDefinition(f.definition).ok) continue;
+      scored.push({ f, s });
     }
-    if (!best) return null;
-    // Never run a definition the validator rejects — fall back to RAG instead.
-    if (!validateFlowDefinition(best.definition).ok) return null;
-    return best;
+    return scored.sort((a, b) => b.s - a.s).slice(0, max).map((x) => x.f);
   } catch (e) {
     console.warn('matchFlow failed', e);
-    return null;
+    return [];
   }
 }
 

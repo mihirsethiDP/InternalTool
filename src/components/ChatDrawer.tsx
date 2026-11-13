@@ -15,11 +15,12 @@ import { renderMarkdown, normalizeAnswerSteps } from '../lib/markdown';
 import { stripCitationMarkers } from '../lib/text';
 import { conversationalReply, isVagueQuery } from '../lib/chatIntent';
 import { isProcedureRequest, isContactRequest, contactSkillHint, isDocumentRequest, normalizeFieldPhrasing } from '../lib/requestIntent';
+import { flowToSteps } from '../lib/flowSteps';
 import { interpretFlowReplyLocal, flowReplyLabel, flowReplyNext, type FlowReply } from '../lib/flowReply';
 import { matchRule, type RouteMatch } from '../lib/routing';
-import { matchFlow, getNode, failTarget, fetchContacts, contactsForSkill, type DiagnosticFlow, type FlowNode, type EscalationContact } from '../lib/flows';
+import { matchFlows, getNode, failTarget, fetchContacts, contactsForSkill, type DiagnosticFlow, type FlowNode, type EscalationContact } from '../lib/flows';
 import { fetchIssues, matchIssueClient, issuePlausible, issueQueueInfo, filterQueueForModel, type Issue, type IssueQueueInfo } from '../lib/issues';
-import { loadCategories, deviceWordsFrom, namedCategory } from '../lib/deviceWords';
+import { loadCategories, deviceWordsFrom, namedCategory, hasSymptomWord } from '../lib/deviceWords';
 import { usePlant, usePlantDevices, devicesInCategory, deviceLabel, deviceNoun } from '../lib/plant';
 import PlantSwitcher from './PlantSwitcher';
 import { correctSpelling } from '../lib/lexicon';
@@ -91,6 +92,9 @@ type Turn =
       // The device is known but the library has NO documentation for its
       // type yet — say so plainly (web answer / ticket), no device picker.
       noDocsFor?: string;
+      // "Just give me the steps": one matched fix written out from its
+      // approved definition; `flows` holds every matching fix in order.
+      steps?: { flows: DiagnosticFlow[]; index: number; markdown: string; origQuery: string };
       // Diagnostic flow runner: this turn shows one node of an approved flow.
       flowNode?: FlowNode;
       flowTitle?: string; // set on the first node so the user sees which flow started
@@ -402,7 +406,7 @@ export default function ChatDrawer({ open, onClose, seed, seedScope, onSeedConsu
   // its flow queue, or a single flow matched by phrasing; both confirm first.
   const pendingRef = useRef<
     | { kind: 'issue'; issue: Issue; info: IssueQueueInfo; origQuery: string }
-    | { kind: 'flow'; flow: DiagnosticFlow; origQuery: string }
+    | { kind: 'flow'; flow: DiagnosticFlow; alts?: DiagnosticFlow[]; origQuery: string }
     | { kind: 'plantpick'; origQuery: string; categoryId: string; categoryName: string; generalModelId: string | null }
     | null
   >(null);
@@ -821,7 +825,9 @@ export default function ChatDrawer({ open, onClose, seed, seedScope, onSeedConsu
         }
         // The LLM backs up the client word-list for vague phrasings it misses
         // ("sensor not working at all", "mera meter kharab hai").
-        if (r?.vague === true) vague = true;
+        // …unless the message names a known symptom: the small routing model
+        // called "camera is offline" vague (and "camera showing offline" not).
+        if (r?.vague === true && !hasSymptomWord(mq, catList)) vague = true;
         if (r?.intent === 'howto') procedure = true;
         // undefined from an older edge build → the match-issue call still runs.
         if (r && r.issue_id !== undefined) routeIssueId = r.issue_id;
@@ -917,8 +923,8 @@ export default function ChatDrawer({ open, onClose, seed, seedScope, onSeedConsu
       const clientIssue = matchIssueClient(mq, issues, deviceWords);
 
       const candidateIds = [activeScope?.modelId, activeScope?.generalModelId].filter(Boolean) as string[];
-      const [flow, routed, llmIssueRaw] = await Promise.all([
-        (routingFailed && !activeScope) ? Promise.resolve(null) : matchFlow(mq, { categoryId: activeScope?.categoryId ?? null, modelId: activeScope?.modelId ?? null }, deviceWords),
+      const [flowList, routed, llmIssueRaw] = await Promise.all([
+        (routingFailed && !activeScope) ? Promise.resolve([] as DiagnosticFlow[]) : matchFlows(mq, { categoryId: activeScope?.categoryId ?? null, modelId: activeScope?.modelId ?? null }, deviceWords),
         candidateIds.length ? matchRule(mq, candidateIds) : Promise.resolve(null),
         // The router already picked (or declined) an issue in its own call;
         // the separate match-issue round-trip is only for the scoped path.
@@ -952,6 +958,9 @@ export default function ChatDrawer({ open, onClose, seed, seedScope, onSeedConsu
         return;
       }
 
+      // Best matching fix first; the others become "try the next fix".
+      const flow: DiagnosticFlow | null = flowList[0] ?? null;
+      const flowAlts: DiagnosticFlow[] = flowList.slice(1);
       // A model's pick must share a symptom word with the message — the
       // light model guessed "Red fault light" for "blinking but overheating".
       const llmIssue = llmIssueRaw && issuePlausible(mq, llmIssueRaw, deviceWords) ? llmIssueRaw : null;
@@ -988,11 +997,11 @@ export default function ChatDrawer({ open, onClose, seed, seedScope, onSeedConsu
       // a fix was exactly how a COD question became a cleaning procedure.
       if (flow && !procedure) {
         queueRef.current = null;
-        pendingRef.current = { kind: 'flow', flow, origQuery: q };
+        pendingRef.current = { kind: 'flow', flow, alts: flowAlts, origQuery: q };
         // Built outside setTurns: the updater's `t` parameter shadows the
         // translation function.
         const flowElicit = {
-          text: t('chat.issueConfirm', { issue: flow.title }),
+          text: t('chat.issueConfirm', { issue: flow.title }) + (flowAlts.length ? ` ${t('chat.moreFixes', { count: flowAlts.length })}` : ''),
           chips: [
             { label: t('chat.startFix'), act: 'start' as const },
             { label: t('chat.justSteps'), act: 'steps' as const },
@@ -1075,6 +1084,50 @@ export default function ChatDrawer({ open, onClose, seed, seedScope, onSeedConsu
       if (slowTimer.current) { clearTimeout(slowTimer.current); slowTimer.current = null; }
       setSlow(false);
     }
+  }
+
+  // The fixes an issue would run for this conversation's device: the model
+  // in scope, else the only model the fixes are written for, else the
+  // model-agnostic ones (never another model's fix).
+  function queueForSteps(info: IssueQueueInfo): DiagnosticFlow[] {
+    if (scope?.modelId) return filterQueueForModel(info.flows, scope.modelId);
+    if (info.models.length === 1 && !info.hasGeneral) return filterQueueForModel(info.flows, info.models[0].id);
+    return filterQueueForModel(info.flows, null);
+  }
+
+  // One fix written out as numbered steps; the turn keeps the whole list so
+  // "Didn't help — next fix" can show the following one.
+  async function showSteps(list: DiagnosticFlow[], index: number, origQuery: string) {
+    const raw = list[index];
+    if (!raw) return;
+    const definition = await translateFlowDefinition(raw, i18n.language).catch(() => raw.definition);
+    const markdown = flowToSteps(definition, {
+      fixedLabel: t2('chat.stepsFixed'), helpLabel: t2('chat.stepsHelp'),
+      ifLabel: (a) => t2('chat.stepsIf', { answer: a }), goTo: (n) => t2('chat.stepsGoTo', { n }), failLabel: t2('chat.stepsFail'),
+    });
+    setTurns((tt) => [...tt, { role: 'bot', query: origQuery, loading: false, narrowedLabel: scope?.label, steps: { flows: list, index, markdown, origQuery } }]);
+  }
+
+  async function nextSteps(turn: Extract<Turn, { role: 'bot' }>) {
+    const st = turn.steps; if (!st || st.index + 1 >= st.flows.length) return;
+    const nextT = st.flows[st.index + 1].title;
+    const label = nextT.trim() === st.flows[st.index].title.trim() ? t2('chat.stepsNextSame', { n: st.index + 2, total: st.flows.length }) : t2('chat.stepsNext', { title: nextT });
+    setTurns((tt) => [...tt, { role: 'user', text: label } as Turn]);
+    await showSteps(st.flows, st.index + 1, st.origQuery);
+  }
+
+  // Switch from the written steps to the guided walk-through of the same fix,
+  // with the remaining fixes queued behind it.
+  async function walkSteps(turn: Extract<Turn, { role: 'bot' }>) {
+    const st = turn.steps; if (!st || sendingRef.current) return;
+    sendingRef.current = true;
+    try {
+      const rest = st.flows.slice(st.index);
+      queueRef.current = rest.length > 1 ? { issueLabel: rest[0].title, flows: rest, index: 0 } : null;
+      setQueueTick((x) => x + 1);
+      setTurns((tt) => [...tt, { role: 'user', text: t2('chat.walkMe') } as Turn, { role: 'bot', query: st.origQuery, loading: true }]);
+      await startFlow(rest[0], scope?.label);
+    } finally { sendingRef.current = false; }
   }
 
   // "Walk me through it step by step" under a procedure answer: start the
@@ -1392,7 +1445,13 @@ export default function ChatDrawer({ open, onClose, seed, seedScope, onSeedConsu
     if (chip.act === 'steps' && p.kind !== 'plantpick') {
       pendingRef.current = null;
       setTurns((tt) => [...tt, { role: 'user', text: chip.label } as Turn]);
-      await answerSteps(p.origQuery, p.kind === 'flow' ? { kind: 'flow', flow: p.flow, origQuery: p.origQuery } : { kind: 'issue', issue: p.issue, info: p.info, origQuery: p.origQuery });
+      // The matched fix's OWN steps, from the approved definition — never a
+      // fresh documentation search. That search was unscoped or worded
+      // differently and came back "nothing found", or with steps that did
+      // not match the guided fix just offered (2026-11-13).
+      const list = p.kind === 'flow' ? [p.flow, ...(p.alts ?? [])] : queueForSteps(p.info);
+      if (list.length) { await showSteps(list, 0, p.origQuery); return; }
+      await answerSteps(p.origQuery);
       return;
     }
     if (p.kind === 'plantpick') {
@@ -1418,6 +1477,10 @@ export default function ChatDrawer({ open, onClose, seed, seedScope, onSeedConsu
       if (p.kind === 'flow') {
         if (chip.act === 'start') {
           pendingRef.current = null;
+          // Other matching fixes queue behind this one: "Still not fixed —
+          // try the next fix" appears at the end of the walk-through.
+          queueRef.current = p.alts?.length ? { issueLabel: p.flow.title, flows: [p.flow, ...p.alts], index: 0 } : null;
+          setQueueTick((x) => x + 1);
           setTurns((t) => [...t, { role: 'user', text: chip.label }, { role: 'bot', query: p.origQuery, loading: true }]);
           await startFlow(p.flow, scope?.label);
           return;
@@ -1891,6 +1954,16 @@ export default function ChatDrawer({ open, onClose, seed, seedScope, onSeedConsu
                     <button onClick={() => resolveLeaveFlow(false, turn.leaveFlow!.newQuery)} disabled={i !== turns.length - 1} className={`${CHIP_CLS} disabled:opacity-50 disabled:pointer-events-none`}>{t('chat.leaveNo')}</button>
                   </div>
                 </div>
+              ) : turn.steps ? (
+                <StepsCard
+                  title={turn.steps.flows[turn.steps.index].title}
+                  markdown={turn.steps.markdown}
+                  pos={turn.steps.flows.length > 1 ? { n: turn.steps.index + 1, total: turn.steps.flows.length } : null}
+                  nextTitle={turn.steps.flows[turn.steps.index + 1]?.title ?? null}
+                  active={i === turns.length - 1 && !flowRun}
+                  onNext={() => nextSteps(turn)}
+                  onWalk={() => walkSteps(turn)}
+                />
               ) : turn.contactCard ? (
                 <ContactCard title={turn.contactCard.title} contacts={turn.contactCard.contacts} />
               ) : turn.flowNode ? (
@@ -2012,7 +2085,7 @@ export default function ChatDrawer({ open, onClose, seed, seedScope, onSeedConsu
               {/* Guided sensor picker — shown until narrowed to a specific model.
                   When a TYPE is already inferred/scoped it jumps to the make step.
                   Hidden during a flow run — the flow's own chips drive the turn. */}
-              {!turn.loading && !turn.note && !turn.elicit && !turn.multi && !turn.flowNode && !turn.contactCard && !turn.leaveFlow && !turn.aside && !turn.noDocsFor && !flowRun && i === turns.length - 1 && !scope?.modelId && (
+              {!turn.loading && !turn.note && !turn.elicit && !turn.multi && !turn.flowNode && !turn.contactCard && !turn.steps && !turn.leaveFlow && !turn.aside && !turn.noDocsFor && !flowRun && i === turns.length - 1 && !scope?.modelId && (
                 <GuidedNarrow
                   key={`gn-${i}-${scope?.categoryId ?? 'none'}`}
                   initialCategoryId={scope?.categoryId ?? undefined}
@@ -2339,6 +2412,40 @@ function ContactRow({ c }: { c: EscalationContact }) {
       }`}>
         {c.model_label ?? c.make_name ?? c.plant_name ?? 'Default'}
       </span>
+    </div>
+  );
+}
+
+// "Just give me the steps": one fix as a numbered checklist, written from the
+// approved flow itself. Offers the walk-through, and the next fix when the
+// problem has more than one.
+function StepsCard({ title, markdown, pos, nextTitle, active, onNext, onWalk }: {
+  title: string; markdown: string; pos: { n: number; total: number } | null; nextTitle: string | null;
+  active: boolean; onNext: () => void; onWalk: () => void;
+}) {
+  const { t } = useTranslation();
+  const html = useMemo(() => renderMarkdown(markdown), [markdown]);
+  return (
+    <div className="rounded-2xl rounded-tl-md overflow-hidden border border-brand-200 shadow-sm bg-white">
+      <div className="bg-gradient-to-r from-brand-600 to-brand-800 px-3.5 py-2 flex items-center gap-1.5">
+        <Wrench size={12} className="text-white shrink-0" />
+        <span className="text-white text-[11px] font-semibold uppercase tracking-wide truncate">{t('chat.stepsTitle')}: {title}</span>
+        {pos && <span className="ml-auto shrink-0 rounded-full bg-white/20 text-white text-[10px] px-1.5 py-px">{t('chat.fixOf', { n: pos.n, total: pos.total })}</span>}
+      </div>
+      <div className="px-3.5 py-3 chat-prose" dangerouslySetInnerHTML={{ __html: html }} />
+      <div className="px-3.5 pb-3 text-[10px] text-slate-400">{t('chat.stepsSource')}</div>
+      {active && (
+        <div className="px-3.5 pb-3.5 flex flex-col gap-1.5">
+          {nextTitle && (
+            <button onClick={onNext} className="tap w-full inline-flex items-center justify-center gap-1.5 rounded-lg border border-brand-300 text-brand-700 px-3 py-2 text-xs font-semibold hover:bg-brand-50 transition">
+              {nextTitle.trim() === title.trim() && pos ? t('chat.stepsNextSame', { n: pos.n + 1, total: pos.total }) : t('chat.stepsNext', { title: nextTitle })} →
+            </button>
+          )}
+          <button onClick={onWalk} className="tap w-full inline-flex items-center justify-center gap-1.5 rounded-lg bg-gradient-to-br from-brand-600 to-brand-800 text-white px-3 py-2 text-xs font-semibold hover:from-brand-700 transition">
+            <GitBranch size={13} /> {t('chat.walkMe')}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

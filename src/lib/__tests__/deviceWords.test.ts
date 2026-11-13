@@ -66,3 +66,20 @@ describe('only device categories can claim a message by name', () => {
     expect(namedCategory('calibration procedure', list)).toBeNull();
   });
 });
+
+describe('symptom words in aliases are not device words', () => {
+  const list: CategoryRef[] = [
+    { id: 'dl', name: 'Datalogger', aliases: ['plant offline', 'data not coming', 'Raspberry Pi'], isDevice: true },
+    { id: 'cam', name: 'Camera', aliases: ['EZVIZ'], isDevice: true },
+    { id: 'disp', name: 'Indicator / Display', aliases: ['Panel Meter'], isDevice: false },
+  ];
+  const words = deviceWordsFrom(list, new Set(['offline', 'data', 'coming', 'blank', 'display']));
+  it('keeps names and device aliases, drops symptom words and document types', () => {
+    expect(words.has('datalogger')).toBe(true);
+    expect(words.has('camera')).toBe(true);
+    expect(words.has('raspberry')).toBe(true);
+    expect(words.has('offline')).toBe(false);
+    expect(words.has('data')).toBe(false);
+    expect(words.has('display')).toBe(false);
+  });
+});
