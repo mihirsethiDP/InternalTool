@@ -33,7 +33,13 @@ export function matchIssueClient(corrected: string, issues: Issue[], ignore?: Se
   const keep = (w: string) => !ignore || !ignore.has(w);
   const qTokens = new Set(queryTokens(corrected).filter(keep));
   if (qTokens.size === 0) return null;
+  // A phrase qualifies when most of it is present (≥ 60%); among qualifying
+  // phrases the one that covers MORE of the message wins, then the higher
+  // share. "magmeter display pe FGP alarm" used to pick "no display" (→
+  // "display", 1 word, 100%) over "alarm message on display" (2 words, 67%)
+  // and sent an alarm to the blank-display fix (agent QA 2026-11-13).
   let best: Issue | null = null;
+  let bestHits = 0;
   let bestScore = 0;
   for (const iss of issues) {
     for (const phrase of [iss.label, ...(iss.aliases ?? [])]) {
@@ -41,10 +47,11 @@ export function matchIssueClient(corrected: string, issues: Issue[], ignore?: Se
       if (pTokens.length === 0) continue;
       const overlap = pTokens.filter((t) => qTokens.has(t)).length;
       const score = overlap / pTokens.length; // how much of the phrase is present
-      if (overlap >= 1 && score > bestScore) { bestScore = score; best = iss; }
+      if (overlap < 1 || score < 0.6) continue;
+      if (overlap > bestHits || (overlap === bestHits && score > bestScore)) { bestHits = overlap; bestScore = score; best = iss; }
     }
   }
-  return bestScore >= 0.6 ? best : null;
+  return best;
 }
 
 // Sanity check on a model-picked issue: the message must share at least one

@@ -83,3 +83,15 @@ describe('symptom words in aliases are not device words', () => {
     expect(words.has('display')).toBe(false);
   });
 });
+
+describe('issue matching prefers the phrase covering more of the message', () => {
+  it('an alarm message goes to the alarm issue, not the blank-display one', () => {
+    const issues = [
+      { id: 'blank', sensor_category_id: 'flow', label: "Flowmeter's display blank or no power", aliases: ['no display', 'screen blank', 'display dead'] },
+      { id: 'alarm', sensor_category_id: 'flow', label: 'Flow alarm displayed on converter', aliases: ['alarm message on display', 'empty pipe alarm'] },
+    ];
+    const ig = deviceWordsFrom([{ id: 'flow', name: 'Flow', aliases: ['Magmeter', 'Flow Meter'], isDevice: true }], new Set());
+    expect(matchIssueClient('magmeter display pe FGP alarm aa raha hai', issues, ig)?.id).toBe('alarm');
+    expect(matchIssueClient('display is blank', issues, ig)?.id).toBe('blank');
+  });
+});
